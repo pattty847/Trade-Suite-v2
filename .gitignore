@@ -1,6 +1,14 @@
 venv
 .env
-analysis\__pycache__
+.gitignore
+
+
+
+# cache
 __pycache__
-save.csv
-visualize.py
+src\__pycache__
+src\analysis\__pycache__
+src\data\__pycache__
+src\ui\__pycache__
+src\ui\components\__pycache__
+src\gui\components\test_window.py
