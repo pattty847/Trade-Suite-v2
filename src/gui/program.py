@@ -9,11 +9,11 @@ from src.gui.task_manager import TaskManager
 
 class MenuBar:
     def __init__(self, emitter: SignalEmitter, data: Data, task_manger: TaskManager) -> None:
-        self.tag = tags.PRIMARY_WINDOW_MENU_BAR
+        self.tag = dpg.generate_uuid()
         self.emitter = emitter
         self.data = data
         self.task_manger = task_manger
-        with dpg.menu_bar(tag=self.tag, parent=tags.PRIMARY_WINDOW):            
+        with dpg.menu_bar(tag=self.tag):            
             
             with dpg.menu(label="DPG"):
                 with dpg.menu(label="Tools"):

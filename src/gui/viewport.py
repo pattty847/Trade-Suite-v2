@@ -18,7 +18,8 @@ class Viewport:
         
     def __enter__(self):
         # Load the ccxt exchanges, symbols, and timeframes to the Data class
-        asyncio.run_coroutine_threadsafe(self.data.load_exchanges(), self.loop)
+        # We need to wait for this to run and finish
+        self.loop.run_until_complete(self.data.load_exchanges())
         
         # Setup dearpygui
         dpg.create_context()
@@ -26,18 +27,36 @@ class Viewport:
         return self
     
     def setup_dpg(self):
+        """
+        The setup_dpg function is responsible for setting up the DearPyGUI event loop, viewport, and primary window.
+            It also sets a frame callback to initialize the program once it has been set up.
+        
+        :param self: Reference the class instance that is calling the function
+        :return: The following:
+        :doc-author: Trelent
+        """
         logging.info("Setting up DearPyGUI loop, viewport, and primary window...")
         try:
             dpg.create_viewport(title="Crpnto Dahsbrod", width=1200, height=720)
             dpg.setup_dearpygui()
             dpg.show_viewport()
-            dpg.set_frame_callback(1, lambda: self.initialize_program())
+            dpg.set_frame_callback(1, lambda: self.initialize_program()) # not called until after start_dearpyui() has been called
             logging.info("DearPyGUI setup complete, launching event loop.")
             dpg.start_dearpygui() # main dpg event loop
         except Exception as e:
             print(e)
     
     def initialize_program(self):
+        """
+        The initialize_program function is responsible for setting up the main program class and all of its subclasses.
+        It also registers all signals that will be used in the program.
+        
+        The async loop is started within a daemon thread to allow non-blocking UI updates while async streaming is going on.
+        
+        :param self: Refer to the class itself
+        :return: A list of the below registering or emition
+        :doc-author: Trelent
+        """
         # This will initialize all UI components and register their callback
         logging.info(f'Frame #1: Setting up the Program classes and subclasses.')
         
@@ -64,6 +83,14 @@ class Viewport:
         )
         
     def start_asyncio_loop(self):
+        """
+        The start_asyncio_loop function is a wrapper for the asyncio.run() function, which runs an event loop until it is stopped.
+        The start_asyncio_loop function starts the event loop in a separate thread so that it can run concurrently with other code.
+        
+        :param self: Represent the instance of the class
+        :return: Nothing
+        :doc-author: Trelent
+        """
         logging.info(f'Starting async thread.')
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()

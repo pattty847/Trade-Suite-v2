@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import ccxt
 import pandas as pd
@@ -237,5 +238,8 @@ class Data(CCXTInterface):
             else:
                 logging.warning(f"{exchange_name} does not support OHLCV.")
 
-        await self.influx.write_candles(all_candles)
+        try:
+            await self.influx.write_candles(all_candles)
+        except Exception as e:
+            print(e)
         return all_candles

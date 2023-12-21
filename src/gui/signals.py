@@ -8,6 +8,8 @@ class Signals(Enum):
     CREATE_CHART_FOR_SYMBOL = auto()
     NEW_TRADE = auto()
     
+    STREAM_SYMBOL = auto()
+    
     VIEWPORT_RESIZED = auto()
 
 class SignalEmitter:
