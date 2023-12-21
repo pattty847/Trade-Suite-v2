@@ -1,17 +1,20 @@
 from enum import Enum, auto
+from typing import Callable
 
 class Signals(Enum):
     SELECT_EXCHANGE = auto()
     EXCHANGE_SELECTED = auto()
     CREATE_CHART = auto()
     CREATE_CHART_FOR_SYMBOL = auto()
-    NEW_TRADE_DATA = auto()
+    NEW_TRADE = auto()
+    
+    VIEWPORT_RESIZED = auto()
 
 class SignalEmitter:
     def __init__(self) -> None:
         self._callbacks = {}
 
-    def register(self, signal: Signals, callback):
+    def register(self, signal: Signals, callback: Callable):
         """
         Register a callback function for a given signal. The callback will be called when the signal is emitted.
 
@@ -50,7 +53,7 @@ class SignalEmitter:
             except Exception as e:
                 print(f"Error in callback for {signal}: {e}")
 
-    def unregister(self, signal: Signals, callback):
+    def unregister(self, signal: Signals, callback: Callable):
         """
         Unregister a callback function from a given signal.
 

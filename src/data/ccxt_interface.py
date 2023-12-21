@@ -57,17 +57,6 @@ class CCXTInterface:
                 logging.error(f"Unexpected error with {exchange_id}: {e}")
         self.exchange_list = supported_exchanges
 
-    async def set_exchanges(self, exchanges: List[str]):
-        self.exchanges = exchanges
-        await self.load_exchanges()
-
-    async def __aenter__(self):
-        await self.load_exchanges()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close_all_exchanges()
-
     async def close_all_exchanges(self):
         async def close_exchange(exchange_id):
             exchange = self.exchange_list[exchange_id]["ccxt"]

@@ -1,14 +1,13 @@
 import asyncio
-import json
 import logging
 import ccxt
 import pandas as pd
-import dearpygui.dearpygui as dpg
+
 
 from src.gui.signals import SignalEmitter, Signals
-from ..analysis.market_aggregator import MarketAggregator
-from .ccxt_interface import CCXTInterface
-from ..data.influx import InfluxDB
+from src.analysis.market_aggregator import MarketAggregator
+from src.data.ccxt_interface import CCXTInterface
+from src.data.influx import InfluxDB
 from typing import Dict, List
 
 
@@ -20,7 +19,7 @@ class Data(CCXTInterface):
 
     async def stream_trades(
         self, symbols: List[str], since: str = None, limit: int = None, params={},
-        line_series_tag=None
+        tag=None
     ):
         """
         The stream_trades function is a coroutine that streams trades from the exchanges in exchange_list.
@@ -54,13 +53,10 @@ class Data(CCXTInterface):
 
                         # await self.influx.write_trades(exchange_id, trades)
                         # await self.influx.write_stats(exchange_id, stats, symbol)
-                        
-                        try:
-                            # Fetch trade data...
-                            self.emitter.emit(Signals.NEW_TRADE_DATA, trades)
-                            # You might include a small delay with asyncio.sleep if needed
-                        except Exception as e:
-                            logging.error(e)
+                        if trades:
+                            self.emitter.emit(Signals.NEW_TRADE, trade_data=trades[0])
+
+                        print(trades)
                         
                     except Exception as e:
                         logging.error(e)
