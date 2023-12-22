@@ -7,6 +7,7 @@ import dearpygui.dearpygui as dpg
 from src.data.data_source import Data
 from src.gui.signals import Signals, SignalEmitter
 from src.gui.program import Program
+from src.gui.task_manager import TaskManager
 
 
 class Viewport:
@@ -14,6 +15,10 @@ class Viewport:
         self.emitter = emitter
         self.data = data
         self.loop = loop
+        
+        # TODO: Make the TaskManager, start the thread for itself in its class file. Remove the asyncio from this
+        # file completely. 
+        self.task_manager = TaskManager(loop)
         self.program: Program = None
         
     def __enter__(self):
@@ -36,15 +41,15 @@ class Viewport:
         :doc-author: Trelent
         """
         logging.info("Setting up DearPyGUI loop, viewport, and primary window...")
-        try:
-            dpg.create_viewport(title="Crpnto Dahsbrod", width=1200, height=720)
-            dpg.setup_dearpygui()
-            dpg.show_viewport()
-            dpg.set_frame_callback(1, lambda: self.initialize_program()) # not called until after start_dearpyui() has been called
-            logging.info("DearPyGUI setup complete, launching event loop.")
-            dpg.start_dearpygui() # main dpg event loop
-        except Exception as e:
-            print(e)
+
+        dpg.create_viewport(title="Crpnto Dahsbrod", width=1200, height=720)
+        dpg.setup_dearpygui()
+        dpg.show_viewport()
+        dpg.set_frame_callback(1, lambda: self.initialize_program()) # not called until after start_dearpyui() has been called
+        
+        logging.info("DearPyGUI setup complete, launching event loop.")
+        
+        dpg.start_dearpygui() # main dpg event loop
     
     def initialize_program(self):
         """
@@ -61,7 +66,7 @@ class Viewport:
         logging.info(f'Frame #1: Setting up the Program classes and subclasses.')
         
         # MAIN PROGRAM/WINDOW CLASS INITIALIZATION
-        self.program = Program(self.emitter, self.data, self.loop)
+        self.program = Program(self.emitter, self.data, self.task_manager)
         dpg.set_primary_window(self.program.tag, True)
         
         # Start the asyncio loop in a separate thread

@@ -29,18 +29,17 @@ class MenuBar:
                     dpg.add_menu_item(label="Wait For Input", check=True, callback=lambda s, a: dpg.configure_app(wait_for_input=a))
                     dpg.add_menu_item(label="Toggle Fullscreen", callback=lambda:dpg.toggle_viewport_fullscreen())
 
-
 class Program:
 
     """
     This is the MainWindow class which contains the set up of other windows, the navigation bar, etc.
     """
 
-    def __init__(self, emitter: SignalEmitter, data: Data, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(self, emitter: SignalEmitter, data: Data, task_manager: TaskManager) -> None:
         self.tag = tags.PRIMARY_WINDOW
         self.emitter = emitter
         self.data = data
-        self.task_manager = TaskManager(loop)
+        self.task_manager = task_manager
         
         with dpg.window(tag=self.tag, menubar=True):
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)

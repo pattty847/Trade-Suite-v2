@@ -19,8 +19,11 @@ class Data(CCXTInterface):
         self.agg = MarketAggregator(influx, emitter)
 
     async def stream_trades(
-        self, symbols: List[str], since: str = None, limit: int = None, params={},
-        tag=None
+        self, symbols: List[str], 
+        track_stats: bool = False,
+        write_trades: bool = False,
+        write_stats: bool = False,
+        params={},
     ):
         """
         The stream_trades function is a coroutine that streams trades from the exchanges in exchange_list.
@@ -47,7 +50,7 @@ class Data(CCXTInterface):
                         # returns whatever the latest tick was for whichever coin for the exchange.
                         # list[dict_keys(['id', 'order', 'info', 'timestamp', 'datetime', 'symbol', 'type', 'takerOrMaker', 'side', 'price', 'amount', 'fee', 'cost', 'fees'])]
                         trades = await exchange_object.watchTradesForSymbols(
-                            symbols, since, limit, params
+                            symbols
                         )
                         # symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
                         # self.agg.report_statistics()
