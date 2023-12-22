@@ -11,20 +11,19 @@ from src.gui.task_manager import TaskManager
 
 
 class Viewport:
-    def __init__(self, emitter: SignalEmitter, data: Data, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(self, emitter: SignalEmitter, data: Data) -> None:
         self.emitter = emitter
         self.data = data
-        self.loop = loop
         
         # TODO: Make the TaskManager, start the thread for itself in its class file. Remove the asyncio from this
         # file completely. 
-        self.task_manager = TaskManager(loop)
-        self.program: Program = None
+        self.task_manager = TaskManager()
+        self.program = Program(self.emitter, self.data, self.task_manager)
         
     def __enter__(self):
         # Load the ccxt exchanges, symbols, and timeframes to the Data class
         # We need to wait for this to run and finish
-        self.loop.run_until_complete(self.data.load_exchanges())
+        self.task_manager.run_task_until_complete(self.data.load_exchanges())
         
         # Setup dearpygui
         dpg.create_context()
@@ -66,18 +65,13 @@ class Viewport:
         logging.info(f'Frame #1: Setting up the Program classes and subclasses.')
         
         # MAIN PROGRAM/WINDOW CLASS INITIALIZATION
-        self.program = Program(self.emitter, self.data, self.task_manager)
+        self.program.initialize()
         dpg.set_primary_window(self.program.tag, True)
         
-        # Start the asyncio loop in a separate thread
-        threading.Thread(target=self.start_asyncio_loop, daemon=True).start()
+        
         
         # Register all signals here.
-        
-        # This could be a function to run this initialilze_program function but for the UI component
-        # It will be a list of the below registering or emition.
-        # self.program.componenet.register_callbacks()
-        
+    
         self.emitter.register(Signals.VIEWPORT_RESIZED, None)
         dpg.set_viewport_resize_callback(
             lambda: self.emitter.emit(
@@ -87,24 +81,12 @@ class Viewport:
             )
         )
         
-    def start_asyncio_loop(self):
-        """
-        The start_asyncio_loop function is a wrapper for the asyncio.run() function, which runs an event loop until it is stopped.
-        The start_asyncio_loop function starts the event loop in a separate thread so that it can run concurrently with other code.
-        
-        :param self: Represent the instance of the class
-        :return: Nothing
-        :doc-author: Trelent
-        """
-        logging.info(f'Starting async thread.')
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
-        
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type:
             logging.error(
                 "An exception occurred: ", exc_info=(exc_type, exc_val, exc_tb)
             )
-        asyncio.run_coroutine_threadsafe(self.data.close_all_exchanges(), self.loop)
+        self.task_manager.run_task_until_complete(self.data.close_all_exchanges())
+        self.task_manager.stop_all_tasks()
         dpg.destroy_context()
         logging.info("Destroyed DearPyGUI context.")

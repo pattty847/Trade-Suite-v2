@@ -41,6 +41,7 @@ class Program:
         self.data = data
         self.task_manager = task_manager
         
+    def initialize(self):
         with dpg.window(tag=self.tag, menubar=True):
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
             self.chart: Chart = Chart(self.emitter, self.data, self.task_manager)
