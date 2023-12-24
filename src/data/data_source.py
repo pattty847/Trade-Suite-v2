@@ -165,69 +165,43 @@ class Data(CCXTInterface):
             except Exception as e:
                 logging.error(e)
 
-    async def fetch_candles(
-        self, exchanges: List[str], symbols: List[str], timeframes: List[str], write_to_db
-    ) -> Dict[str, Dict[str, pd.DataFrame]]:
-
-        # {exchange_id: ccxt_object}
-        exchange_objects = {
-            exchange: self.exchange_list[exchange]["ccxt"] for exchange in exchanges
-        }
+    async def fetch_candles(self, exchanges: List[str], symbols: List[str], timeframes: List[str], write_to_db) -> Dict[str, Dict[str, pd.DataFrame]]:
+        exchange_objects = {exch: self.exchange_list[exch]["ccxt"] for exch in exchanges}
         all_candles = {}
 
         for exchange_name, exchange in exchange_objects.items():
+            exchange_data = self.exchange_list[exchange_name]
+            all_candles.setdefault(exchange_name, {})
+
             for symbol in symbols:
-                # If the exchange doesn't even have the symbol, skip this loop.
-                if symbol not in self.exchange_list[exchange_name]["symbols"]:
+                if symbol not in exchange_data["symbols"]:
                     logging.info(f"{symbol} not found on {exchange_name}.")
                     continue
 
-                all_candles[exchange_name] = all_candles.get(exchange_name, {})
                 for timeframe in timeframes:
-                    # If they have the symbol but not timeframe, skip this loop too.
-                    if (
-                        timeframe
-                        not in self.exchange_list[exchange_name]["timeframes"]
-                    ):
+                    if timeframe not in exchange_data["timeframes"]:
                         logging.info(f"{timeframe} not found on {exchange_name}.")
                         continue
 
                     try:
                         candles = await exchange.fetch_ohlcv(symbol, timeframe)
-                        df = pd.DataFrame(
-                            candles,
-                            columns=[
-                                "dates",
-                                "open",
-                                "high",
-                                "low",
-                                "close",
-                                "volume",
-                            ],
-                        )
-
-                        df["dates"] = df["dates"] / 1000
-                        # Return just the one dataframe if fetching one symbol from one exchange and one timeframe
-                        if len(exchanges) == 1 and len(symbols) == 1 and len(timeframes) == 1:
-                            self.emitter.emit(Signals.NEW_CANDLES, candles=df)
-                            return
-                        
+                        df = pd.DataFrame(candles, columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+                        df["dates"] /= 1000
                         key = f"{symbol}-{timeframe}"
                         all_candles[exchange_name][key] = df
 
-                    except ccxt.NetworkError as e:
-                        logging.error(f"Network error occurred: {e}")
-                    except ccxt.ExchangeError as e:
-                        logging.error(f"Exchange error occurred: {e}")
-                    except Exception as e:
-                        logging.error(f"An error occurred: {e}")
+                    except (ccxt.NetworkError, ccxt.ExchangeError, Exception) as e:
+                        logging.error(f"{type(e).__name__} occurred: {e}")
+
+                    if len(exchanges) == len(symbols) == len(timeframes) == 1:
+                        self.emitter.emit(Signals.NEW_CANDLES, candles=df)
 
         self.emitter.emit(Signals.NEW_CANDLES, candles=all_candles)
-        
+
         if write_to_db:
             try:
                 await self.influx.write_candles(all_candles)
             except Exception as e:
-                print(e)
-            
+                logging.error(f"Error writing to DB: {e}")
+
         return all_candles

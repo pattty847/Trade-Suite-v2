@@ -137,52 +137,29 @@ class Chart:
         # Update the chart
         pass
         
+    def update_chart_from_dataframe(self, ohlcv_df):
+        """Converts a DataFrame to OHLCV dict and updates the chart."""
+        self.ohlcv = ohlcv_df.to_dict('list')
+        dpg.configure_item(
+            self.candle_series,
+            dates=self.ohlcv['dates'],
+            opens=self.ohlcv['opens'],
+            highs=self.ohlcv['highs'],
+            lows=self.ohlcv['lows'],
+            closes=self.ohlcv['closes']
+        )
+
     def on_new_candles(self, candles):
-        if isinstance(candles, dict):
+        # Directly check if candles is a DataFrame
+        if isinstance(candles, pd.DataFrame):
+            self.update_chart_from_dataframe(candles)
+        else:
+            # Assuming candles is a dict with the required structure
             for exchange_name, values in candles.items():
                 for key, ohlcv_df in values.items():
                     symbol, timeframe = key.split("-")
-                    print(symbol, timeframe, ohlcv_df)
-
-                    # Set the OHLCV data from the DataFrame
-                    self.ohlcv = {
-                        'dates': list(ohlcv_df['dates']),
-                        'opens': list(ohlcv_df['open']),
-                        'highs': list(ohlcv_df['high']),
-                        'lows': list(ohlcv_df['low']),
-                        'closes': list(ohlcv_df['close']),
-                        'volumes': list(ohlcv_df['volume'])
-                    }
-
-                    # Update the chart with new candle data
-                    dpg.configure_item(
-                        self.candle_series,
-                        dates=self.ohlcv['dates'],
-                        opens=self.ohlcv['opens'],
-                        highs=self.ohlcv['highs'],
-                        lows=self.ohlcv['lows'],
-                        closes=self.ohlcv['closes']
-                    )
-        elif isinstance(candles, pd.DataFrame):
-
-            self.ohlcv = {
-                'dates': list(candles['dates']),
-                'opens': list(candles['open']),
-                'highs': list(candles['high']),
-                'lows': list(candles['low']),
-                'closes': list(candles['close']),
-                'volumes': list(candles['volume'])
-            }
-
-            # Update the chart with new candle data
-            dpg.configure_item(
-                self.candle_series,
-                dates=self.ohlcv['dates'],
-                opens=self.ohlcv['opens'],
-                highs=self.ohlcv['highs'],
-                lows=self.ohlcv['lows'],
-                closes=self.ohlcv['closes']
-            )
+                    print(f"{exchange_name} {symbol} {timeframe}:\n{ohlcv_df.head()}")
+                    self.update_chart_from_dataframe(ohlcv_df)
 
     def on_new_trade(self, exchange, trade_data):
         timestamp = trade_data['timestamp'] / 1000  # Convert ms to seconds

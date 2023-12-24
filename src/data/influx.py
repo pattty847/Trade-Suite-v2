@@ -147,11 +147,11 @@ class InfluxDB:
                         .tag("exchange", exchange)
                         .tag("symbol", symbol)
                         .tag("timeframe", timeframe)
-                        .field("open", row["open"])
-                        .field("high", row["high"])
-                        .field("low", row["low"])
-                        .field("close", row["close"])
-                        .field("volume", row["volume"])
+                        .field("opens", row["opens"])
+                        .field("highs", row["highs"])
+                        .field("lows", row["lows"])
+                        .field("closes", row["closes"])
+                        .field("volumes", row["volumes"])
                         .time(row.name, WritePrecision.MS)
                     )  # row.name is the timestamp index
 
