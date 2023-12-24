@@ -68,19 +68,6 @@ class Viewport:
         self.program.initialize()
         dpg.set_primary_window(self.program.tag, True)
         
-        
-        
-        # Register all signals here.
-    
-        self.emitter.register(Signals.VIEWPORT_RESIZED, None)
-        dpg.set_viewport_resize_callback(
-            lambda: self.emitter.emit(
-                Signals.VIEWPORT_RESIZED,
-                width=dpg.get_viewport_width(),
-                height=dpg.get_viewport_height(),
-            )
-        )
-        
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type:
             logging.error(

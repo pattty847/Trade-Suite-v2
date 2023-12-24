@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import os
 import pandas as pd
 import logging
@@ -7,7 +8,7 @@ from typing import Dict, List
 
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import ASYNCHRONOUS
-
+from influxdb_client.client.query_api_async import QueryApiAsync
 
 class InfluxDB:
     def __init__(self, is_local: bool = True) -> None:
@@ -135,6 +136,64 @@ class InfluxDB:
         # logging.info(f'Writing {len(points)} points to DB for {symbol}.')
         self.write_api.write(bucket="market_data", org="pepe", record=points)
 
+    async def write_candles(self, all_candles: Dict[str, Dict[str, pd.DataFrame]]):
+        points = []
+        for exchange, symbol_data in all_candles.items():
+            for symbol_timeframe, df in symbol_data.items():
+                symbol, timeframe = symbol_timeframe.split("-")
+                for _, row in df.iterrows():
+                    point = (
+                        Point("candle")
+                        .tag("exchange", exchange)
+                        .tag("symbol", symbol)
+                        .tag("timeframe", timeframe)
+                        .field("open", row["open"])
+                        .field("high", row["high"])
+                        .field("low", row["low"])
+                        .field("close", row["close"])
+                        .field("volume", row["volume"])
+                        .time(row.name, WritePrecision.MS)
+                    )  # row.name is the timestamp index
+
+                    points.append(point)
+
+        logging.info(f"Writing {len(points)} candle points to DB.")
+        self.write_api.write(bucket="candles", org="pepe", record=points)
+
+    # TODO: Make this and the whole class truly async
+    def query_candles(self, exchange: str, symbol: str, timeframe: str):
+        """
+        Queries InfluxDB for candle data for a given exchange, symbol, and timeframe.
+
+        Args:
+            exchange: The exchange to query for.
+            symbol: The trading symbol to query for.
+            timeframe: The timeframe to query for.
+
+        Returns:
+            A pandas DataFrame containing the candle data.
+        """
+        # Define the time range for the query. This example uses 5 years ago until now.
+        start_time = datetime.utcnow() - timedelta(days=5*365)
+        end_time = datetime.utcnow()
+        
+        # Construct the Flux query
+        flux_query = f'''
+        from(bucket: "candles")
+        |> range(start: {start_time.isoformat()}Z, stop: {end_time.isoformat()}Z)
+        |> filter(fn: (r) => 
+            r._measurement == "candle" and 
+            r.exchange == "{exchange}" and 
+            r.symbol == "{symbol}" and 
+            r.timeframe == "{timeframe}")
+        |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+        |> keep(columns: ["_time", "open", "high", "low", "close"])
+        '''
+        
+        # Execute the query and return the result as a pandas DataFrame
+        result = self.query_api.query_data_frame(flux_query)
+        return result
+
     async def write_candlesticks_batch(self, candlestick_data: Dict):
         batch_size = 10000  # example size, adjust as needed
         points = []
@@ -172,30 +231,6 @@ class InfluxDB:
 
             # Log the completion of writing for an exchange
             logging.info(f"Completed writing candlesticks for {exchange}")
-
-    async def write_candles(self, all_candles: Dict[str, Dict[str, pd.DataFrame]]):
-        points = []
-        for exchange, symbol_data in all_candles.items():
-            for symbol_timeframe, df in symbol_data.items():
-                symbol, timeframe = symbol_timeframe.split("-")
-                for _, row in df.iterrows():
-                    point = (
-                        Point("candle")
-                        .tag("exchange", exchange)
-                        .tag("symbol", symbol)
-                        .tag("timeframe", timeframe)
-                        .field("open", row["open"])
-                        .field("high", row["high"])
-                        .field("low", row["low"])
-                        .field("close", row["close"])
-                        .field("volume", row["volume"])
-                        .time(row.name, WritePrecision.MS)
-                    )  # row.name is the timestamp index
-
-                    points.append(point)
-
-        logging.info(f"Writing {len(points)} candle points to DB.")
-        self.write_api.write(bucket="candles", org="pepe", record=points)
 
     async def write_order_book(self, exchange, orderbook):
         points = []

@@ -42,32 +42,24 @@ class Data(CCXTInterface):
             exchange_object = self.exchange_list[exchange_id]["ccxt"]
 
             logging.info(f"Starting trade stream for {symbols} on {exchange_id}")
-            if exchange_object.has["watchTradesForSymbols"]:
-                # Add a condition to this
-                while True:
-                    try:
-                        # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
-                        # returns whatever the latest tick was for whichever coin for the exchange.
-                        # list[dict_keys(['id', 'order', 'info', 'timestamp', 'datetime', 'symbol', 'type', 'takerOrMaker', 'side', 'price', 'amount', 'fee', 'cost', 'fees'])]
-                        trades = await exchange_object.watchTradesForSymbols(
-                            symbols
-                        )
-                        # symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
-                        # self.agg.report_statistics()
+            # TODO: Add a condition to streaming
+            while True:
+                try:
+                    # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
+                    # returns whatever the latest tick was for whichever coin for the exchange.
+                    # list[dict_keys(['id', 'order', 'info', 'timestamp', 'datetime', 'symbol', 'type', 'takerOrMaker', 'side', 'price', 'amount', 'fee', 'cost', 'fees'])]
+                    trades = await exchange_object.watchTradesForSymbols(
+                        symbols
+                    )
+                    if trades:
+                        self.emitter.emit(Signals.NEW_TRADE, exchange=exchange_id, trade_data=trades[0])
+                    # symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
+                    # self.agg.report_statistics()
 
-                        # await self.influx.write_trades(exchange_id, trades)
-                        # await self.influx.write_stats(exchange_id, stats, symbol)
-                        if trades:
-                            self.emitter.emit(Signals.NEW_TRADE, trade_data=trades[0])
-
-                        print(trades)
-                        
-                    except Exception as e:
-                        logging.error(e)
-            else:
-                logging.warning(
-                    f"{exchange_id} does not allow streaming for a list of symbols."
-                )
+                    # await self.influx.write_trades(exchange_id, trades)
+                    # await self.influx.write_stats(exchange_id, stats, symbol)
+                except Exception as e:
+                    logging.error(e)
 
     async def stream_order_book(self, symbols: List[str], limit: int = 100, params={}):
         """
@@ -168,7 +160,7 @@ class Data(CCXTInterface):
                 logging.error(e)
 
     async def fetch_candles(
-        self, exchanges: List[str], symbols: List[str], timeframes: List[str]
+        self, exchanges: List[str], symbols: List[str], timeframes: List[str], write_to_db
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
         The fetch_candles function fetches OHLCV data from the exchanges specified in the exchanges list.
@@ -197,52 +189,53 @@ class Data(CCXTInterface):
         all_candles = {}
 
         for exchange_name, exchange in exchange_objects.items():
-            if exchange.has["fetchOHLCV"]:
-                for symbol in symbols:
-                    # If the exchange doesn't even have the symbol, skip this loop.
-                    if symbol not in self.exchange_list[exchange_name]["symbols"]:
-                        logging.info(f"{symbol} not found on {exchange_name}.")
+            for symbol in symbols:
+                # If the exchange doesn't even have the symbol, skip this loop.
+                if symbol not in self.exchange_list[exchange_name]["symbols"]:
+                    logging.info(f"{symbol} not found on {exchange_name}.")
+                    continue
+
+                all_candles[exchange_name] = all_candles.get(exchange_name, {})
+                for timeframe in timeframes:
+                    # If they have the symbol but not timeframe, skip this loop too.
+                    if (
+                        timeframe
+                        not in self.exchange_list[exchange_name]["timeframes"]
+                    ):
+                        logging.info(f"{timeframe} not found on {exchange_name}.")
                         continue
 
-                    all_candles[exchange_name] = all_candles.get(exchange_name, {})
-                    for timeframe in timeframes:
-                        # If they have the symbol but not timeframe, skip this loop too.
-                        if (
-                            timeframe
-                            not in self.exchange_list[exchange_name]["timeframes"]
-                        ):
-                            logging.info(f"{timeframe} not found on {exchange_name}.")
-                            continue
+                    try:
+                        candles = await exchange.fetch_ohlcv(symbol, timeframe)
+                        df = pd.DataFrame(
+                            candles,
+                            columns=[
+                                "timestamp",
+                                "open",
+                                "high",
+                                "low",
+                                "close",
+                                "volume",
+                            ],
+                        )
+                        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+                        df.set_index("timestamp", inplace=True)
+                        key = f"{symbol}-{timeframe}"
+                        all_candles[exchange_name][key] = df
 
-                        try:
-                            candles = await exchange.fetch_ohlcv(symbol, timeframe)
-                            df = pd.DataFrame(
-                                candles,
-                                columns=[
-                                    "timestamp",
-                                    "open",
-                                    "high",
-                                    "low",
-                                    "close",
-                                    "volume",
-                                ],
-                            )
-                            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-                            df.set_index("timestamp", inplace=True)
-                            key = f"{symbol}-{timeframe}"
-                            all_candles[exchange_name][key] = df
+                    except ccxt.NetworkError as e:
+                        logging.error(f"Network error occurred: {e}")
+                    except ccxt.ExchangeError as e:
+                        logging.error(f"Exchange error occurred: {e}")
+                    except Exception as e:
+                        logging.error(f"An error occurred: {e}")
 
-                        except ccxt.NetworkError as e:
-                            logging.error(f"Network error occurred: {e}")
-                        except ccxt.ExchangeError as e:
-                            logging.error(f"Exchange error occurred: {e}")
-                        except Exception as e:
-                            logging.error(f"An error occurred: {e}")
-            else:
-                logging.warning(f"{exchange_name} does not support OHLCV.")
-
-        try:
-            await self.influx.write_candles(all_candles)
-        except Exception as e:
-            print(e)
+        self.emitter.emit(Signals.FETCHED_CANDLES, all_candles=all_candles)
+        
+        if write_to_db:
+            try:
+                await self.influx.write_candles(all_candles)
+            except Exception as e:
+                print(e)
+            
         return all_candles
