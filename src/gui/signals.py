@@ -9,7 +9,7 @@ class Signals(Enum):
     NEW_TRADE = auto()
     
     STREAM_SYMBOL = auto()
-    FETCHED_CANDLES = auto()
+    NEW_CANDLES = auto()
     VIEWPORT_RESIZED = auto()
 
 class SignalEmitter:

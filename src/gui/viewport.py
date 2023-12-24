@@ -1,11 +1,8 @@
-from asyncio import Queue
-import asyncio
 import logging
-import threading
 import dearpygui.dearpygui as dpg
 
 from src.data.data_source import Data
-from src.gui.signals import Signals, SignalEmitter
+from src.gui.signals import SignalEmitter
 from src.gui.program import Program
 from src.gui.task_manager import TaskManager
 
@@ -14,9 +11,7 @@ class Viewport:
     def __init__(self, emitter: SignalEmitter, data: Data) -> None:
         self.emitter = emitter
         self.data = data
-        
-        # TODO: Make the TaskManager, start the thread for itself in its class file. Remove the asyncio from this
-        # file completely. 
+    
         self.task_manager = TaskManager()
         self.program = Program(self.emitter, self.data, self.task_manager)
         

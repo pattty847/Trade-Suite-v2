@@ -41,6 +41,7 @@ class TaskManager:
         if not self.tasks:
             return
         logging.info(f'Stopping all async tasks: {list(self.tasks.keys())}')
-        for task in self.tasks.values():
+        tasks_copy = dict(self.tasks)  # Create a copy of the dictionary
+        for task in tasks_copy.values():
             task.cancel()
         self.tasks.clear()

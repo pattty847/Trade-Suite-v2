@@ -1,4 +1,6 @@
 venv
+testing
+
 .env
 .gitignore
 

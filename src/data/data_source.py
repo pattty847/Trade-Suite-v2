@@ -23,6 +23,7 @@ class Data(CCXTInterface):
         track_stats: bool = False,
         write_trades: bool = False,
         write_stats: bool = False,
+        chart_tag: str = None,
         params={},
     ):
         """
@@ -53,6 +54,7 @@ class Data(CCXTInterface):
                     )
                     if trades:
                         self.emitter.emit(Signals.NEW_TRADE, exchange=exchange_id, trade_data=trades[0])
+                        print(trades)
                     # symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
                     # self.agg.report_statistics()
 
@@ -85,7 +87,11 @@ class Data(CCXTInterface):
                         orderbook = await exchange_object.watchOrderBookForSymbols(
                             symbols, limit, params
                         )
-
+                        with open('save.json', 'w') as f:
+                            json.dump(orderbook, f)
+                        
+                        break
+                    
                         await self.influx.write_order_book(exchange_id, orderbook)
                         # orderbook = dict_keys(['bids': [[price, amount]], 'asks': [[price, amount]], 'timestamp', 'datetime', 'nonce', 'symbol'])
                         # logging.info(f"{exchange_object.iso8601(exchange_object.milliseconds())}, {orderbook['symbol']}, {orderbook['asks'][0]} ({len(orderbook['asks'])}), {orderbook['bids'][0]} ({len(orderbook['bids'])})")
@@ -162,26 +168,7 @@ class Data(CCXTInterface):
     async def fetch_candles(
         self, exchanges: List[str], symbols: List[str], timeframes: List[str], write_to_db
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
-        """
-        The fetch_candles function fetches OHLCV data from the exchanges specified in the exchanges list.
-            The symbols and timeframes lists are used to specify which symbols and timeframes to fetch.
 
-            Args:
-                exchanges (List[str]): A list of exchange IDs, e.g., ['binance', 'bitfinex'].
-                symbols (List[str]): A list of symbol pairs, e.g., ['BTC/USDT', 'ETH/BTC'].
-                timeframes (List[str]): A list of timeframe strings, e.g., ['5m', '1m'].
-
-        :param exchanges: List[str]: Specify which exchanges to fetch data from
-        :param symbols: List[str]: Specify which symbols to fetch
-        :param timeframes: List[str]: Specify the timeframes you want to fetch
-        :param returns:
-            dict: A nested dictionary structure:
-                - Top-level keys are exchange names (e.g., 'coinbasepro').
-                - Second-level keys are concatenated strings of symbol and timeframe (e.g., 'BTC/USDT-1m').
-                - Values are pandas DataFrames with columns ['open', 'high', 'low', 'close', 'volume']
-                and 'timestamp' as the index, representing OHLCV data.
-        :doc-author: Trelent
-        """
         # {exchange_id: ccxt_object}
         exchange_objects = {
             exchange: self.exchange_list[exchange]["ccxt"] for exchange in exchanges
@@ -210,7 +197,7 @@ class Data(CCXTInterface):
                         df = pd.DataFrame(
                             candles,
                             columns=[
-                                "timestamp",
+                                "dates",
                                 "open",
                                 "high",
                                 "low",
@@ -218,8 +205,13 @@ class Data(CCXTInterface):
                                 "volume",
                             ],
                         )
-                        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-                        df.set_index("timestamp", inplace=True)
+
+                        df["dates"] = df["dates"] / 1000
+                        # Return just the one dataframe if fetching one symbol from one exchange and one timeframe
+                        if len(exchanges) == 1 and len(symbols) == 1 and len(timeframes) == 1:
+                            self.emitter.emit(Signals.NEW_CANDLES, candles=df)
+                            return
+                        
                         key = f"{symbol}-{timeframe}"
                         all_candles[exchange_name][key] = df
 
@@ -230,7 +222,7 @@ class Data(CCXTInterface):
                     except Exception as e:
                         logging.error(f"An error occurred: {e}")
 
-        self.emitter.emit(Signals.FETCHED_CANDLES, all_candles=all_candles)
+        self.emitter.emit(Signals.NEW_CANDLES, candles=all_candles)
         
         if write_to_db:
             try:
