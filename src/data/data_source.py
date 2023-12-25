@@ -87,13 +87,12 @@ class Data(CCXTInterface):
                         orderbook = await exchange_object.watchOrderBookForSymbols(
                             symbols, limit, params
                         )
-                        with open('save.json', 'w') as f:
-                            json.dump(orderbook, f)
                         
-                        break
-                    
-                        await self.influx.write_order_book(exchange_id, orderbook)
+                        # await self.influx.write_order_book(exchange_id, orderbook)
                         # orderbook = dict_keys(['bids': [[price, amount]], 'asks': [[price, amount]], 'timestamp', 'datetime', 'nonce', 'symbol'])
+                        
+                        # Filter first? Should we even emit it? Does it matter, etc.?
+                        self.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange_id, orderbook=orderbook)
                         # logging.info(f"{exchange_object.iso8601(exchange_object.milliseconds())}, {orderbook['symbol']}, {orderbook['asks'][0]} ({len(orderbook['asks'])}), {orderbook['bids'][0]} ({len(orderbook['bids'])})")
                     except Exception as e:
                         logging.error(e)

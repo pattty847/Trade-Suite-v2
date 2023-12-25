@@ -31,6 +31,7 @@ class Chart:
         # When we receive a trade after streaming symbol(s) on an exchange(s) we can subscribe to the events.
         self.emitter.register(Signals.NEW_TRADE, self.on_new_trade)
         self.emitter.register(Signals.NEW_CANDLES, self.on_new_candles)
+        self.emitter.register(Signals.ORDER_BOOK_UPDATE, self.on_order_book_update)
         
         with dpg.child_window(menubar=True):
             with dpg.menu_bar():
@@ -47,10 +48,7 @@ class Chart:
                     dpg.add_text('Timeframe')
                     dpg.add_listbox(
                         items=self.data.exchange_list['coinbasepro']['timeframes'],
-                        callback=lambda sender, app_data, user_data: self.task_manager.start_task(
-                            'fetch_candles',
-                            # Set timeframe, resample candle series (if possible, or request new data?)
-                        ),
+                        callback=lambda sender, timeframe, user_data: self.resample_chart(timeframe),
                         num_items=5
                     )
                     
@@ -78,37 +76,57 @@ class Chart:
                 with dpg.menu(label="Testing"):
                     dpg.add_button(label="Stop Async Tasks", callback=self.task_manager.stop_all_tasks)
             
-            
-            max_len = 10000
-            # OHLCV data structure
-            self.ohlcv = {
-                'dates': deque(maxlen=max_len),
-                'opens': deque(maxlen=max_len),
-                'highs': deque(maxlen=max_len),
-                'lows': deque(maxlen=max_len),
-                'closes': deque(maxlen=max_len),
-                'volumes': deque(maxlen=max_len)
-            }
-            self.timeframe = 360  # Timeframe for the candles in seconds
-            self.last_candle_timestamp = None
 
-            with dpg.plot(use_local_time=True, width=-1, height=-1, crosshairs=True):
-                dpg.add_plot_legend()
-                xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
-                with dpg.plot_axis(dpg.mvYAxis, label="USD"):
-                    self.candle_series = dpg.add_candle_series(
-                        list(self.ohlcv['dates']),
-                        list(self.ohlcv['opens']),
-                        list(self.ohlcv['closes']),
-                        list(self.ohlcv['lows']),
-                        list(self.ohlcv['highs']),
-                        weight=0.1,
-                        time_unit=dpg.mvTimeUnit_Hr
-                    )
-                    # dpg.add_line_series(self.x, self.y, tag='line_series')
-                    dpg.fit_axis_data(dpg.top_container_stack())
-                dpg.fit_axis_data(xaxis)
-            
+            with dpg.group():
+                with dpg.group(horizontal=True):
+                    
+                    max_len = 10000
+                    # OHLCV data structure
+                    self.ohlcv = {
+                        'dates': deque(maxlen=max_len),
+                        'opens': deque(maxlen=max_len),
+                        'highs': deque(maxlen=max_len),
+                        'lows': deque(maxlen=max_len),
+                        'closes': deque(maxlen=max_len),
+                        'volumes': deque(maxlen=max_len)
+                    }
+                    self.timeframe = 360  # Timeframe for the candles in seconds
+                    self.last_candle_timestamp = None
+                    
+                    # Candle stick plot
+                    # TODO: Turn into subplot with volume bars
+                    with dpg.plot(use_local_time=True, width=-1, height=-1, crosshairs=True):
+                        dpg.add_plot_legend()
+                        xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
+                        with dpg.plot_axis(dpg.mvYAxis, label="USD"):
+                            self.candle_series = dpg.add_candle_series(
+                                list(self.ohlcv['dates']),
+                                list(self.ohlcv['opens']),
+                                list(self.ohlcv['closes']),
+                                list(self.ohlcv['lows']),
+                                list(self.ohlcv['highs']),
+                                weight=0.1,
+                                time_unit=dpg.mvTimeUnit_Hr
+                            )
+                            # dpg.add_line_series(self.x, self.y, tag='line_series')
+                            dpg.fit_axis_data(dpg.top_container_stack())
+                        dpg.fit_axis_data(xaxis)
+
+
+                    # How do I store? Very high frequency, most updates are miniscule, we want filtering strategies,
+                    # Order book will be emitted with Signals.ORDER_BOOK_UPDATE
+                    self.order_book = {}
+                    # Live Order Book
+                    with dpg.plot():
+                        pass
+                    
+                    
+                    # New trade emitted with Signals.NEW_TRADE
+                    self.trade_history = {}
+                    # Trade History
+                    with dpg.plot():
+                        pass
+                
     def start_stream(self, symbol):
         for task in list(self.task_manager.tasks):
             self.task_manager.stop_task(task)
@@ -117,7 +135,6 @@ class Chart:
         self.task_manager.run_task_until_complete(self.data.fetch_candles(['coinbasepro'], [symbol], ['1h'], write_to_db=None))
         
         # We start the stream (ticks), this emits 'Signals.NEW_TRADE', func 'on_new_trade' handles building of candles
-        # TODO: Pass the UUID generated plot id
         self.task_manager.start_task(
             f'stream_{symbol}_{self.timeframe}', 
             # TODO: Add 'exchange' parameter to 'stream_trades'
@@ -128,6 +145,7 @@ class Chart:
         )
         
     def resample_chart(self, resampled_timeframe: str):
+        # if resampled_timeframe not in self.data.exchange_list['coinbasepro']['timeframes']:
         # Check if there exists candles self.ohlcv
         # Can we resample the current timeframe into the new timeframe?
         # If not, out of the timeframes the exchange offers (self.data.exchange_list[exchange_id]['timeframes']), 
@@ -201,3 +219,6 @@ class Chart:
             lows=list(self.ohlcv['lows']),
             closes=list(self.ohlcv['closes']),
         )
+        
+    def on_order_book_update(self, exchange, orderbook):
+        pass

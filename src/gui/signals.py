@@ -2,15 +2,16 @@ from enum import Enum, auto
 from typing import Callable
 
 class Signals(Enum):
-    SELECT_EXCHANGE = auto()
-    EXCHANGE_SELECTED = auto()
     CREATE_CHART = auto()
     CREATE_CHART_FOR_SYMBOL = auto()
-    NEW_TRADE = auto()
-    
-    STREAM_SYMBOL = auto()
+    EXCHANGE_SELECTED = auto()
     NEW_CANDLES = auto()
+    NEW_TRADE = auto()
+    ORDER_BOOK_UPDATE = auto()
+    SELECT_EXCHANGE = auto()
+    STREAM_SYMBOL = auto()
     VIEWPORT_RESIZED = auto()
+
 
 class SignalEmitter:
     def __init__(self) -> None:
