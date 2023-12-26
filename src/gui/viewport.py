@@ -2,7 +2,7 @@ import logging
 import dearpygui.dearpygui as dpg
 
 from src.data.data_source import Data
-from src.gui.signals import SignalEmitter
+from src.gui.signals import SignalEmitter, Signals
 from src.gui.program import Program
 from src.gui.task_manager import TaskManager
 
@@ -62,6 +62,12 @@ class Viewport:
         # MAIN PROGRAM/WINDOW CLASS INITIALIZATION
         self.program.initialize()
         dpg.set_primary_window(self.program.tag, True)
+        
+        dpg.set_viewport_resize_callback(lambda: self.emitter.emit(
+            Signals.VIEWPORT_RESIZED, 
+            width=dpg.get_viewport_width(),
+            height=dpg.get_viewport_height()
+        ))
         
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type:

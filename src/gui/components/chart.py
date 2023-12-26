@@ -1,4 +1,5 @@
 import dearpygui.dearpygui as dpg
+import numpy as np
 import pandas as pd
 
 from collections import deque
@@ -25,12 +26,14 @@ class Chart:
         # Figure out base values for these
         self.active_stream = None
         self.active_timeframe = None
-
+        self.ob_levels = 100
         # UI elements will need to register for emitted signals
         
         # When we receive a trade after streaming symbol(s) on an exchange(s) we can subscribe to the events.
         self.emitter.register(Signals.NEW_TRADE, self.on_new_trade)
         self.emitter.register(Signals.NEW_CANDLES, self.on_new_candles)
+        self.emitter.register(Signals.ORDER_BOOK_UPDATE, self.on_order_book_update)
+        self.emitter.register(Signals.VIEWPORT_RESIZED, self.on_viewport_resize)
 
         
         with dpg.child_window(menubar=True):
@@ -52,79 +55,80 @@ class Chart:
                         num_items=5
                     )
                     
-                    
-                    dpg.add_text('Test Candle Fetch')
-                    symbol = 'ETH/USD'
-                    dpg.add_button(
-                        label=symbol,
-                        callback=lambda sender, app_data, user_data: self.task_manager.start_task(
-                            'fetch_candles',
-                            self.data.fetch_candles(
-                                exchanges=['coinbasepro'], 
-                                symbols=[symbol], 
-                                timeframes=['1m'], 
-                                write_to_db=False
-                            )
-                        )
-                    )
-                
-                
-                with dpg.menu(label="Settings"):
-                    dpg.add_slider_float(min_value=0.1, max_value=5, callback=lambda s, a, u: dpg.configure_item(self.candle_series, weight=a))
-                
                 
                     with dpg.menu(label="Testing"):
-                        dpg.add_button(label="Stop Async Tasks", callback=self.task_manager.stop_all_tasks)
+                        dpg.add_slider_float(min_value=0.1, max_value=5, callback=lambda s, a, u: dpg.configure_item(self.candle_series, weight=a))
+                        dpg.add_menu_item(label="Stop Async Tasks", callback=self.task_manager.stop_all_tasks)
             
 
-            with dpg.group(width=-1, height=-1):
-                max_len = 10000
-                # OHLCV data structure
-                self.ohlcv = {
-                    'dates': deque(maxlen=max_len),
-                    'opens': deque(maxlen=max_len),
-                    'highs': deque(maxlen=max_len),
-                    'lows': deque(maxlen=max_len),
-                    'closes': deque(maxlen=max_len),
-                    'volumes': deque(maxlen=max_len)
-                }
-                self.timeframe = 60  # Timeframe for the candles in seconds
-                self.last_candle_timestamp = None
+            max_len = 10000
+            # OHLCV data structure
+            self.ohlcv = {
+                'dates': deque(maxlen=max_len),
+                'opens': deque(maxlen=max_len),
+                'highs': deque(maxlen=max_len),
+                'lows': deque(maxlen=max_len),
+                'closes': deque(maxlen=max_len),
+                'volumes': deque(maxlen=max_len)
+            }
+            self.timeframe = 300  # Timeframe for the candles in seconds
+            self.last_candle_timestamp = None
                 
-                with dpg.subplots(rows=2, columns=1, row_ratios=[.7, .3], link_all_x=True):
-                    with dpg.plot(label="Candlestick Chart", no_title=True):
-                        dpg.add_plot_legend()
-                        xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
-                        with dpg.plot_axis(dpg.mvYAxis, label="USD"):
-                            self.candle_series = dpg.add_candle_series(
-                                list(self.ohlcv['dates']),
-                                list(self.ohlcv['opens']),
-                                list(self.ohlcv['closes']),
-                                list(self.ohlcv['lows']),
-                                list(self.ohlcv['highs']),
-                                time_unit=dpg.mvTimeUnit_Min
-                            )
-                            dpg.fit_axis_data(dpg.top_container_stack())
-                        dpg.fit_axis_data(xaxis)
-                    
-                    with dpg.plot(no_title=True):
-                        dpg.add_plot_legend()
-                        xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
-                        with dpg.plot_axis(dpg.mvYAxis, label="USD"):
-                            self.volume_series = dpg.add_line_series(
-                                list(self.ohlcv['dates']),
-                                list(self.ohlcv['volumes']),
-                            )
-                            dpg.fit_axis_data(dpg.top_container_stack())
-                        dpg.fit_axis_data(xaxis)
-
+            with dpg.group(horizontal=True):  # Use horizontal grouping to align elements side by side
+                with dpg.group(tag='charts_group', width=dpg.get_viewport_width() * 0.7, height=-1):  # This group will contain the charts, filling the available space
+                    with dpg.subplots(rows=2, columns=1, row_ratios=[0.7, 0.3], link_all_x=True):
+                        
+                        # Candlestick Chart
+                        with dpg.plot(label="Candlestick Chart", no_title=True, height=-1):
+                            dpg.add_plot_legend()
+                            xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
+                            with dpg.plot_axis(dpg.mvYAxis, label="USD"):
+                                # Ensure data is populated before adding series
+                                self.candle_series = dpg.add_candle_series(
+                                    list(self.ohlcv['dates']),
+                                    list(self.ohlcv['opens']),
+                                    list(self.ohlcv['closes']),
+                                    list(self.ohlcv['lows']),
+                                    list(self.ohlcv['highs']),
+                                    time_unit=dpg.mvTimeUnit_Min
+                                )
+                            dpg.fit_axis_data(xaxis)
+                            
+                        # Volume Chart
+                        with dpg.plot(label="Volume Chart", no_title=True, height=-1):
+                            dpg.add_plot_legend()
+                            xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
+                            with dpg.plot_axis(dpg.mvYAxis, label="Volume") as vol_yaxis:
+                                # Ensure data is populated before adding series
+                                self.volume_series = dpg.add_line_series(
+                                    list(self.ohlcv['dates']),
+                                    list(self.ohlcv['volumes']),
+                                )
+                            dpg.set_axis_limits_auto(axis=vol_yaxis)
+                            dpg.fit_axis_data(xaxis)
+                            
+                with dpg.group(width=300, tag='order_book_group'):  # This group will contain the order book plot
+                    dpg.add_slider_int(label="Levels", default_value=100, min_value=5, max_value=50000, callback=lambda s, a, u: self.set_ob_levels(a))
+                    with dpg.plot(label="Volume Chart", no_title=True, height=-1):
+                            dpg.add_plot_legend()
+                            self.x_axis_tag = dpg.add_plot_axis(dpg.mvXAxis)
+                            with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.ob_yaxis:
+                                # Ensure data is populated before adding series
+                                self.bids_tag = dpg.add_line_series(
+                                    [], []
+                                )
+                                self.asks_tag = dpg.add_line_series(
+                                    [], []
+                                )
+                            dpg.fit_axis_data(xaxis)
+    def set_ob_levels(self, levels):
+        self.ob_levels = levels
                         
     def start_stream(self, symbol):
-        for task in list(self.task_manager.tasks):
-            self.task_manager.stop_task(task)
+        self.task_manager.stop_all_tasks()
         
         # We need to fetch the candles (wait for them), this emits 'Signals.NEW_CANDLES', func 'on_new_candles' should set them    
-        self.task_manager.run_task_until_complete(self.data.fetch_candles(['coinbasepro'], [symbol], ['1m'], write_to_db=False))
+        self.task_manager.run_task_until_complete(self.data.fetch_candles(['coinbasepro'], [symbol], ['5m'], write_to_db=False))
         
         # We start the stream (ticks), this emits 'Signals.NEW_TRADE', func 'on_new_trade' handles building of candles
         self.task_manager.start_task(
@@ -132,7 +136,14 @@ class Chart:
             # TODO: Add 'exchange' parameter to 'stream_trades'
             coro=self.data.stream_trades(
                 symbols=[symbol], 
-                chart_tag=self.candle_series
+            )
+        )
+        
+        self.task_manager.start_task(
+            f'stream_ob_{symbol}', 
+            # TODO: Add 'exchange' parameter to 'stream_trades'
+            coro=self.data.stream_order_book(
+                symbols=[symbol], 
             )
         )
         
@@ -206,7 +217,6 @@ class Chart:
         # Update the chart
         self.update_candle_chart()
 
-        
     def update_candle_chart(self):
         # Assuming you've created a candle series with a tag
         dpg.configure_item(
@@ -222,6 +232,46 @@ class Chart:
             x=self.ohlcv['dates'],
             y=self.ohlcv['volumes']
         )
-        
+
     def on_order_book_update(self, exchange, orderbook):
-        print(orderbook)
+        
+        # Extract bids and asks
+        bids = orderbook['bids']
+        asks = orderbook['asks']
+
+        # Create DataFrames
+        bids_df = pd.DataFrame(bids, columns=['price', 'quantity'])
+        asks_df = pd.DataFrame(asks, columns=['price', 'quantity'])
+        
+        # Sorting by price
+        bids_df = bids_df.sort_values(by='price', ascending=False).head(self.ob_levels)
+        asks_df = asks_df.sort_values(by='price', ascending=True).head(self.ob_levels)
+
+        # Calculate cumulative quantity
+        bids_df['cumulative_quantity'] = bids_df['quantity'].cumsum()
+        asks_df['cumulative_quantity'] = asks_df['quantity'].cumsum()
+
+        # Find the midpoint
+        worst_bid_price = bids_df['price'].min()
+        worst_ask_price = asks_df['price'].max()
+        
+        worst_bid_size = bids_df['cumulative_quantity'].min()
+        worst_ask_size = asks_df['cumulative_quantity'].max()
+
+        # Update the series data
+        dpg.configure_item(self.bids_tag, x=bids_df['price'].tolist(), y=bids_df['cumulative_quantity'].tolist())
+        dpg.configure_item(self.asks_tag, x=asks_df['price'].tolist(), y=asks_df['cumulative_quantity'].tolist())
+
+        # Update the x-axis limits to center the midpoint
+        dpg.set_axis_limits(axis=self.x_axis_tag, ymin=worst_bid_price, ymax=worst_ask_price)
+        dpg.set_axis_limits(axis=self.ob_yaxis, ymin=worst_bid_size, ymax=worst_ask_size)
+
+        
+    def on_viewport_resize(self, width, height):
+        # Calculate new width for the charts and order book based on viewport size
+        charts_width = width * 0.7
+        order_book_width = width - charts_width  # Subtract the chart width from the total to get the order book width
+        
+        # Update the width of the groups
+        dpg.configure_item("charts_group", width=charts_width)
+        dpg.configure_item("order_book_group", width=order_book_width)

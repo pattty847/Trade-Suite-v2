@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 import json
 import logging
 import ccxt
@@ -18,7 +19,7 @@ class Data(CCXTInterface):
         self.emitter = emitter
         self.agg = MarketAggregator(influx, emitter)
         
-        self.price_precision = 1
+        self.price_precision = 10
         self.volume_threshold = 0.0
 
     async def stream_trades(
@@ -26,8 +27,6 @@ class Data(CCXTInterface):
         track_stats: bool = False,
         write_trades: bool = False,
         write_stats: bool = False,
-        chart_tag: str = None,
-        params={},
     ):
         """
         The stream_trades function is a coroutine that streams trades from the exchanges in exchange_list.
@@ -57,7 +56,7 @@ class Data(CCXTInterface):
                     )
                     if trades:
                         self.emitter.emit(Signals.NEW_TRADE, exchange=exchange_id, trade_data=trades[0])
-                        print(trades)
+
                     # symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
                     # self.agg.report_statistics()
 
@@ -66,7 +65,7 @@ class Data(CCXTInterface):
                 except Exception as e:
                     logging.error(e)
 
-    async def stream_order_book(self, symbols: List[str], limit: int = 100, params={}):
+    async def stream_order_book(self, symbols: List[str]):
         """
         The stream_order_book function is a coroutine that streams the order book for a given symbol.
             The function takes in two parameters:
@@ -88,108 +87,16 @@ class Data(CCXTInterface):
                 while True:
                     try:
                         orderbook = await exchange_object.watchOrderBookForSymbols(
-                            symbols, limit, params
+                            symbols
                         )
-                        
                         # await self.influx.write_order_book(exchange_id, orderbook)
                         # orderbook = dict_keys(['bids': [[price, amount]], 'asks': [[price, amount]], 'timestamp', 'datetime', 'nonce', 'symbol'])
-                        filtered_orderbook = self.filter_order_book(orderbook, limit)
-                        # Filter first? Should we even emit it? Does it matter, etc.?
-                        self.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange_id, orderbook=filtered_orderbook)
-                        await asyncio.sleep(0.1)
+                        self.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange_id, orderbook=orderbook)
+                        
+                        await asyncio.sleep(0.3)
                     except Exception as e:
                         logging.error(e)
                         
-    def filter_order_book(self, orderbook, limit):
-        # Implement your filtering logic here
-        # For example, aggregate by price level and apply volume threshold
-        aggregated_orderbook = {
-            'bids': self.aggregate_orders(orderbook['bids'], limit),
-            'asks': self.aggregate_orders(orderbook['asks'], limit)
-        }
-        return aggregated_orderbook
-
-    def aggregate_orders(self, orders, limit):
-        # Aggregate orders by price and apply volume threshold
-        aggregated = {}
-        for price, amount in orders:
-            price_level = round(price, self.price_precision)  # Define price_precision based on your tick size
-            if price_level not in aggregated:
-                aggregated[price_level] = 0
-            aggregated[price_level] += amount
-
-        # Apply volume threshold and limit to top N levels
-        return sorted([
-            (price, amount) for price, amount in aggregated.items() if amount >= self.volume_threshold
-        ][:limit], key=lambda x: x[0], reverse=True)  # Reverse for bids, not for asks
-
-
-    async def stream_ob_and_trades(
-        self, symbols: List[str], since: str = None, limit: int = None, params={}
-    ):
-        """
-        The stream_ob_and_trades function is a coroutine that streams order book and trade data for the given symbols.
-            It does this by calling the stream_for_exchange function on each exchange in self.exchange_list, which returns an asyncio task object.
-            The tasks are then gathered together using asyncio's gather method, which allows them to run concurrently.
-
-        :param self: Represent the instance of the class
-        :param symbols: List[str]: Specify the symbols to stream
-        :param since: str: Get the trades that have occurred since a certain time
-        :param limit: int: Limit the amount of data that is returned
-        :param params: Pass in the parameters for the websocket connection
-        :return: A list of tasks
-        :doc-author: Trelent
-        """
-        tasks = []
-        for exchange_id in self.exchange_list.keys():
-            exchange_object = self.exchange_list[exchange_id]["ccxt"]
-            if (
-                exchange_object.has["watchTradesForSymbols"]
-                and exchange_object.has["watchOrderBookForSymbols"]
-            ):
-                tasks.append(
-                    self.stream_ob_and_trades_(
-                        exchange_id, exchange_object, symbols, since, limit, params
-                    )
-                )
-        await asyncio.gather(*tasks)
-
-    async def stream_ob_and_trades_(
-        self, exchange_id, exchange_object, symbols, since, limit, params
-    ):
-        """
-        The stream_for_exchange function is a coroutine that takes in an exchange_id, exchange_object, symbols, since and limit.
-        It then uses the ccxt library to stream trades and order books for the given symbols on the given exchange.
-        The function will continue to run until it encounters an error or is stopped by another process.
-
-        :param self: Represent the instance of the class
-        :param exchange_id: Identify which exchange the data is coming from
-        :param exchange_object: Call the watchtradesforsymbols and watchorderbookforsymbols functions
-        :param symbols: Specify which symbols to stream for
-        :param since: Get trades from a certain time
-        :param limit: Limit the number of trades and order book entries returned by the exchange
-        :param params: Pass in the parameters for the watchtradesforsymbols and watchorderbookforsymbols functions
-        :return: A coroutine object
-        :doc-author: Trelent
-        """
-        logging.info(
-            f"Starting trade and order book stream for {symbols} on {exchange_id}"
-        )
-        while True:
-            try:
-                trades = await exchange_object.watchTradesForSymbols(
-                    symbols, since, limit, params
-                )
-                orderbook = await exchange_object.watchOrderBookForSymbols(
-                    symbols, limit, params
-                )
-                await self.influx.write_ob_and_trades(exchange_id, trades, orderbook)
-            except ccxt.NetworkError as e:
-                logging.error(f"Network error occurred: {e}")
-            except ccxt.ExchangeError as e:
-                logging.error(f"Exchange error occurred: {e}")
-            except Exception as e:
-                logging.error(e)
 
     async def fetch_candles(self, exchanges: List[str], symbols: List[str], timeframes: List[str], write_to_db) -> Dict[str, Dict[str, pd.DataFrame]]:
         exchange_objects = {exch: self.exchange_list[exch]["ccxt"] for exch in exchanges}
