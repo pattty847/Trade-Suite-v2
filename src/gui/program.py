@@ -1,5 +1,6 @@
 import asyncio
 import dearpygui.dearpygui as dpg
+import dearpygui.demo as demo
 
 from src.data.data_source import Data
 from src.gui import tags
@@ -17,6 +18,7 @@ class MenuBar:
             
             with dpg.menu(label="DPG"):
                 with dpg.menu(label="Tools"):
+                    dpg.add_menu_item(label="Show Demo", callback=demo.show_demo)
                     dpg.add_menu_item(label="Show About", callback=lambda:dpg.show_tool(dpg.mvTool_About))
                     dpg.add_menu_item(label="Show Metrics", callback=lambda:dpg.show_tool(dpg.mvTool_Metrics))
                     dpg.add_menu_item(label="Show Documentation", callback=lambda:dpg.show_tool(dpg.mvTool_Doc))

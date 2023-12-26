@@ -17,6 +17,9 @@ class Data(CCXTInterface):
         super().__init__(influx, exchanges)
         self.emitter = emitter
         self.agg = MarketAggregator(influx, emitter)
+        
+        self.price_precision = 1
+        self.volume_threshold = 0.0
 
     async def stream_trades(
         self, symbols: List[str], 
@@ -90,12 +93,36 @@ class Data(CCXTInterface):
                         
                         # await self.influx.write_order_book(exchange_id, orderbook)
                         # orderbook = dict_keys(['bids': [[price, amount]], 'asks': [[price, amount]], 'timestamp', 'datetime', 'nonce', 'symbol'])
-                        
+                        filtered_orderbook = self.filter_order_book(orderbook, limit)
                         # Filter first? Should we even emit it? Does it matter, etc.?
-                        self.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange_id, orderbook=orderbook)
-                        # logging.info(f"{exchange_object.iso8601(exchange_object.milliseconds())}, {orderbook['symbol']}, {orderbook['asks'][0]} ({len(orderbook['asks'])}), {orderbook['bids'][0]} ({len(orderbook['bids'])})")
+                        self.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange_id, orderbook=filtered_orderbook)
+                        await asyncio.sleep(0.1)
                     except Exception as e:
                         logging.error(e)
+                        
+    def filter_order_book(self, orderbook, limit):
+        # Implement your filtering logic here
+        # For example, aggregate by price level and apply volume threshold
+        aggregated_orderbook = {
+            'bids': self.aggregate_orders(orderbook['bids'], limit),
+            'asks': self.aggregate_orders(orderbook['asks'], limit)
+        }
+        return aggregated_orderbook
+
+    def aggregate_orders(self, orders, limit):
+        # Aggregate orders by price and apply volume threshold
+        aggregated = {}
+        for price, amount in orders:
+            price_level = round(price, self.price_precision)  # Define price_precision based on your tick size
+            if price_level not in aggregated:
+                aggregated[price_level] = 0
+            aggregated[price_level] += amount
+
+        # Apply volume threshold and limit to top N levels
+        return sorted([
+            (price, amount) for price, amount in aggregated.items() if amount >= self.volume_threshold
+        ][:limit], key=lambda x: x[0], reverse=True)  # Reverse for bids, not for asks
+
 
     async def stream_ob_and_trades(
         self, symbols: List[str], since: str = None, limit: int = None, params={}
