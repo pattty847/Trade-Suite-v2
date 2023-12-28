@@ -30,6 +30,9 @@ class MenuBar:
                 with dpg.menu(label="Settings"):
                     dpg.add_menu_item(label="Wait For Input", check=True, callback=lambda s, a: dpg.configure_app(wait_for_input=a))
                     dpg.add_menu_item(label="Toggle Fullscreen", callback=lambda:dpg.toggle_viewport_fullscreen())
+                
+            with dpg.menu(label="Exchanges"):
+                dpg.add_listbox(list(self.data.exchange_list.keys()), callback=lambda s, a, u: self.emitter.emit(Signals.CREATE_CHART, exchange=a))
 
 class Program:
 
@@ -43,7 +46,12 @@ class Program:
         self.data = data
         self.task_manager = task_manager
         
+        self.emitter.register(Signals.CREATE_CHART, callback=self.on_create_chart)
+        
     def initialize(self):
         with dpg.window(tag=self.tag, menubar=True):
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
-            self.chart: Chart = Chart(self.emitter, self.data, self.task_manager)
+            # self.chart: Chart = Chart(self.emitter, self.data, self.task_manager)
+            
+    def on_create_chart(self, exchange):
+        self.chart: Chart = Chart(exchange, self.emitter, self.data, self.task_manager)

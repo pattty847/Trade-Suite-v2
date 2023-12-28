@@ -166,7 +166,7 @@ class MarketAggregator:
         df['price_group'] = (df['price'] // tick_size) * tick_size
         return df.groupby('price_group').agg({'quantity': 'sum'}).reset_index()
 
-    def on_order_book_update(self, exchange, orderbook, tick_size, aggregate):
+    def on_order_book_update(self, exchange, orderbook, tick_size, aggregate, ob_levels):
 
         # Extract bids and asks
         bids = orderbook['bids']
@@ -184,8 +184,8 @@ class MarketAggregator:
             price_column = 'price'
 
         # Sorting and calculations
-        bids_df = bids_df.sort_values(by=price_column, ascending=False).head(self.ob_levels)
-        asks_df = asks_df.sort_values(by=price_column, ascending=True).head(self.ob_levels)
+        bids_df = bids_df.sort_values(by=price_column, ascending=False).head(ob_levels)
+        asks_df = asks_df.sort_values(by=price_column, ascending=True).head(ob_levels)
         bids_df['cumulative_quantity'] = bids_df['quantity'].cumsum()
         asks_df['cumulative_quantity'] = asks_df['quantity'].cumsum()
 
