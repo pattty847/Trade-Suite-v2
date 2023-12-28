@@ -1,13 +1,11 @@
-import asyncio
-from collections import defaultdict
-from datetime import datetime
-from typing import List
-from influxdb_client import Point, WritePrecision
 import pandas as pd
+import dearpygui.dearpygui as dpg
+
+from collections import defaultdict
+from typing import List
 from tabulate import tabulate
 from collections import defaultdict
 from typing import List
-
 from src.data.influx import InfluxDB
 from src.gui.signals import SignalEmitter
 
@@ -15,7 +13,27 @@ from src.gui.signals import SignalEmitter
 class MarketAggregator:
     def __init__(self, influx: InfluxDB, emitter: SignalEmitter):
         self.emitter = emitter
+        self.trade_stats = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        self.order_size_categories = [
+            "0-10k",
+            "10k-100k",
+            "100k-1m",
+            "1m-10m",
+            "10m-100m",
+        ]
+        self.influx = influx
+
+    def calc_trade_stats(self, exchange: str, trades: List[str]) -> None:
         """
+        The calc_trade_stats function will be passed a particular exchange and tick data (containing the symbol, and other relevant information).
+        It will then calculate the following metrics:
+            - Total volume for an exchange and symbol pair
+            - Total volume in USD for an exchange and symbol pair
+        
+        :param self: Reference the object that is calling the function
+        :param exchange: str: Specify the exchange that the trade data is coming from
+        :param trades: List[str]: Pass in the tick data
+        :return: A tuple containing the symbol and trade_stats dictionary
         self.trade_stats = {
             ('exchange1', 'symbol1'): {
                 'category1': {
@@ -35,20 +53,11 @@ class MarketAggregator:
             },
             ...
         }
+        :doc-author: Trelent
         """
-        self.trade_stats = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
-        self.order_size_categories = [
-            "0-10k",
-            "10k-100k",
-            "100k-1m",
-            "1m-10m",
-            "10m-100m",
-        ]
-        self.influx = influx
-
-    def calc_trade_stats(self, exchange: str, trades: List[str]) -> None:
         # This function will be passed a particular exchange and tick data (containing the symbol, and other relevant information)
         try:
+            # trades = list[dict_keys(['id', 'order', 'info', 'timestamp', 'datetime', 'symbol', 'type', 'takerOrMaker', 'side', 'price', 'amount', 'fee', 'cost', 'fees'])]
             for trade in trades:
                 symbol = trade["symbol"]
                 # Check if necessary fields are in the trade data
@@ -151,3 +160,34 @@ class MarketAggregator:
 
         print(tabulate(rows, headers=header, tablefmt="grid"))
         # print(self.trade_stats)
+
+    def group_and_aggregate(self, orders, tick_size):
+        df = pd.DataFrame(orders, columns=['price', 'quantity'])
+        df['price_group'] = (df['price'] // tick_size) * tick_size
+        return df.groupby('price_group').agg({'quantity': 'sum'}).reset_index()
+
+    def on_order_book_update(self, exchange, orderbook, tick_size, aggregate):
+
+        # Extract bids and asks
+        bids = orderbook['bids']
+        asks = orderbook['asks']
+
+        if aggregate:
+            # Process for aggregated view
+            bids_df = self.group_and_aggregate(bids, tick_size)
+            asks_df = self.group_and_aggregate(asks, tick_size)
+            price_column = 'price_group'
+        else:
+            # Process for non-aggregated view
+            bids_df = pd.DataFrame(bids, columns=['price', 'quantity'])
+            asks_df = pd.DataFrame(asks, columns=['price', 'quantity'])
+            price_column = 'price'
+
+        # Sorting and calculations
+        bids_df = bids_df.sort_values(by=price_column, ascending=False).head(self.ob_levels)
+        asks_df = asks_df.sort_values(by=price_column, ascending=True).head(self.ob_levels)
+        bids_df['cumulative_quantity'] = bids_df['quantity'].cumsum()
+        asks_df['cumulative_quantity'] = asks_df['quantity'].cumsum()
+
+        # Update the series data
+        return bids_df, asks_df, price_column

@@ -8,14 +8,6 @@ from src.data.data_source import Data
 from src.gui.signals import SignalEmitter, Signals
 from src.gui.task_manager import TaskManager
 
-"""
-
-We need to incorporate pandas for the candle sticks here and in Data(). 
-
-Maintain a consistant Chart object and modularity wherever possible.
-
-"""
-
 class Chart:
     def __init__(self, emitter: SignalEmitter, data: Data, task_manager: TaskManager) -> None:
         self.tag = dpg.generate_uuid()
@@ -27,6 +19,8 @@ class Chart:
         self.active_stream = None
         self.active_timeframe = None
         self.ob_levels = 100
+        self.tick_size = 10
+        self.aggregated_order_book = True
         # UI elements will need to register for emitted signals
         
         # When we receive a trade after streaming symbol(s) on an exchange(s) we can subscribe to the events.
@@ -34,6 +28,7 @@ class Chart:
         self.emitter.register(Signals.NEW_CANDLES, self.on_new_candles)
         self.emitter.register(Signals.ORDER_BOOK_UPDATE, self.on_order_book_update)
         self.emitter.register(Signals.VIEWPORT_RESIZED, self.on_viewport_resize)
+        self.emitter.register(Signals.TRADE_STAT_UPDATE, self.on_trade_stat_update)
 
         
         with dpg.child_window(menubar=True):
@@ -108,10 +103,12 @@ class Chart:
                             dpg.fit_axis_data(xaxis)
                             
                 with dpg.group(width=300, tag='order_book_group'):  # This group will contain the order book plot
-                    dpg.add_slider_int(label="Levels", default_value=100, min_value=5, max_value=50000, callback=lambda s, a, u: self.set_ob_levels(a))
-                    with dpg.plot(label="Volume Chart", no_title=True, height=-1):
+                    dpg.add_checkbox(label="Aggregate", callback=self.toggle_aggregated_order_book)
+                    # Tick slider needs to be tailored to symbol precision
+                    dpg.add_slider_int(label="Levels", default_value=100, min_value=5, max_value=1000, callback=lambda s, a, u: self.set_ob_levels(a))
+                    with dpg.plot(label="Orderbook", no_title=True, height=-1):
                             dpg.add_plot_legend()
-                            self.x_axis_tag = dpg.add_plot_axis(dpg.mvXAxis)
+                            self.ob_xaxis = dpg.add_plot_axis(dpg.mvXAxis)
                             with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.ob_yaxis:
                                 # Ensure data is populated before adding series
                                 self.bids_tag = dpg.add_line_series(
@@ -121,6 +118,10 @@ class Chart:
                                     [], []
                                 )
                             dpg.fit_axis_data(xaxis)
+                            
+    def toggle_aggregated_order_book(self):
+        self.aggregated_order_book = not self.aggregated_order_book
+                            
     def set_ob_levels(self, levels):
         self.ob_levels = levels
                         
@@ -136,6 +137,7 @@ class Chart:
             # TODO: Add 'exchange' parameter to 'stream_trades'
             coro=self.data.stream_trades(
                 symbols=[symbol], 
+                track_stats=True
             )
         )
         
@@ -234,39 +236,26 @@ class Chart:
         )
 
     def on_order_book_update(self, exchange, orderbook):
+        bids_df, ask_df, price_column = self.data.agg.on_order_book_update(exchange, orderbook, self.tick_size, self.aggregated_order_book)
+        self.update_order_book(bids_df, ask_df, price_column)
+    
+    def update_order_book(self, bids_df, asks_df, price_column):
+        dpg.configure_item(self.bids_tag, x=bids_df[price_column].tolist(), y=bids_df['cumulative_quantity'].tolist())
+        dpg.configure_item(self.asks_tag, x=asks_df[price_column].tolist(), y=asks_df['cumulative_quantity'].tolist())
         
-        # Extract bids and asks
-        bids = orderbook['bids']
-        asks = orderbook['asks']
-
-        # Create DataFrames
-        bids_df = pd.DataFrame(bids, columns=['price', 'quantity'])
-        asks_df = pd.DataFrame(asks, columns=['price', 'quantity'])
-        
-        # Sorting by price
-        bids_df = bids_df.sort_values(by='price', ascending=False).head(self.ob_levels)
-        asks_df = asks_df.sort_values(by='price', ascending=True).head(self.ob_levels)
-
-        # Calculate cumulative quantity
-        bids_df['cumulative_quantity'] = bids_df['quantity'].cumsum()
-        asks_df['cumulative_quantity'] = asks_df['quantity'].cumsum()
-
         # Find the midpoint
-        worst_bid_price = bids_df['price'].min()
-        worst_ask_price = asks_df['price'].max()
-        
+        worst_bid_price = bids_df[price_column].min()
+        worst_ask_price = asks_df[price_column].max()
         worst_bid_size = bids_df['cumulative_quantity'].min()
         worst_ask_size = asks_df['cumulative_quantity'].max()
 
-        # Update the series data
-        dpg.configure_item(self.bids_tag, x=bids_df['price'].tolist(), y=bids_df['cumulative_quantity'].tolist())
-        dpg.configure_item(self.asks_tag, x=asks_df['price'].tolist(), y=asks_df['cumulative_quantity'].tolist())
-
-        # Update the x-axis limits to center the midpoint
-        dpg.set_axis_limits(axis=self.x_axis_tag, ymin=worst_bid_price, ymax=worst_ask_price)
+        # Update the x-axis limits
+        dpg.set_axis_limits(axis=self.ob_xaxis, ymin=worst_bid_price, ymax=worst_ask_price)
         dpg.set_axis_limits(axis=self.ob_yaxis, ymin=worst_bid_size, ymax=worst_ask_size)
-
         
+    def on_trade_stat_update(self, symbol, stats):
+        pass
+
     def on_viewport_resize(self, width, height):
         # Calculate new width for the charts and order book based on viewport size
         charts_width = width * 0.7

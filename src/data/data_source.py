@@ -16,11 +16,8 @@ from typing import Dict, List
 class Data(CCXTInterface):
     def __init__(self, influx: InfluxDB, emitter: SignalEmitter, exchanges: List[str] = None):
         super().__init__(influx, exchanges)
-        self.emitter = emitter
         self.agg = MarketAggregator(influx, emitter)
-        
-        self.price_precision = 10
-        self.volume_threshold = 0.0
+        self.emitter = emitter
 
     async def stream_trades(
         self, symbols: List[str], 
@@ -56,12 +53,15 @@ class Data(CCXTInterface):
                     )
                     if trades:
                         self.emitter.emit(Signals.NEW_TRADE, exchange=exchange_id, trade_data=trades[0])
+                    
+                    if track_stats:
+                        symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
+                        # self.agg.report_statistics() # print to console
+                        self.emitter.emit(Signals.TRADE_STAT_UPDATE, symbol=symbol, stats=stats)
 
-                    # symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
-                    # self.agg.report_statistics()
-
-                    # await self.influx.write_trades(exchange_id, trades)
-                    # await self.influx.write_stats(exchange_id, stats, symbol)
+                    if write_stats and write_trades:
+                        await self.influx.write_trades(exchange_id, trades)
+                        await self.influx.write_stats(exchange_id, stats, symbol)
                 except Exception as e:
                     logging.error(e)
 

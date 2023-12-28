@@ -10,6 +10,7 @@ class Signals(Enum):
     ORDER_BOOK_UPDATE = auto()
     SELECT_EXCHANGE = auto()
     STREAM_SYMBOL = auto()
+    TRADE_STAT_UPDATE = auto()
     VIEWPORT_RESIZED = auto()
 
 
