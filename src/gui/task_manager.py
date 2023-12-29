@@ -16,7 +16,7 @@ class TaskManager:
         self.loop.run_forever()
 
     def start_task(self, name: str, coro):
-        logging.info(f"Starrting new task {name}")
+        logging.info(f"Starting new task {name}")
         task = asyncio.run_coroutine_threadsafe(coro, self.loop)
         self.tasks[name] = task
         task.add_done_callback(lambda t: self.tasks.pop(name, None))

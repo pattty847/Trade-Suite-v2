@@ -49,14 +49,14 @@ class Chart:
                     dpg.add_text('Symbols')
                     dpg.add_listbox(
                         items=self.data.exchange_list[self.exchange]['symbols'], 
-                        callback=lambda sender, symbol, user_data: self.emitter.emit(Signals.SYMBOL_CHANGED, symbol=symbol),
+                        callback=lambda sender, symbol, user_data: self.emitter.emit(Signals.SYMBOL_CHANGED, new_symbol=symbol),
                         num_items=8
                     )
                     
                     dpg.add_text('Timeframe')
                     dpg.add_listbox(
                         items=self.data.exchange_list[self.exchange]['timeframes'],
-                        callback=lambda sender, timeframe, user_data: self.emitter.emit(Signals.TIMEFRAME_CHANGED, timeframe_str=timeframe),
+                        callback=lambda sender, timeframe, user_data: self.emitter.emit(Signals.TIMEFRAME_CHANGED, new_timeframe=timeframe),
                         num_items=5
                     )
                     
@@ -119,53 +119,55 @@ class Chart:
     
     # This needs to be abstracted more
     # The TaskManager is async loop running in thread as daemon, needed for non-blocking UI
-    def start_stream(self, symbol, timeframe):
-        
-        # TODO: Stop only the trade stream
-        if self.task_manager.tasks:
-            self.task_manager.stop_all_tasks()
+    def start_stream(self, symbol, timeframe, cant_resample: bool):
+
+        if cant_resample:
+            if f"trades_{symbol}" in self.task_manager.tasks:
+                self.task_manager.stop_task(f"trades_{symbol}")
 
         # We need to fetch the candles (wait for them), this emits 'Signals.NEW_CANDLES', func 'on_new_candles' should set them    
         self.task_manager.run_task_until_complete(self.data.fetch_candles([self.exchange], [symbol], [timeframe], write_to_db=False))
         
-        # We start the stream (ticks), this emits 'Signals.NEW_TRADE', func 'on_new_trade' handles building of candles
-        self.task_manager.start_task(
-            f'trades_{symbol}', 
-            # TODO: Add 'exchange' parameter to 'stream_trades'
-            coro=self.data.stream_trades(
-                symbols=[symbol], 
-                track_stats=True
+        if f"trades_{symbol}" not in self.task_manager.tasks:
+            # We start the stream (ticks), this emits 'Signals.NEW_TRADE', func 'on_new_trade' handles building of candles
+            self.task_manager.start_task(
+                f'trades_{symbol}', 
+                # TODO: Add 'exchange' parameter to 'stream_trades'
+                coro=self.data.stream_trades(
+                    symbols=[symbol], 
+                    track_stats=True
+                )
             )
-        )
         
-        self.task_manager.start_task(
-            f'orderbook_{symbol}', 
-            # TODO: Add 'exchange' parameter to 'stream_trades'
-            coro=self.data.stream_order_book(
-                symbols=[symbol], 
+        if f"orderbook_{symbol}" not in self.task_manager.tasks:
+            self.task_manager.start_task(
+                f'orderbook_{symbol}', 
+                # TODO: Add 'exchange' parameter to 'stream_trades'
+                coro=self.data.stream_order_book(
+                    symbols=[symbol], 
+                )
             )
-        )
      
-    def on_symbol_change(self, symbol):
-        new_settings = {"last_symbol": symbol, "last_timeframe": self.timeframe_str}
+    def on_symbol_change(self, new_symbol: str):
+        new_settings = {"last_symbol": new_symbol, "last_timeframe": self.timeframe_str}
         self.config_manager.update_setting(self.exchange, new_settings)
         
-        self.active_symbol = symbol
-        self.start_stream(symbol, self.timeframe_str)
+        self.active_symbol = new_symbol
+        self.start_stream(new_symbol, self.timeframe_str, cant_resample=False)
         
-    def on_timeframe_change(self, timeframe_str):
-        new_settings = {"last_symbol": self.active_symbol, "last_timeframe": timeframe_str}
+    def on_timeframe_change(self, new_timeframe: str):
+        new_settings = {"last_symbol": self.active_symbol, "last_timeframe": new_timeframe}
         self.config_manager.update_setting(self.exchange, new_settings)
         
-        timeframe_in_minutes = self.str_timeframe_to_minutes(timeframe_str)
+        timeframe_in_minutes = self.str_timeframe_to_minutes(new_timeframe)
 
         # if new timeframe > old timeframe
         if timeframe_in_minutes > self.timeframe_seconds:
-            self.resample_data(timeframe_str)
+            self.resample_data(new_timeframe)
         else:
-            self.start_stream(self.active_symbol, timeframe_str)
+            self.start_stream(self.active_symbol, new_timeframe, cant_resample=True)
 
-        self.timeframe_str = timeframe_str
+        self.timeframe_str = new_timeframe
         self.timeframe_seconds = timeframe_in_minutes
 
     def str_timeframe_to_minutes(self, timeframe_str):
