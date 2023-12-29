@@ -82,6 +82,7 @@ class Data(CCXTInterface):
         """
         for exchange_id in self.exchange_list.keys():
             exchange_object = self.exchange_list[exchange_id]["ccxt"]
+            logging.info(f"Starting orderbook stream for {symbols} on {exchange_id}")
             if exchange_object.has["watchOrderBookForSymbols"]:
                 while True:
                     try:

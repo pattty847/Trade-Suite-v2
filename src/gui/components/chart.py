@@ -1,3 +1,4 @@
+import logging
 import dearpygui.dearpygui as dpg
 import pandas as pd
 from src.config import ConfigManager
@@ -120,6 +121,7 @@ class Chart:
     # The TaskManager is async loop running in thread as daemon, needed for non-blocking UI
     def start_stream(self, symbol, timeframe):
         
+        # TODO: Stop only the trade stream
         if self.task_manager.tasks:
             self.task_manager.stop_all_tasks()
 
@@ -152,7 +154,7 @@ class Chart:
         self.start_stream(symbol, self.timeframe_str)
         
     def on_timeframe_change(self, timeframe_str):
-        new_settings = {"last_symbol": self.active_symbol, "last_timeframe": self.timeframe_str}
+        new_settings = {"last_symbol": self.active_symbol, "last_timeframe": timeframe_str}
         self.config_manager.update_setting(self.exchange, new_settings)
         
         timeframe_in_minutes = self.str_timeframe_to_minutes(timeframe_str)
@@ -209,7 +211,8 @@ class Chart:
         if isinstance(candles, pd.DataFrame):
             self.ohlcv = candles
             self.update_candle_chart()
-
+            
+            
     def on_new_trade(self, exchange, trade_data):
         timestamp = trade_data['timestamp'] / 1000  # Convert ms to seconds
         price = trade_data['price']
@@ -228,7 +231,9 @@ class Chart:
                 'closes': price,
                 'volumes': volume
             }
-            self.ohlcv = pd.concat([self.ohlcv, new_candle], ignore_index=True)
+            # Convert the new candle dictionary to a DataFrame before concatenating
+            new_candle_df = pd.DataFrame([new_candle])
+            self.ohlcv = pd.concat([self.ohlcv, new_candle_df], ignore_index=True)
             self.last_candle_timestamp += self.timeframe_seconds
         else:
             # Update the current candle
@@ -238,6 +243,7 @@ class Chart:
             self.ohlcv.at[self.ohlcv.index[-1], 'volumes'] += volume
 
         self.update_candle_chart()
+
 
     def update_candle_chart(self):
         # Redraw the candle stick series (assuming the dataframe has changed)
