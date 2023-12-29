@@ -3,12 +3,15 @@ import logging
 import threading
 import weakref
 
+from src.data.data_source import Data
+
 class TaskManager:
-    def __init__(self):
+    def __init__(self, data: Data):
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()
         self.tasks = {}
+        self.data = data
 
     def run_loop(self):
         logging.info(f'Starting async thread.')
@@ -20,6 +23,35 @@ class TaskManager:
         task = asyncio.run_coroutine_threadsafe(coro, self.loop)
         self.tasks[name] = task
         task.add_done_callback(lambda t: self.tasks.pop(name, None))
+        
+    def start_stream(self, exchange, symbol, timeframe, cant_resample: bool):
+
+        if cant_resample:
+            if f"trades_{symbol}" in self.tasks:
+                self.stop_task(f"trades_{symbol}")
+
+        # We need to fetch the candles (wait for them), this emits 'Signals.NEW_CANDLES', func 'on_new_candles' should set them    
+        self.run_task_until_complete(self.data.fetch_candles([exchange], [symbol], [timeframe], write_to_db=False))
+        
+        if f"trades_{symbol}" not in self.tasks:
+            # We start the stream (ticks), this emits 'Signals.NEW_TRADE', func 'on_new_trade' handles building of candles
+            self.start_task(
+                f'trades_{symbol}', 
+                # TODO: Add 'exchange' parameter to 'stream_trades'
+                coro=self.data.stream_trades(
+                    symbols=[symbol], 
+                    track_stats=True
+                )
+            )
+        
+        if f"orderbook_{symbol}" not in self.tasks:
+            self.start_task(
+                f'orderbook_{symbol}', 
+                # TODO: Add 'exchange' parameter to 'stream_trades'
+                coro=self.data.stream_order_book(
+                    symbols=[symbol], 
+                )
+            )
         
     def run_task_until_complete(self, coro):
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)

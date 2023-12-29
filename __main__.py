@@ -1,8 +1,8 @@
 import logging
 
 import dotenv
-from src.config import ConfigManager
 
+from src.config import ConfigManager
 from src.data.data_source import Data
 from src.data.influx import InfluxDB
 from src.gui.signals import SignalEmitter

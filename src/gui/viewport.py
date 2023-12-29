@@ -15,7 +15,7 @@ class Viewport:
         self.data = data
         self.config_manager = config_manager
     
-        self.task_manager = TaskManager()
+        self.task_manager = TaskManager(self.data)
         self.program = Program(self.emitter, self.data, self.task_manager, self.config_manager)
         
     def __enter__(self):

@@ -194,3 +194,30 @@ class MarketAggregator:
 
         # Update the series data
         return bids_df, asks_df, price_column
+    
+    
+    def resample_data(self, timeframe_str):
+        temp_ohlcv = self.ohlcv.copy()
+        temp_ohlcv['dates'] = pd.to_datetime(temp_ohlcv['dates'], unit='s')
+        temp_ohlcv.set_index('dates', inplace=True)
+
+        if timeframe_str.endswith('m'):
+            timeframe_str = timeframe_str.replace('m', 'T')
+        resampled_ohlcv = self.perform_resampling(temp_ohlcv, timeframe_str)
+
+        self.ohlcv = resampled_ohlcv
+        self.update_candle_chart()
+
+
+    def perform_resampling(self, data, timeframe):
+        # Perform the actual resampling
+        resampled_ohlcv = data.resample(timeframe).agg({
+            'opens': 'first',
+            'highs': 'max',
+            'lows': 'min',
+            'closes': 'last',
+            'volumes': 'sum'
+        }).dropna().reset_index()
+
+        resampled_ohlcv['dates'] = resampled_ohlcv['dates'].view('int64') // 1e9
+        return resampled_ohlcv.reset_index(drop=True)

@@ -51,6 +51,9 @@ class Program:
         self.config_manager = config_manager
         
         self.last_exchange = self.config_manager.get_setting('last_exchange')
+        self.exchange_settings = self.config_manager.get_setting(self.last_exchange)
+        self.last_symbol = self.exchange_settings['last_symbol'] if self.exchange_settings else None
+        self.last_timeframe = self.exchange_settings['last_timeframe'] if self.exchange_settings else None
         
         self.emitter.register(Signals.CREATE_CHART, callback=self.create_chart)
         
@@ -58,6 +61,8 @@ class Program:
         with dpg.window(tag=self.tag, menubar=True):
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
             self.create_chart(self.last_exchange)
+            if self.last_exchange:
+                self.chart.task_manager.start_stream(self.last_exchange, self.last_symbol, self.last_timeframe, False)
             
     def create_chart(self, exchange):
         if self.last_exchange != exchange and dpg.does_alias_exist(self.last_exchange):
