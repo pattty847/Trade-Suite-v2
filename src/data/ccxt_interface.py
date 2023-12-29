@@ -1,11 +1,11 @@
 import asyncio
 import json
+import logging
 import os
+from typing import List
+
 import ccxt
 import ccxt.pro as ccxtpro
-import logging
-
-from typing import List
 
 from src.data.influx import InfluxDB
 
@@ -19,6 +19,7 @@ class CCXTInterface:
         self.exchanges = exchanges
         self.exchange_list = None
         self.influx = influx
+
 
     async def load_exchanges(self):
         supported_exchanges = {}
@@ -56,6 +57,7 @@ class CCXTInterface:
             except Exception as e:
                 logging.error(f"Unexpected error with {exchange_id}: {e}")
         self.exchange_list = supported_exchanges
+
 
     async def close_all_exchanges(self):
         async def close_exchange(exchange_id):

@@ -1,16 +1,14 @@
 import asyncio
-from collections import defaultdict
-import json
 import logging
+from typing import Dict, List
+
 import ccxt
 import pandas as pd
 
-
-from src.gui.signals import SignalEmitter, Signals
 from src.analysis.market_aggregator import MarketAggregator
 from src.data.ccxt_interface import CCXTInterface
 from src.data.influx import InfluxDB
-from typing import Dict, List
+from src.gui.signals import SignalEmitter, Signals
 
 
 class Data(CCXTInterface):
@@ -64,6 +62,7 @@ class Data(CCXTInterface):
                         await self.influx.write_stats(exchange_id, stats, symbol)
                 except Exception as e:
                     logging.error(e)
+
 
     async def stream_order_book(self, symbols: List[str]):
         """

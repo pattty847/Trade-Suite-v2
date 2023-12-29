@@ -1,12 +1,15 @@
 import asyncio
+
 import dearpygui.dearpygui as dpg
 import dearpygui.demo as demo
+from src.config import ConfigManager
 
 from src.data.data_source import Data
 from src.gui import tags
 from src.gui.components.chart import Chart
-from src.gui.signals import Signals, SignalEmitter
+from src.gui.signals import SignalEmitter, Signals
 from src.gui.task_manager import TaskManager
+
 
 class MenuBar:
     def __init__(self, emitter: SignalEmitter, data: Data, task_manger: TaskManager) -> None:
@@ -40,18 +43,25 @@ class Program:
     This is the MainWindow class which contains the set up of other windows, the navigation bar, etc.
     """
 
-    def __init__(self, emitter: SignalEmitter, data: Data, task_manager: TaskManager) -> None:
+    def __init__(self, emitter: SignalEmitter, data: Data, task_manager: TaskManager, config_manager: ConfigManager) -> None:
         self.tag = tags.PRIMARY_WINDOW
         self.emitter = emitter
         self.data = data
         self.task_manager = task_manager
+        self.config_manager = config_manager
         
-        self.emitter.register(Signals.CREATE_CHART, callback=self.on_create_chart)
+        self.last_exchange = self.config_manager.get_setting('last_exchange')
+        
+        self.emitter.register(Signals.CREATE_CHART, callback=self.create_chart)
         
     def initialize(self):
         with dpg.window(tag=self.tag, menubar=True):
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
-            # self.chart: Chart = Chart(self.emitter, self.data, self.task_manager)
+            self.create_chart(self.last_exchange)
             
-    def on_create_chart(self, exchange):
-        self.chart: Chart = Chart(exchange, self.emitter, self.data, self.task_manager)
+    def create_chart(self, exchange):
+        if self.last_exchange != exchange and dpg.does_alias_exist(self.last_exchange):
+            dpg.delete_item(self.last_exchange)
+            
+        self.last_exchange = exchange
+        self.chart: Chart = Chart(exchange, self.emitter, self.data, self.task_manager, self.config_manager)

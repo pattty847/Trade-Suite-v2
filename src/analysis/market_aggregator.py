@@ -1,11 +1,9 @@
-import pandas as pd
-import dearpygui.dearpygui as dpg
+from collections import defaultdict
+from typing import List
 
-from collections import defaultdict
-from typing import List
+import pandas as pd
 from tabulate import tabulate
-from collections import defaultdict
-from typing import List
+
 from src.data.influx import InfluxDB
 from src.gui.signals import SignalEmitter
 
@@ -22,6 +20,7 @@ class MarketAggregator:
             "10m-100m",
         ]
         self.influx = influx
+
 
     def calc_trade_stats(self, exchange: str, trades: List[str]) -> None:
         """
@@ -111,6 +110,7 @@ class MarketAggregator:
         except Exception as e:
             print(f"Error processing trade data: {e}")
 
+
     def get_order_size_category_(self, order_cost):
         if order_cost < 1e4:
             return "0-10k"
@@ -122,6 +122,7 @@ class MarketAggregator:
             return "1m-10m"
         elif order_cost < 1e8:
             return "10m-100m"
+
 
     def report_statistics(self):
         header = [
@@ -161,10 +162,12 @@ class MarketAggregator:
         print(tabulate(rows, headers=header, tablefmt="grid"))
         # print(self.trade_stats)
 
+
     def group_and_aggregate(self, orders, tick_size):
         df = pd.DataFrame(orders, columns=['price', 'quantity'])
         df['price_group'] = (df['price'] // tick_size) * tick_size
         return df.groupby('price_group').agg({'quantity': 'sum'}).reset_index()
+
 
     def on_order_book_update(self, exchange, orderbook, tick_size, aggregate, ob_levels):
 

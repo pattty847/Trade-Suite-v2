@@ -1,5 +1,7 @@
 import logging
+
 import dotenv
+from src.config import ConfigManager
 
 from src.data.data_source import Data
 from src.data.influx import InfluxDB
@@ -17,7 +19,8 @@ if __name__ == "__main__":
     emitter = SignalEmitter()
     influx = InfluxDB()
     data = Data(influx, emitter, exchanges)
+    config_manager = ConfigManager()
     
     # EZ START LETS GO
-    with Viewport(data=data, emitter=emitter) as viewport:
+    with Viewport(data=data, emitter=emitter, config_manager=config_manager) as viewport:
         pass

@@ -1,19 +1,22 @@
 import logging
+
 import dearpygui.dearpygui as dpg
+from src.config import ConfigManager
 
 from src.data.data_source import Data
-from src.gui.signals import SignalEmitter, Signals
 from src.gui.program import Program
+from src.gui.signals import SignalEmitter, Signals
 from src.gui.task_manager import TaskManager
 
 
 class Viewport:
-    def __init__(self, emitter: SignalEmitter, data: Data) -> None:
+    def __init__(self, emitter: SignalEmitter, data: Data, config_manager: ConfigManager) -> None:
         self.emitter = emitter
         self.data = data
+        self.config_manager = config_manager
     
         self.task_manager = TaskManager()
-        self.program = Program(self.emitter, self.data, self.task_manager)
+        self.program = Program(self.emitter, self.data, self.task_manager, self.config_manager)
         
     def __enter__(self):
         # Load the ccxt exchanges, symbols, and timeframes to the Data class
@@ -60,6 +63,7 @@ class Viewport:
         logging.info(f'Frame #1: Setting up the Program classes and subclasses.')
         
         # MAIN PROGRAM/WINDOW CLASS INITIALIZATION
+        # Adds the primary window to the viewport
         self.program.initialize()
         dpg.set_primary_window(self.program.tag, True)
         
@@ -70,10 +74,19 @@ class Viewport:
         ))
         
     def __exit__(self, exc_type, exc_val, exc_tb):
+        logging.info('Trying to shutdown...')
         if exc_type:
             logging.error(
                 "An exception occurred: ", exc_info=(exc_type, exc_val, exc_tb)
             )
+        
+        logging.info('Updating settings...')
+        
+        self.config_manager.update_setting('last_exchange', self.program.last_exchange)
+        
+        logging.info('Done.')
+        
+            
         self.task_manager.run_task_until_complete(self.data.close_all_exchanges())
         self.task_manager.stop_all_tasks()
         dpg.destroy_context()
