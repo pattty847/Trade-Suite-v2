@@ -2,8 +2,8 @@ import asyncio
 
 import dearpygui.dearpygui as dpg
 import dearpygui.demo as demo
-from src.config import ConfigManager
 
+from src.config import ConfigManager
 from src.data.data_source import Data
 from src.gui import tags
 from src.gui.components.chart import Chart
@@ -30,10 +30,7 @@ class MenuBar:
                     dpg.add_menu_item(label="Show Font Manager", callback=lambda:dpg.show_tool(dpg.mvTool_Font))
                     dpg.add_menu_item(label="Show Item Registry", callback=lambda:dpg.show_tool(dpg.mvTool_ItemRegistry))
 
-                with dpg.menu(label="Settings"):
-                    dpg.add_menu_item(label="Wait For Input", check=True, callback=lambda s, a: dpg.configure_app(wait_for_input=a))
-                    dpg.add_menu_item(label="Toggle Fullscreen", callback=lambda:dpg.toggle_viewport_fullscreen())
-                
+
             with dpg.menu(label="Exchanges"):
                 dpg.add_listbox(list(self.data.exchange_list.keys()), callback=lambda s, a, u: self.emitter.emit(Signals.CREATE_CHART, exchange=a))
 

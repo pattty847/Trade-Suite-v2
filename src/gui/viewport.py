@@ -25,8 +25,31 @@ class Viewport:
         
         # Setup dearpygui
         dpg.create_context()
+        self.load_theme()
         self.setup_dpg()
         return self
+
+    def load_theme(self):
+        with dpg.theme() as global_theme:
+
+            with dpg.theme_component(dpg.mvAll):
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (13,13,13,255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (13,13,13,255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (13,13,13,255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 2, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_style(dpg.mvPlotStyleVar_MinorAlpha, 0.33, category=dpg.mvThemeCat_Plots)
+                dpg.add_theme_style(dpg.mvPlotStyleVar_PlotPadding, 0, 0, category=dpg.mvThemeCat_Plots)
+
+            with dpg.theme_component(dpg.mvInputInt):
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (13,13,13,255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (13,13,13,255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (13,13,13,255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 2, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_style(dpg.mvPlotStyleVar_MinorAlpha, 0.33, category=dpg.mvThemeCat_Plots)
+                dpg.add_theme_style(dpg.mvPlotStyleVar_PlotPadding, 0, 0, category=dpg.mvThemeCat_Plots)
+
+        dpg.bind_theme(global_theme)
+
     
     def setup_dpg(self):
         """

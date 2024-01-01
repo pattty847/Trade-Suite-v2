@@ -13,11 +13,11 @@ from src.gui.signals import SignalEmitter, Signals
 
 class Data(CCXTInterface):
     def __init__(self, influx: InfluxDB, emitter: SignalEmitter, exchanges: List[str] = None):
-        super().__init__(influx, exchanges)
+        super().__init__(exchanges)
         self.agg = MarketAggregator(influx, emitter)
         self.emitter = emitter
 
-    async def stream_trades(
+    async def watch_trades(
         self, symbols: List[str], 
         track_stats: bool = False,
         write_trades: bool = False,
@@ -64,7 +64,7 @@ class Data(CCXTInterface):
                     logging.error(e)
 
 
-    async def stream_order_book(self, symbols: List[str]):
+    async def watch_orderbook(self, symbols: List[str]):
         """
         The stream_order_book function is a coroutine that streams the order book for a given symbol.
             The function takes in two parameters:
@@ -98,13 +98,15 @@ class Data(CCXTInterface):
                         logging.error(e)
                         
 
-    async def fetch_candles(self, exchanges: List[str], symbols: List[str], timeframes: List[str], write_to_db) -> Dict[str, Dict[str, pd.DataFrame]]:
+    async def fetch_candles(self, exchanges: List[str], symbols: List[str], since: str, timeframes: List[str], write_to_db) -> Dict[str, Dict[str, pd.DataFrame]]:
         exchange_objects = {exch: self.exchange_list[exch]["ccxt"] for exch in exchanges}
         all_candles = {}
 
         for exchange_name, exchange in exchange_objects.items():
             exchange_data = self.exchange_list[exchange_name]
             all_candles.setdefault(exchange_name, {})
+            
+            since_timestamp = exchange.parse8601(since)
 
             for symbol in symbols:
                 if symbol not in exchange_data["symbols"]:
@@ -117,8 +119,20 @@ class Data(CCXTInterface):
                         continue
 
                     try:
-                        candles = await exchange.fetch_ohlcv(symbol, timeframe)
-                        df = pd.DataFrame(candles, columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+                        timeframe_duration_in_seconds = exchange.parse_timeframe(timeframe)
+                        timeframe_duration_in_ms = timeframe_duration_in_seconds * 1000
+                        now = exchange.milliseconds()
+                        fetch_since = since_timestamp
+                        all_ohlcv = []
+
+                        while fetch_since < now:
+                            ohlcv = await self.retry_fetch_ohlcv(exchange, 3, symbol, timeframe, fetch_since)
+                            if not ohlcv:
+                                break
+                            fetch_since = ohlcv[-1][0] + timeframe_duration_in_ms
+                            all_ohlcv += ohlcv
+
+                        df = pd.DataFrame(all_ohlcv, columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
                         df["dates"] /= 1000
                         key = f"{symbol}-{timeframe}"
                         all_candles[exchange_name][key] = df
@@ -127,14 +141,24 @@ class Data(CCXTInterface):
                         logging.error(f"{type(e).__name__} occurred: {e}")
 
                     if len(exchanges) == len(symbols) == len(timeframes) == 1:
-                        self.emitter.emit(Signals.NEW_CANDLES, candles=df)
-
-        self.emitter.emit(Signals.NEW_CANDLES, candles=all_candles)
+                        self.emitter.emit(Signals.NEW_CANDLES, df)
 
         if write_to_db:
             try:
                 await self.influx.write_candles(all_candles)
             except Exception as e:
                 logging.error(f"Error writing to DB: {e}")
-
+                
         return all_candles
+    
+    async def retry_fetch_ohlcv(self, exchange, max_retries, symbol, timeframe, since):
+        num_retries = 0
+        while num_retries < max_retries:
+            try:
+                ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, since)
+                return ohlcv
+            except Exception as e:
+                num_retries += 1
+                logging.error(f"Attempt {num_retries}: {e}")
+                if num_retries >= max_retries:
+                    raise Exception(f"Failed to fetch {timeframe} {symbol} OHLCV in {max_retries} attempts")

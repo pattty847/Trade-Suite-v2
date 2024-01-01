@@ -20,15 +20,14 @@ class OrderBook:
         self.create_order_book_ui()
 
     def create_order_book_ui(self):
-        with dpg.group(width=300, tag='order_book_group'):
-            dpg.add_checkbox(label="Aggregate", default_value=self.aggregated_order_book, callback=self.toggle_aggregated_order_book)
-            dpg.add_slider_int(label="Levels", default_value=self.order_book_levels, min_value=5, max_value=1000, callback=self.set_ob_levels)
-            with dpg.plot(label="Orderbook", no_title=True, height=-1):
-                dpg.add_plot_legend()
-                self.ob_xaxis = dpg.add_plot_axis(dpg.mvXAxis)
-                with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.ob_yaxis:
-                    self.bids_tag = dpg.add_line_series([], [])
-                    self.asks_tag = dpg.add_line_series([], [])
+        dpg.add_checkbox(label="Aggregate", default_value=self.aggregated_order_book, callback=self.toggle_aggregated_order_book)
+        dpg.add_slider_int(label="Levels", default_value=self.order_book_levels, min_value=5, max_value=1000, callback=self.set_ob_levels)
+        with dpg.plot(label="Orderbook", no_title=True, height=-1):
+            dpg.add_plot_legend()
+            self.ob_xaxis = dpg.add_plot_axis(dpg.mvXAxis)
+            with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.ob_yaxis:
+                self.bids_tag = dpg.add_line_series([], [])
+                self.asks_tag = dpg.add_line_series([], [])
 
     # Rest of the methods related to order book (update_order_book, set_ob_levels, etc.)
 
