@@ -5,7 +5,6 @@ import pandas as pd
 
 from src.config import ConfigManager
 from src.data.data_source import Data
-from src.gui import tags
 from src.gui.components.orderbook import OrderBook
 from src.gui.components.trading import Orders
 from src.gui.signals import SignalEmitter, Signals
@@ -14,11 +13,13 @@ from src.gui.utils import str_timeframe_to_minutes
 
 
 class Chart:
-    def __init__(self, exchange, emitter: SignalEmitter, data: Data, task_manager: TaskManager, config_manager: ConfigManager) -> None:
-        self.emitter = emitter
-        self.data = data
-        self.task_manager = task_manager
-        self.config_manager = config_manager
+    def __init__(self, parent, exchange, emitter: SignalEmitter, data: Data, task_manager: TaskManager, config_manager: ConfigManager) -> None:
+        self.tag = dpg.generate_uuid()
+        self.parent = parent # Primary Window's tag
+        self.emitter = emitter # Signal Emitter object used to register and emit information
+        self.data = data # CCXTWrapper used to fetch data for your account
+        self.task_manager = task_manager # Asyncio task wrapper running in thread
+        self.config_manager = config_manager 
         self.active_exchange = exchange
         self.exchange_settings = self.config_manager.get_setting(self.active_exchange) # else make settings
         
@@ -40,9 +41,10 @@ class Chart:
         self.active_symbol = self.exchange_settings['last_symbol'] if self.exchange_settings else None
         
         self.in_trade_mode = False
+        self.trade_mode_drag_line_tag = "trade_drag_line"
 
         # UI setup
-        with dpg.child_window(menubar=True, tag=self.active_exchange, parent=tags.PRIMARY_WINDOW):
+        with dpg.child_window(menubar=True, tag=self.tag, parent=self.parent):
             with dpg.menu_bar():
                 with dpg.menu(label=self.active_exchange.upper()):
 
@@ -67,26 +69,26 @@ class Chart:
                         dpg.add_menu_item(label="Stop All Streaming", callback=self.task_manager.stop_all_tasks)
             
                 with dpg.menu(label="Trading Actions"):
-                    dpg.add_menu_item(label="Toggle Trade Line Visibility", callback=self.place_trade_callback)
-                    dpg.add_menu_item(label="Execute Trade at Line Position", callback=self.open_order_window)
+                    dpg.add_checkbox(label="Trade Line", callback=self.toggle_drag_line)
+                    dpg.add_menu_item(label="Trade", callback=self.toggle_place_order)
 
                     # Adding a tooltip to the menu to give users more information
                     with dpg.tooltip(dpg.last_item()):
                         dpg.add_text("Use these options to manage trading on the chart.\n"
-                                    "'Toggle Trade Line Visibility' will show or hide the line where you can place your trade.\n"
-                                    "'Execute Trade at Line Position' will open the trade window at the line's current position.")
+                                    "'Trade Line' will show or hide the line where you can place your trade.\n"
+                                    "'Trade' will open the trade window at the line's price.")
 
                 
             with dpg.group(horizontal=True):  # Use horizontal grouping to align elements side by side
                 
-                with dpg.group(tag='charts_group', width=dpg.get_viewport_width() * 0.7, height=-1):  # This group will contain the charts, filling the available space
+                with dpg.group(width=dpg.get_viewport_width() * 0.7, height=-1, tag='charts_group'):  # This group will contain the charts, filling the available space
                                         
                     with dpg.subplots(rows=2, columns=1, row_ratios=[0.7, 0.3], link_all_x=True):
                         # Candlestick Chart
                         with dpg.plot(label="Candlestick Chart", height=-1) as self.candlestick_plot:
                             dpg.add_plot_legend()
                             
-                            dpg.add_drag_line(label='Order', tag="trade_drag_line", show=False, color=[255, 0, 0, 255], vertical=False)
+                            dpg.add_drag_line(label='Order', tag=self.trade_mode_drag_line_tag, show=False, color=[255, 0, 0, 255], vertical=False)
                             
                             self.candle_series_xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
                             with dpg.plot_axis(dpg.mvYAxis, label="USD") as self.candle_series_yaxis:
@@ -97,8 +99,10 @@ class Chart:
                                     list(self.ohlcv['closes']),
                                     list(self.ohlcv['lows']),
                                     list(self.ohlcv['highs']),
-                                    time_unit=dpg.mvTimeUnit_Min
+                                    time_unit=dpg.mvTimeUnit_Min,
+                                    label=f"{self.active_symbol}"
                                 )
+                                
                                 
                             
                         # Volume Chart
@@ -117,44 +121,69 @@ class Chart:
                     self.orderbook = OrderBook(self.emitter, self.data, self.config_manager)
                     # self.orders = Orders(self.emitter, self.data, self.config_manager, self.task_manager)
 
-    def place_trade_callback(self):
+    def toggle_drag_line(self):
         self.in_trade_mode = not self.in_trade_mode
         if self.in_trade_mode: 
-            dpg.configure_item('trade_drag_line', show=True, default_value=self.ohlcv['closes'].tolist()[-1])
+            dpg.configure_item(self.trade_mode_drag_line_tag, show=True, default_value=self.ohlcv['closes'].tolist()[-1])
         else: 
-            dpg.configure_item('trade_drag_line', show=False)
+            dpg.configure_item(self.trade_mode_drag_line_tag, show=False)
     
-    def open_order_window(self):
-        price = dpg.get_value('trade_drag_line')
+    def toggle_place_order(self):
+        price = dpg.get_value(self.trade_mode_drag_line_tag)
         
-        def on_close():
-            dpg.delete_item('order_window', children_only=True)
-            dpg.delete_item('order_window')
-
-        def apply_percentage(sender, app_data, user_data):
-            percentage = user_data / 100
+        def apply_percentage(profit_pct):
+            percentage = dpg.get_value(profit_pct) / 100
             take_profit_price = price * (1 + percentage)
-            dpg.set_value("profit_percentage_input", take_profit_price)
+            dpg.set_value(profit_pct, take_profit_price)
 
         if not dpg.does_item_exist("order_window"):
-            width, height = 400, 300
+            # Create the window once
+            width, height = 400, 200
             with dpg.window(
                 label="Place Order", 
                 modal=True, 
-                on_close=on_close,
+                tag="order_window",
                 width=width, height=height,
-                pos=(dpg.get_viewport_width() / 2 - width/2, dpg.get_viewport_height() / 2 - height/2)):
-                dpg.add_input_float(label="Price", default_value=price, tag="Price")
-                dpg.add_input_float(label="Stop Loss", tag="Stop Loss")
-                dpg.add_input_float(label="Take Profit", tag="profit_percentage_input")
-                dpg.add_input_int(label="Size", tag="Size")
+                pos=(dpg.get_viewport_width() / 2 - width/2, dpg.get_viewport_height() / 2 - height/2), 
+                show=False):
+                price_ = dpg.add_input_float(label="Price", default_value=price)
+                stop = dpg.add_input_float(label="Stop Loss")
+                profit_pct = dpg.add_input_float(label="Take Profit")
+                size = dpg.add_input_int(label="Size")
 
                 # Quick buttons for setting take profit percentage
                 with dpg.group(horizontal=True):
                     for percent in [2, 3, 5]:
-                        dpg.add_button(label=f"{percent}%", callback=apply_percentage, user_data=percent)
+                        dpg.add_button(label=f"{percent}%", callback=lambda: apply_percentage(profit_pct), user_data=percent)
 
-                dpg.add_button(label="Place Order")
+                order = (price_, stop, profit_pct, size)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Long", callback=self.place_order, user_data=(order, "Long"))
+                    dpg.add_button(label="Short", callback=self.place_order, user_data=(order, "Short"))
+
+        # Show or hide the window
+        if dpg.is_item_shown("order_window"):
+            dpg.hide_item("order_window")
+        else:
+            dpg.show_item("order_window")
+            
+    
+    def place_order(self, sender, app_data, user_data):
+        price, stop, profit_pct, size = [dpg.get_value(item) for item in user_data[0]]
+        side = user_data[1]
+        
+        print(price, stop, profit_pct, size, side)
+        # Set the color based on the value of 'side'
+        if side == "Short":
+            color = (255, 0, 0, 255)  # Red color for 'Short'
+        elif side == "Long":
+            color = (0, 255, 0, 255)  # Green color for 'Long'
+        else:
+            color = (255, 255, 255, 255)  # Default to white if side is neither
+
+        # Add a drag line with the specified color
+        dpg.add_drag_line(label=f"{side}|{price}", default_value=price, vertical=False, parent=self.candlestick_plot, color=color)
+
     
     def on_symbol_change(self, new_symbol: str):
         new_settings = {"last_symbol": new_symbol, "last_timeframe": self.timeframe_str}
@@ -184,6 +213,7 @@ class Chart:
         if isinstance(candles, pd.DataFrame):
             self.ohlcv = candles
             self.update_candle_chart()
+            self.update_line_series()
             dpg.fit_axis_data(self.candle_series_xaxis)
             dpg.fit_axis_data(self.candle_series_yaxis)
             dpg.fit_axis_data(self.volume_series_xaxis)
@@ -241,6 +271,10 @@ class Chart:
             x=self.ohlcv['dates'].tolist(),
             y=self.ohlcv['volumes'].tolist()
         )
+        
+    def update_line_series(self):
+        ema = self.ohlcv['closes'].ewm(span=12, adjust=False).mean()
+        dpg.add_line_series(list(self.ohlcv['dates']), list(ema), label="EMA", parent=self.candle_series_yaxis)
         
     def on_trade_stat_update(self, symbol, stats):
         pass

@@ -15,7 +15,7 @@ class OrderBook:
 
         self.aggregated_order_book = True
         self.order_book_levels = 100
-        self.tick_size = 10
+        self.tick_size = 10 # TODO: This needs to be dynamic based on the symbols precision 
 
         self.create_order_book_ui()
 

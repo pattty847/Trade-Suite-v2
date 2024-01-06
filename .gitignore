@@ -2,6 +2,7 @@ venv
 testing
 
 config.json
+fetch_candles_main.py
 
 .env
 .gitignore

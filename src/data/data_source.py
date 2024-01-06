@@ -49,6 +49,7 @@ class Data(CCXTInterface):
                     trades = await exchange_object.watchTradesForSymbols(
                         symbols
                     )
+                    
                     if trades:
                         self.emitter.emit(Signals.NEW_TRADE, exchange=exchange_id, trade_data=trades[0])
                     
@@ -98,14 +99,14 @@ class Data(CCXTInterface):
                         logging.error(e)
                         
 
-    async def fetch_candles(self, exchanges: List[str], symbols: List[str], since: str, timeframes: List[str], write_to_db) -> Dict[str, Dict[str, pd.DataFrame]]:
+    async def fetch_candles(self, exchanges: List[str], symbols: List[str], since: str, timeframes: List[str], write_to_db=False) -> Dict[str, Dict[str, pd.DataFrame]]:
         exchange_objects = {exch: self.exchange_list[exch]["ccxt"] for exch in exchanges}
         all_candles = {}
 
+        tasks = []
         for exchange_name, exchange in exchange_objects.items():
             exchange_data = self.exchange_list[exchange_name]
             all_candles.setdefault(exchange_name, {})
-            
             since_timestamp = exchange.parse8601(since)
 
             for symbol in symbols:
@@ -118,38 +119,55 @@ class Data(CCXTInterface):
                         logging.info(f"{timeframe} not found on {exchange_name}.")
                         continue
 
-                    try:
-                        timeframe_duration_in_seconds = exchange.parse_timeframe(timeframe)
-                        timeframe_duration_in_ms = timeframe_duration_in_seconds * 1000
-                        now = exchange.milliseconds()
-                        fetch_since = since_timestamp
-                        all_ohlcv = []
+                    task = asyncio.create_task(
+                        self.fetch_and_process_candles(exchange, symbol, timeframe, since_timestamp, exchange_name, all_candles)
+                    )
+                    tasks.append(task)
 
-                        while fetch_since < now:
-                            ohlcv = await self.retry_fetch_ohlcv(exchange, 3, symbol, timeframe, fetch_since)
-                            if not ohlcv:
-                                break
-                            fetch_since = ohlcv[-1][0] + timeframe_duration_in_ms
-                            all_ohlcv += ohlcv
-
-                        df = pd.DataFrame(all_ohlcv, columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
-                        df["dates"] /= 1000
-                        key = f"{symbol}-{timeframe}"
-                        all_candles[exchange_name][key] = df
-
-                    except (ccxt.NetworkError, ccxt.ExchangeError, Exception) as e:
-                        logging.error(f"{type(e).__name__} occurred: {e}")
-
-                    if len(exchanges) == len(symbols) == len(timeframes) == 1:
-                        self.emitter.emit(Signals.NEW_CANDLES, df)
+        await asyncio.gather(*tasks)
 
         if write_to_db:
             try:
                 await self.influx.write_candles(all_candles)
             except Exception as e:
                 logging.error(f"Error writing to DB: {e}")
-                
+        
+        # If we're just requesting one exchange: symbol/timeframe pair we'll emit it for Charts
+        if len(exchanges) == len(symbols) == len(timeframes) == 1 and self.emitter:
+            first_exchange = next(iter(all_candles))
+            first_symbol_timeframe_key = next(iter(all_candles[first_exchange]))
+            first_candle_df = all_candles[first_exchange][first_symbol_timeframe_key]
+
+            # Emitting the data
+            if self.emitter:
+                self.emitter.emit(Signals.NEW_CANDLES, first_candle_df)
+
         return all_candles
+
+
+    async def fetch_and_process_candles(self, exchange, symbol, timeframe, since_timestamp, exchange_name, all_candles):
+        try:
+            timeframe_duration_in_seconds = exchange.parse_timeframe(timeframe)
+            timeframe_duration_in_ms = timeframe_duration_in_seconds * 1000
+            now = exchange.milliseconds()
+            fetch_since = since_timestamp
+            all_ohlcv = []
+
+            while fetch_since < now:
+                ohlcv = await self.retry_fetch_ohlcv(exchange, 3, symbol, timeframe, fetch_since)
+                if not ohlcv:
+                    break
+                fetch_since = ohlcv[-1][0] + timeframe_duration_in_ms
+                all_ohlcv += ohlcv
+
+            df = pd.DataFrame(all_ohlcv, columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+            df["dates"] /= 1000
+            key = f"{symbol}-{timeframe}"
+            all_candles[exchange_name][key] = df
+
+        except (ccxt.NetworkError, ccxt.ExchangeError, Exception) as e:
+            logging.error(f"{type(e).__name__} occurred: {e}")
+    
     
     async def retry_fetch_ohlcv(self, exchange, max_retries, symbol, timeframe, since):
         num_retries = 0
@@ -162,3 +180,33 @@ class Data(CCXTInterface):
                 logging.error(f"Attempt {num_retries}: {e}")
                 if num_retries >= max_retries:
                     raise Exception(f"Failed to fetch {timeframe} {symbol} OHLCV in {max_retries} attempts")
+                
+    
+    async def fetch_stats_for_symbol(self, exchange, symbol):
+        try:
+            response = await exchange.publicGetProductsIdStats({'id': symbol})
+            return response
+        except Exception as e:
+            print(f"Error fetching stats for {symbol}: {e}")
+            return None
+
+    async def fetch_all_stats(self, exchange, currency: str = "USD"):
+        exchange = self.exchange_list[exchange]['ccxt']
+        symbols = self.exchange_list[exchange]['symbols']
+        
+        tasks = [
+            self.fetch_stats_for_symbol(exchange, symbol)
+            for symbol in symbols
+            if not currency or symbol.split('/')[-1] == currency
+        ]
+        results = await asyncio.gather(*tasks)
+        
+        results_ = {}
+        for stat in results:
+            for symbol in symbols:
+                results_[symbol] = stat
+        
+        return results_
+    
+    async def fetch_highest_volume(self, n: int):
+        results = self.fetch_all_stats()

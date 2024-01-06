@@ -1,11 +1,8 @@
-import asyncio
-
 import dearpygui.dearpygui as dpg
 import dearpygui.demo as demo
 
 from src.config import ConfigManager
 from src.data.data_source import Data
-from src.gui import tags
 from src.gui.components.chart import Chart
 from src.gui.signals import SignalEmitter, Signals
 from src.gui.task_manager import TaskManager
@@ -41,7 +38,7 @@ class Program:
     """
 
     def __init__(self, emitter: SignalEmitter, data: Data, task_manager: TaskManager, config_manager: ConfigManager) -> None:
-        self.tag = tags.PRIMARY_WINDOW
+        self.primary_window_tag = 'PRIMARY_WINDOW'
         self.emitter = emitter
         self.data = data
         self.task_manager = task_manager
@@ -55,7 +52,7 @@ class Program:
         self.emitter.register(Signals.CREATE_CHART, callback=self.create_chart)
         
     def initialize(self):
-        with dpg.window(tag=self.tag, menubar=True):
+        with dpg.window(tag=self.primary_window_tag, menubar=True):
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
             self.create_chart(self.last_exchange)
             if self.last_exchange:
@@ -66,4 +63,4 @@ class Program:
             dpg.delete_item(self.last_exchange)
             
         self.last_exchange = exchange
-        self.chart: Chart = Chart(exchange, self.emitter, self.data, self.task_manager, self.config_manager)
+        self.chart: Chart = Chart(self.primary_window_tag, exchange, self.emitter, self.data, self.task_manager, self.config_manager)

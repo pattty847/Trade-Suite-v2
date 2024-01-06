@@ -33,7 +33,8 @@ class MarketAggregator:
         :param exchange: str: Specify the exchange that the trade data is coming from
         :param trades: List[str]: Pass in the tick data
         :return: A tuple containing the symbol and trade_stats dictionary
-        self.trade_stats = {
+        self.trade_stats = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        = {
             ('exchange1', 'symbol1'): {
                 'category1': {
                     'metric1': 0.0,
@@ -163,12 +164,6 @@ class MarketAggregator:
         # print(self.trade_stats)
 
 
-    def group_and_aggregate(self, orders, tick_size):
-        df = pd.DataFrame(orders, columns=['price', 'quantity'])
-        df['price_group'] = (df['price'] // tick_size) * tick_size
-        return df.groupby('price_group').agg({'quantity': 'sum'}).reset_index()
-
-
     def on_order_book_update(self, exchange, orderbook, tick_size, aggregate, ob_levels):
 
         # Extract bids and asks
@@ -195,6 +190,12 @@ class MarketAggregator:
         # Update the series data
         return bids_df, asks_df, price_column
     
+
+    def group_and_aggregate(self, orders, tick_size):
+        df = pd.DataFrame(orders, columns=['price', 'quantity'])
+        df['price_group'] = (df['price'] // tick_size) * tick_size
+        return df.groupby('price_group').agg({'quantity': 'sum'}).reset_index()
+    
     
     def resample_data(self, ohlcv: pd.DataFrame, timeframe_str):
         temp_ohlcv = ohlcv.copy()
@@ -206,7 +207,7 @@ class MarketAggregator:
         resampled_ohlcv = self.perform_resampling(temp_ohlcv, timeframe_str)
 
         return resampled_ohlcv
-
+    
 
     def perform_resampling(self, data, timeframe):
         # Perform the actual resampling

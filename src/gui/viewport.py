@@ -1,8 +1,7 @@
 import logging
-
 import dearpygui.dearpygui as dpg
-from src.config import ConfigManager
 
+from src.config import ConfigManager
 from src.data.data_source import Data
 from src.gui.program import Program
 from src.gui.signals import SignalEmitter, Signals
@@ -30,6 +29,7 @@ class Viewport:
         return self
 
     def load_theme(self):
+        logging.info('Loading theme.')
         with dpg.theme() as global_theme:
 
             with dpg.theme_component(dpg.mvAll):
@@ -49,6 +49,7 @@ class Viewport:
                 dpg.add_theme_style(dpg.mvPlotStyleVar_PlotPadding, 0, 0, category=dpg.mvThemeCat_Plots)
 
         dpg.bind_theme(global_theme)
+        logging.info('Done loading theme.')
 
     
     def setup_dpg(self):
@@ -67,7 +68,7 @@ class Viewport:
         dpg.show_viewport()
         dpg.set_frame_callback(1, lambda: self.initialize_program()) # not called until after start_dearpyui() has been called
         
-        logging.info("DearPyGUI setup complete, launching event loop.")
+        logging.info("Setup complete. Launching DPG.")
         
         dpg.start_dearpygui() # main dpg event loop
     
@@ -83,12 +84,12 @@ class Viewport:
         :doc-author: Trelent
         """
         # This will initialize all UI components and register their callback
-        logging.info(f'Frame #1: Setting up the Program classes and subclasses.')
+        logging.info(f'Setting up the program classes and subclasses.')
         
         # MAIN PROGRAM/WINDOW CLASS INITIALIZATION
         # Adds the primary window to the viewport
         self.program.initialize()
-        dpg.set_primary_window(self.program.tag, True)
+        dpg.set_primary_window(self.program.primary_window_tag, True)
         
         dpg.set_viewport_resize_callback(lambda: self.emitter.emit(
             Signals.VIEWPORT_RESIZED, 

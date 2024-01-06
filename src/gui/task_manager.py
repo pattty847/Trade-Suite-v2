@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import threading
-import weakref
 
 from src.data.data_source import Data
 from src.gui.utils import calculate_since
