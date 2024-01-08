@@ -8,7 +8,7 @@ from src.gui.signals import SignalEmitter
 from src.gui.task_manager import TaskManager
 
 
-class Orders:
+class Trading:
     def __init__(self, emitter: SignalEmitter, data: Data, config: ConfigManager, task_manager: TaskManager) -> None:
         
         self.emitter = emitter
@@ -20,6 +20,8 @@ class Orders:
         self.setup_orders()
 
     def setup_orders(self):
+        orders = self.task_manager.run_task_until_complete(self.data.exchange_list['coinbasepro']['ccxt'].fetch_orders())
+        
         with dpg.window(label="Order Book", width=800, height=300):
             # Create the table and store its ID for later use
             with dpg.table(header_row=True, resizable=True) as self.order_table_id:
@@ -32,8 +34,7 @@ class Orders:
                 dpg.add_table_column(label="% Filled")
                 dpg.add_table_column(label="Total")
                 dpg.add_table_column(label="Status")
-        
-        orders = self.task_manager.run_task_until_complete(self.data.exchange_list['coinbasepro']['ccxt'].fetch_orders())
+                
         self.create_order_table(orders)
 
 
