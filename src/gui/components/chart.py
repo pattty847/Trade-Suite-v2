@@ -4,6 +4,7 @@ import dearpygui.dearpygui as dpg
 import pandas as pd
 
 from src.config import ConfigManager
+from src.data.candle_factory import CandleFactory
 from src.data.data_source import Data
 from src.gui.components.indicators import Indicators
 from src.gui.components.orderbook import OrderBook
@@ -24,6 +25,7 @@ class Chart:
         self.active_exchange = exchange
         self.exchange_settings = self.config_manager.get_setting(self.active_exchange) # else make settings
         
+        self.candle_factory = CandleFactory(self.emitter, self.task_manager, self.data, self.exchange_settings)
         self.indicators = Indicators(self.emitter, self.exchange_settings)
         self.trading = Trading(self.emitter, self.data, self.config_manager, self.task_manager)
         self.orderbook = OrderBook(self.emitter, self.data, self.config_manager)
@@ -48,7 +50,7 @@ class Chart:
         with dpg.menu_bar():
             self.setup_exchange_menu()
             self.setup_settings_menu()
-            self.trading.setup_trading_actions_menu()
+            self.trading.setup_trading_menu()
             self.indicators.setup_line_series_menu()
             self.orderbook.setup_orderbook_menu()
 
@@ -122,7 +124,8 @@ class Chart:
     def register_event_listeners(self):
         event_mappings = {
             Signals.NEW_TRADE: self.on_new_trade,
-            Signals.NEW_CANDLES: self.on_new_candles,
+            Signals.NEW_CANDLES: self.on_new_candles, # first callback emitted when application starts (requests last chart user had)
+            Signals.UPDATED_CANDLES: self.on_updated_candles,
             Signals.VIEWPORT_RESIZED: self.on_viewport_resize,
             Signals.TRADE_STAT_UPDATE: self.on_trade_stat_update,
             Signals.SYMBOL_CHANGED: self.on_symbol_change,
@@ -143,17 +146,8 @@ class Chart:
         new_settings = {"last_symbol": self.active_symbol, "last_timeframe": new_timeframe}
         self.config_manager.update_setting(self.active_exchange, new_settings)
         
-        timeframe_in_minutes = str_timeframe_to_minutes(new_timeframe)
-
-        # if new timeframe > old timeframe
-        if timeframe_in_minutes > self.timeframe_seconds:
-            self.ohlcv = self.data.agg.resample_data(self.ohlcv, new_timeframe)
-            self.update_candle_chart()
-        else:
-            self.task_manager.start_stream(self.active_exchange, self.active_symbol, new_timeframe, cant_resample=True)
-
+        self.candle_factory.resample_candle(new_timeframe, self.active_exchange, self.active_symbol)
         self.timeframe_str = new_timeframe
-        self.timeframe_seconds = timeframe_in_minutes
         
 
     def on_new_candles(self, candles):
@@ -167,34 +161,10 @@ class Chart:
             
             
     def on_new_trade(self, exchange, trade_data):
-        timestamp = trade_data['timestamp'] / 1000  # Convert ms to seconds
-        price = trade_data['price']
-        volume = trade_data['amount']
-
-        if self.last_candle_timestamp is None:
-            self.last_candle_timestamp = timestamp - (timestamp % self.timeframe_seconds)
-
-        if timestamp >= self.last_candle_timestamp + self.timeframe_seconds:
-            # Start a new candle
-            new_candle = {
-                'dates': self.last_candle_timestamp + self.timeframe_seconds,
-                'opens': price,
-                'highs': price,
-                'lows': price,
-                'closes': price,
-                'volumes': volume
-            }
-            # Convert the new candle dictionary to a DataFrame before concatenating
-            new_candle_df = pd.DataFrame([new_candle])
-            self.ohlcv = pd.concat([self.ohlcv, new_candle_df], ignore_index=True)
-            self.last_candle_timestamp += self.timeframe_seconds
-        else:
-            # Update the current candle
-            self.ohlcv.at[self.ohlcv.index[-1], 'highs'] = max(self.ohlcv.at[self.ohlcv.index[-1], 'highs'], price)
-            self.ohlcv.at[self.ohlcv.index[-1], 'lows'] = min(self.ohlcv.at[self.ohlcv.index[-1], 'lows'], price)
-            self.ohlcv.at[self.ohlcv.index[-1], 'closes'] = price
-            self.ohlcv.at[self.ohlcv.index[-1], 'volumes'] += volume
+        pass
         
+    def on_updated_candles(self, candles):
+        self.ohlcv = candles
         self.update_candle_chart()
 
 

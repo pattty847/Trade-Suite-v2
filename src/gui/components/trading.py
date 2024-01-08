@@ -38,15 +38,15 @@ class Trading:
             self.emitter.register(signal, handler)
             
     
-    def setup_trading_actions_menu(self):
-        with dpg.menu(label="Trading Actions"):
-            dpg.add_checkbox(label="Trade Line", callback=self.toggle_drag_line)
+    def setup_trading_menu(self):
+        with dpg.menu(label="Trading"):
+            dpg.add_checkbox(label="Order Line", callback=self.toggle_drag_line)
             dpg.add_menu_item(label="Trade", callback=self.toggle_place_order)
 
             # Adding a tooltip to the menu to give users more information
             with dpg.tooltip(dpg.last_item()):
                 dpg.add_text("Use these options to manage trading on the chart.\n"
-                            "'Trade Line' will show or hide the line where you can place your trade.\n"
+                            "'Order Line' will show or hide a line at which you can place your trade.\n"
                             "'Trade' will open the trade window at the line's price.")
            
             
@@ -97,6 +97,7 @@ class Trading:
                 width=width, height=height,
                 pos=(dpg.get_viewport_width() / 2 - width/2, dpg.get_viewport_height() / 2 - height/2), 
                 show=False):
+                account = dpg.add_button(label="Account", callback=lambda: print(self.task_manager.run_task_until_complete(self.data.exchange_list['coinbasepro']['ccxt'].fetch_balance())))
                 price_ = dpg.add_input_float(label="Price", default_value=price)
                 stop = dpg.add_input_float(label="Stop Loss")
                 profit_pct = dpg.add_input_float(label="Take Profit")

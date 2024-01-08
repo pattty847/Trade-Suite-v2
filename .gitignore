@@ -3,6 +3,7 @@ testing
 
 config.json
 fetch_candles_main.py
+outline.drawio
 
 .env
 .gitignore
@@ -15,4 +16,3 @@ src\analysis\__pycache__
 src\data\__pycache__
 src\ui\__pycache__
 src\ui\components\__pycache__
-src\gui\components\test_window.py

@@ -140,7 +140,7 @@ class Data(CCXTInterface):
 
             # Emitting the data
             if self.emitter:
-                self.emitter.emit(Signals.NEW_CANDLES, first_candle_df)
+                self.emitter.emit(Signals.NEW_CANDLES, candles=first_candle_df)
 
         return all_candles
 

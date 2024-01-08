@@ -14,6 +14,7 @@ class Signals(Enum):
     TIMEFRAME_CHANGED = auto()
     TRADE_STAT_UPDATE = auto()
     VIEWPORT_RESIZED = auto()
+    UPDATED_CANDLES = auto()
 
 
 class SignalEmitter:
