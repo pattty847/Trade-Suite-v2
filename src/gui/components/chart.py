@@ -24,8 +24,9 @@ class Chart:
         self.active_exchange = exchange
         self.exchange_settings = self.config_manager.get_setting(self.active_exchange) # else make settings
         
-        self.indicators = Indicators(self.emitter)
-        
+        self.indicators = Indicators(self.emitter, self.exchange_settings)
+        self.trading = Trading(self.emitter, self.data, self.config_manager, self.task_manager)
+        self.orderbook = OrderBook(self.emitter, self.data, self.config_manager)
 
         # OHLCV data structure
         self.ohlcv = pd.DataFrame(columns=['dates', 'opens', 'highs', 'lows', 'closes', 'volumes'])
@@ -47,8 +48,9 @@ class Chart:
         with dpg.menu_bar():
             self.setup_exchange_menu()
             self.setup_settings_menu()
-            self.indicators.setup_trading_actions_menu()
+            self.trading.setup_trading_actions_menu()
             self.indicators.setup_line_series_menu()
+            self.orderbook.setup_orderbook_menu()
 
     def setup_exchange_menu(self):
         with dpg.menu(label=self.active_exchange.upper()):
@@ -82,7 +84,8 @@ class Chart:
                     with dpg.plot(label="Candlestick Chart", height=-1) as self.candlestick_plot:
                         dpg.add_plot_legend()
                         
-                        dpg.add_drag_line(label='Order', tag=self.indicators.trade_mode_drag_line_tag, show=False, color=[255, 0, 0, 255], vertical=False)
+                        # Belongs to: self.candlestick_plot
+                        self.trading.trade_mode_drag_line_tag = dpg.add_drag_line(label='Order', show=False, color=[255, 0, 0, 255], vertical=False)
                         
                         self.candle_series_xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
                         with dpg.plot_axis(dpg.mvYAxis, label="USD") as self.candle_series_yaxis:
@@ -96,8 +99,8 @@ class Chart:
                                 time_unit=dpg.mvTimeUnit_Min,
                                 label=f"{self.active_symbol}"
                             )
+                            self.trading.candle_series_yaxis = self.candle_series_yaxis
                             self.indicators.candle_series_yaxis = self.candle_series_yaxis
-                            
                             
                         
                     # Volume Chart
@@ -113,8 +116,8 @@ class Chart:
             
             
             with dpg.group(width=300, tag='order_book_group'):
-                self.orderbook = OrderBook(self.emitter, self.data, self.config_manager)
-                # self.orders = Orders(self.emitter, self.data, self.config_manager, self.task_manager)
+                self.orderbook.create_order_book_ui()
+                
 
     def register_event_listeners(self):
         event_mappings = {
