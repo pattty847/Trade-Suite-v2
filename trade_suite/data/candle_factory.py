@@ -7,7 +7,8 @@ from trade_suite.gui.utils import timeframe_to_seconds
 
 
 class CandleFactory:
-    def __init__(self, emitter: SignalEmitter, task_manager: TaskManager, data: Data, exchange_settings) -> None:
+    def __init__(self, exchange, emitter: SignalEmitter, task_manager: TaskManager, data: Data, exchange_settings, ohlcv) -> None:
+        self.exchange = exchange
         self.emitter = emitter
         self.task_manager = task_manager
         self.data = data
@@ -16,7 +17,7 @@ class CandleFactory:
         self.timeframe_seconds = timeframe_to_seconds(self.timeframe_str)  # Timeframe for the candles in seconds
         self.last_candle_timestamp = None
         
-        self.ohlcv = pd.DataFrame(columns=['dates', 'opens', 'highs', 'lows', 'closes', 'volumes'])
+        self.ohlcv = ohlcv
         
         self.register_event_listeners()
         
@@ -28,8 +29,8 @@ class CandleFactory:
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
         
-    def on_new_candles(self, candles):
-        if isinstance(candles, pd.DataFrame):
+    def on_new_candles(self, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and exchange == self.exchange:
             self.ohlcv = candles
         
     def build_candle_from_stream(self, exchange, trade_data):
@@ -61,14 +62,14 @@ class CandleFactory:
             self.ohlcv.at[self.ohlcv.index[-1], 'closes'] = price
             self.ohlcv.at[self.ohlcv.index[-1], 'volumes'] += volume
         
-        self.emitter.emit(Signals.UPDATED_CANDLES, candles=self.ohlcv)
+        self.emitter.emit(Signals.UPDATED_CANDLES, exchange=exchange, candles=self.ohlcv)
         
     def resample_candle(self, new_timeframe: str, active_exchange, active_symbol):
         timeframe_in_seconds = timeframe_to_seconds(new_timeframe)
         # if new timeframe > old timeframe
         if timeframe_in_seconds > self.timeframe_seconds:
             ohlcv = self.data.agg.resample_data(self.ohlcv, new_timeframe)
-            self.emitter.emit(Signals.UPDATED_CANDLES, candles=ohlcv)
+            self.emitter.emit(Signals.UPDATED_CANDLES, exchange=active_exchange, candles=ohlcv)
             self.ohlcv = ohlcv
         else:
             self.task_manager.start_stream(active_exchange, active_symbol, new_timeframe, cant_resample=True)

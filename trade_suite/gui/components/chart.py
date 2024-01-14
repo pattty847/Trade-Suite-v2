@@ -25,13 +25,13 @@ class Chart:
         self.active_exchange = exchange
         self.exchange_settings = self.config_manager.get_setting(self.active_exchange) # else make settings
         
-        self.candle_factory = CandleFactory(self.emitter, self.task_manager, self.data, self.exchange_settings)
-        self.indicators = Indicators(self.emitter, self.exchange_settings)
-        self.trading = Trading(self.emitter, self.data, self.config_manager, self.task_manager)
-        self.orderbook = OrderBook(self.emitter, self.data, self.config_manager)
-
         # OHLCV data structure
         self.ohlcv = pd.DataFrame(columns=['dates', 'opens', 'highs', 'lows', 'closes', 'volumes'])
+        self.candle_factory = CandleFactory(self.active_exchange, self.emitter, self.task_manager, self.data, self.exchange_settings, self.ohlcv)
+        self.indicators = Indicators(self.emitter, self.exchange_settings)
+        self.trading = Trading(self.emitter, self.data, self.config_manager, self.task_manager)
+        self.orderbook = OrderBook(self.active_exchange, self.emitter, self.data, self.config_manager)
+
         # Grab timeframe saved in config file or use the second timeframe the exchange offers as 1m contains candle stick issues sometimes with dearpygui
         self.timeframe_str = self.exchange_settings['last_timeframe'] if self.exchange_settings else \
             self.data.exchange_list[self.active_exchange]['timeframes'][1]
@@ -39,8 +39,6 @@ class Chart:
         self.active_symbol = self.exchange_settings['last_symbol'] if self.exchange_settings else \
             next((symbol for symbol in self.data.exchange_list[self.active_exchange]['symbols'] if symbol in ['BTC/USD', 'BTC/USDT']), None)
         # Convert the string to numerical seconds
-        self.timeframe_seconds = timeframe_to_seconds(self.timeframe_str)
-        self.last_candle_timestamp = None
         
         
         self.setup_ui_elements()
@@ -52,7 +50,7 @@ class Chart:
 
 
     def setup_ui_elements(self):
-        with dpg.tab(label=self.active_exchange.upper(), parent=self.parent):
+        with dpg.tab(label=self.active_exchange.upper(), parent=self.parent) as self.tab:
             with dpg.child_window(menubar=True, tag=self.tag):
                 self.setup_menus()
                 self.setup_candlestick_chart()
@@ -70,14 +68,14 @@ class Chart:
             dpg.add_text('Symbols')
             dpg.add_listbox(
                 items=self.data.exchange_list[self.active_exchange]['symbols'], 
-                callback=lambda sender, symbol, user_data: self.emitter.emit(Signals.SYMBOL_CHANGED, new_symbol=symbol),
+                callback=lambda sender, symbol, user_data: self.emitter.emit(Signals.SYMBOL_CHANGED, tab=self.tab, new_symbol=symbol),
                 num_items=8
             )
             
             dpg.add_text('Timeframe')
             dpg.add_listbox(
                 items=self.data.exchange_list[self.active_exchange]['timeframes'],
-                callback=lambda sender, timeframe, user_data: self.emitter.emit(Signals.TIMEFRAME_CHANGED, new_timeframe=timeframe),
+                callback=lambda sender, timeframe, user_data: self.emitter.emit(Signals.TIMEFRAME_CHANGED, tab=self.tab, new_timeframe=timeframe),
                 num_items=5
             )
 
@@ -129,7 +127,14 @@ class Chart:
             
             
             with dpg.group(width=300, tag=f'{self.active_exchange}_order_book_group'):
-                self.orderbook.create_order_book_ui()
+                dpg.add_checkbox(label="Aggregate", default_value=self.orderbook.aggregated_order_book, callback=self.orderbook.toggle_aggregated_order_book)
+                dpg.add_slider_int(label="Levels", default_value=self.orderbook.order_book_levels, min_value=5, max_value=1000, callback=self.orderbook.set_ob_levels)
+                with dpg.plot(label="Orderbook", no_title=True, height=-1) as self.orderbook.orderbook_tag:
+                    dpg.add_plot_legend()
+                    self.orderbook.ob_xaxis = dpg.add_plot_axis(dpg.mvXAxis)
+                    with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.orderbook.ob_yaxis:
+                        self.orderbook.bids_tag = dpg.add_line_series([], [])
+                        self.orderbook.asks_tag = dpg.add_line_series([], [])
                 
 
     def register_event_listeners(self):
@@ -146,23 +151,25 @@ class Chart:
             self.emitter.register(signal, handler)
 
     
-    def on_symbol_change(self, new_symbol: str):
-        new_settings = {"last_symbol": new_symbol, "last_timeframe": self.timeframe_str}
-        self.config_manager.update_setting(self.active_exchange, new_settings)
+    def on_symbol_change(self, tab, new_symbol: str):
+        if tab == self.tab:
+            new_settings = {"last_symbol": new_symbol, "last_timeframe": self.timeframe_str}
+            self.config_manager.update_setting(self.active_exchange, new_settings)
+            
+            self.active_symbol = new_symbol
+            self.task_manager.start_stream(self.active_exchange, new_symbol, self.timeframe_str, cant_resample=False)
         
-        self.active_symbol = new_symbol
-        self.task_manager.start_stream(self.active_exchange, new_symbol, self.timeframe_str, cant_resample=False)
-        
-    def on_timeframe_change(self, new_timeframe: str):
-        new_settings = {"last_symbol": self.active_symbol, "last_timeframe": new_timeframe}
-        self.config_manager.update_setting(self.active_exchange, new_settings)
-        
-        self.candle_factory.resample_candle(new_timeframe, self.active_exchange, self.active_symbol)
-        self.timeframe_str = new_timeframe
+    def on_timeframe_change(self, tab, new_timeframe: str):
+        if tab == self.tab:
+            new_settings = {"last_symbol": self.active_symbol, "last_timeframe": new_timeframe}
+            self.config_manager.update_setting(self.active_exchange, new_settings)
+            
+            self.candle_factory.resample_candle(new_timeframe, self.active_exchange, self.active_symbol)
+            self.timeframe_str = new_timeframe
         
 
-    def on_new_candles(self, candles):
-        if isinstance(candles, pd.DataFrame):
+    def on_new_candles(self, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and exchange == self.active_exchange:
             self.ohlcv = candles
             self.update_candle_chart()
             dpg.fit_axis_data(self.candle_series_xaxis)
@@ -174,9 +181,10 @@ class Chart:
     def on_new_trade(self, exchange, trade_data):
         pass
         
-    def on_updated_candles(self, candles):
-        self.ohlcv = candles
-        self.update_candle_chart()
+    def on_updated_candles(self, exchange, candles):
+        if exchange == self.active_exchange:
+            self.ohlcv = candles
+            self.update_candle_chart()
 
 
     def update_candle_chart(self):

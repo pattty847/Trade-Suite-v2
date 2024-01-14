@@ -57,7 +57,7 @@ class Trading:
         self.timeframe_seconds = timeframe_in_minutes
             
             
-    def on_new_candles(self, candles):
+    def on_new_candles(self, exchange, candles):
         if isinstance(candles, pd.DataFrame):
             self.ohlcv = candles
         

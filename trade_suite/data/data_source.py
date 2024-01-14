@@ -11,13 +11,16 @@ from trade_suite.data.influx import InfluxDB
 from trade_suite.gui.signals import SignalEmitter, Signals
 
 
+# TODO: Make functions that watch one symbol at a time. Start/stop them with task manager
+
+
 class Data(CCXTInterface):
     def __init__(self, influx: InfluxDB, emitter: SignalEmitter, exchanges: List[str] = None):
         super().__init__(exchanges)
         self.agg = MarketAggregator(influx, emitter)
         self.emitter = emitter
 
-    async def watch_trades(
+    async def watch_trades_list(
         self, symbols: List[str], 
         track_stats: bool = False,
         write_trades: bool = False,
@@ -65,7 +68,52 @@ class Data(CCXTInterface):
                     logging.error(e)
 
 
-    async def watch_orderbook(self, symbols: List[str]):
+    async def watch_trades(
+        self, symbol: str, 
+        exchange: str,
+        track_stats: bool = False,
+        write_trades: bool = False,
+        write_stats: bool = False,
+    ):
+        """
+        The stream_trades function is a coroutine that streams trades from the exchanges in exchange_list.
+
+        :param self: Represent the instance of the class
+        :param symbols: List[str]: Specify which symbols to stream trades for
+        :param since: str: Get trades after a certain timestamp
+        :param limit: int: Limit the number of trades returned
+        :param params: Pass additional parameters to the exchange
+        :return: A list of dictionaries
+        :doc-author: Trelent
+        """
+        exchange_object = self.exchange_list[exchange]["ccxt"]
+        logging.info(f"Starting trade stream for {symbol} on {exchange}")
+        # TODO: Add a condition to streaming
+        while True:
+            try:
+                # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
+                # returns whatever the latest tick was for whichever coin for the exchange.
+                # list[dict_keys(['id', 'order', 'info', 'timestamp', 'datetime', 'symbol', 'type', 'takerOrMaker', 'side', 'price', 'amount', 'fee', 'cost', 'fees'])]
+                trades = await exchange_object.watch_trades(
+                    symbol
+                )
+                
+                if trades:
+                    self.emitter.emit(Signals.NEW_TRADE, exchange=exchange, trade_data=trades[0])
+                
+                if track_stats:
+                    symbol, stats = self.agg.calc_trade_stats(exchange, trades)
+                    # self.agg.report_statistics() # print to console
+                    self.emitter.emit(Signals.TRADE_STAT_UPDATE, symbol=symbol, stats=stats)
+
+                if write_stats and write_trades:
+                    await self.influx.write_trades(exchange, trades)
+                    await self.influx.write_stats(exchange, stats, symbol)
+            except Exception as e:
+                logging.error(e)
+
+
+    async def watch_orderbooks(self, symbols: List[str]):
         """
         The stream_order_book function is a coroutine that streams the order book for a given symbol.
             The function takes in two parameters:
@@ -97,7 +145,25 @@ class Data(CCXTInterface):
                         await asyncio.sleep(0.3)
                     except Exception as e:
                         logging.error(e)
-                        
+                
+    
+    async def watch_orderbook(self, exchange:str, symbol: str):
+
+        exchange_object = self.exchange_list[exchange]["ccxt"]
+        logging.info(f"Starting orderbook stream for {symbol} on {exchange}")
+        while True:
+            try:
+                orderbook = await exchange_object.watch_order_book(
+                    symbol
+                )
+                # await self.influx.write_order_book(exchange_id, orderbook)
+                # orderbook = dict_keys(['bids': [[price, amount]], 'asks': [[price, amount]], 'timestamp', 'datetime', 'nonce', 'symbol'])
+                self.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange, orderbook=orderbook)
+                
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                logging.error(e)
+            
 
     async def fetch_candles(self, exchanges: List[str], symbols: List[str], since: str, timeframes: List[str], write_to_db=False) -> Dict[str, Dict[str, pd.DataFrame]]:
         exchange_objects = {exch: self.exchange_list[exch]["ccxt"] for exch in exchanges}
@@ -140,7 +206,7 @@ class Data(CCXTInterface):
 
             # Emitting the data
             if self.emitter:
-                self.emitter.emit(Signals.NEW_CANDLES, candles=first_candle_df)
+                self.emitter.emit(Signals.NEW_CANDLES, exchange=first_exchange, candles=first_candle_df)
 
         return all_candles
 
@@ -190,6 +256,7 @@ class Data(CCXTInterface):
             print(f"Error fetching stats for {symbol}: {e}")
             return None
 
+
     async def fetch_all_stats(self, exchange, currency: str = "USD"):
         exchange = self.exchange_list[exchange]['ccxt']
         symbols = self.exchange_list[exchange]['symbols']
@@ -207,6 +274,7 @@ class Data(CCXTInterface):
                 results_[symbol] = stat
         
         return results_
+    
     
     async def fetch_highest_volume(self, n: int):
         results = self.fetch_all_stats()

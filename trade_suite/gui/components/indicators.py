@@ -49,7 +49,7 @@ class Indicators:
         if self.show_ema:
             self.recalculate_ema()            
             
-    def on_new_candles(self, candles):
+    def on_new_candles(self, exchange, candles):
         if isinstance(candles, pd.DataFrame):
             self.ohlcv = candles
             

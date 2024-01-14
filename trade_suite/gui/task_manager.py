@@ -13,6 +13,7 @@ class TaskManager:
         self.tasks = {}
         self.data = data
         self.active_symbol = None
+        self.active_symbols = []
 
     def run_loop(self):
         logging.info(f'Starting async thread.')
@@ -24,38 +25,43 @@ class TaskManager:
         task = asyncio.run_coroutine_threadsafe(coro, self.loop)
         self.tasks[name] = task
         task.add_done_callback(lambda t: self.tasks.pop(name, None))
-        
+    
+    
+    # TODO: FIX THIS BREAK IT UP
     def start_stream(self, exchange, symbol, timeframe, cant_resample: bool):
+        
+        trades_task = f"trades_{symbol}_{exchange}"
+        orderbook_task = f'orderbook_{symbol}_{exchange}'
         
         if self.active_symbol != None and self.active_symbol != symbol:
             self.stop_all_tasks()
 
         if cant_resample:
-            if f"trades_{symbol}" in self.tasks:
-                self.stop_task(f"trades_{symbol}")
+            if trades_task in self.tasks:
+                self.stop_task(trades_task)
 
 
         since = calculate_since(self.data.exchange_list[exchange]['ccxt'], timeframe, 365)
         # We need to fetch the candles (wait for them), this emits 'Signals.NEW_CANDLES', func 'on_new_candles' should set them    
         self.run_task_until_complete(self.data.fetch_candles(exchanges=[exchange], symbols=[symbol], timeframes=[timeframe], since=since, write_to_db=False))
         
-        if f"trades_{symbol}" not in self.tasks:
+        if trades_task not in self.tasks:
             # We start the stream (ticks), this emits 'Signals.NEW_TRADE', func 'on_new_trade' handles building of candles
             self.start_task(
-                f'trades_{symbol}', 
-                # TODO: Add 'exchange' parameter to 'stream_trades'
+                trades_task, 
                 coro=self.data.watch_trades(
-                    symbols=[symbol], 
+                    exchange=exchange,
+                    symbol=symbol, 
                     track_stats=True
                 )
             )
         
-        if f"orderbook_{symbol}" not in self.tasks:
+        if orderbook_task not in self.tasks:
             self.start_task(
-                f'orderbook_{symbol}', 
-                # TODO: Add 'exchange' parameter to 'stream_trades'
+                orderbook_task, 
                 coro=self.data.watch_orderbook(
-                    symbols=[symbol], 
+                    exchange=exchange,
+                    symbol=symbol, 
                 )
             )
             
