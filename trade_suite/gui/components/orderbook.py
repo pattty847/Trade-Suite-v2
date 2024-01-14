@@ -1,8 +1,8 @@
 import dearpygui.dearpygui as dpg
 
-from src.config import ConfigManager
-from src.data.data_source import Data
-from src.gui.signals import SignalEmitter, Signals
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.gui.signals import SignalEmitter, Signals
 
 
 class OrderBook:
@@ -16,7 +16,7 @@ class OrderBook:
         self.show_orderbook = True
         self.aggregated_order_book = True
         self.order_book_levels = 100
-        self.tick_size = 10 # TODO: This needs to be dynamic based on the symbols precision 
+        self.tick_size = 1 # TODO: This needs to be dynamic based on the symbols precision 
         
         self.emitter.register(Signals.ORDER_BOOK_UPDATE, self.on_order_book_update)
 

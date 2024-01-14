@@ -2,11 +2,11 @@ import logging
 
 import dotenv
 
-from src.config import ConfigManager
-from src.data.data_source import Data
-from src.data.influx import InfluxDB
-from src.gui.signals import SignalEmitter
-from src.gui.viewport import Viewport
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.data.influx import InfluxDB
+from trade_suite.gui.signals import SignalEmitter
+from trade_suite.gui.viewport import Viewport
 
 logging.basicConfig(level=logging.INFO)
 dotenv.load_dotenv()

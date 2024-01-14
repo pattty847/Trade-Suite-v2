@@ -1,9 +1,9 @@
 import pandas as pd
-from src.data.data_source import Data
+from trade_suite.data.data_source import Data
 
-from src.gui.signals import SignalEmitter, Signals
-from src.gui.task_manager import TaskManager
-from src.gui.utils import str_timeframe_to_minutes
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.utils import timeframe_to_seconds
 
 
 class CandleFactory:
@@ -13,8 +13,7 @@ class CandleFactory:
         self.data = data
         self.exchange_settings = exchange_settings
         self.timeframe_str = self.exchange_settings['last_timeframe'] if self.exchange_settings else '15m'
-        self.timeframe_seconds = str_timeframe_to_minutes(self.timeframe_str)  # Timeframe for the candles in seconds
-        print(self.timeframe_seconds, self.timeframe_str)
+        self.timeframe_seconds = timeframe_to_seconds(self.timeframe_str)  # Timeframe for the candles in seconds
         self.last_candle_timestamp = None
         
         self.ohlcv = pd.DataFrame(columns=['dates', 'opens', 'highs', 'lows', 'closes', 'volumes'])
@@ -65,12 +64,12 @@ class CandleFactory:
         self.emitter.emit(Signals.UPDATED_CANDLES, candles=self.ohlcv)
         
     def resample_candle(self, new_timeframe: str, active_exchange, active_symbol):
-        timeframe_in_minutes = str_timeframe_to_minutes(new_timeframe)
-        
+        timeframe_in_seconds = timeframe_to_seconds(new_timeframe)
         # if new timeframe > old timeframe
-        if timeframe_in_minutes > self.timeframe_seconds:
+        if timeframe_in_seconds > self.timeframe_seconds:
             ohlcv = self.data.agg.resample_data(self.ohlcv, new_timeframe)
             self.emitter.emit(Signals.UPDATED_CANDLES, candles=ohlcv)
             self.ohlcv = ohlcv
         else:
             self.task_manager.start_stream(active_exchange, active_symbol, new_timeframe, cant_resample=True)
+        self.timeframe_seconds = timeframe_in_seconds

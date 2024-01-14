@@ -5,10 +5,10 @@ from typing import Dict, List
 import ccxt
 import pandas as pd
 
-from src.analysis.market_aggregator import MarketAggregator
-from src.data.ccxt_interface import CCXTInterface
-from src.data.influx import InfluxDB
-from src.gui.signals import SignalEmitter, Signals
+from trade_suite.analysis.market_aggregator import MarketAggregator
+from trade_suite.data.ccxt_interface import CCXTInterface
+from trade_suite.data.influx import InfluxDB
+from trade_suite.gui.signals import SignalEmitter, Signals
 
 
 class Data(CCXTInterface):

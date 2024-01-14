@@ -3,15 +3,15 @@ import logging
 import dearpygui.dearpygui as dpg
 import pandas as pd
 
-from src.config import ConfigManager
-from src.data.candle_factory import CandleFactory
-from src.data.data_source import Data
-from src.gui.components.indicators import Indicators
-from src.gui.components.orderbook import OrderBook
-from src.gui.components.trading import Trading
-from src.gui.signals import SignalEmitter, Signals
-from src.gui.task_manager import TaskManager
-from src.gui.utils import str_timeframe_to_minutes
+from trade_suite.config import ConfigManager
+from trade_suite.data.candle_factory import CandleFactory
+from trade_suite.data.data_source import Data
+from trade_suite.gui.components.indicators import Indicators
+from trade_suite.gui.components.orderbook import OrderBook
+from trade_suite.gui.components.trading import Trading
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.utils import timeframe_to_seconds
 
 
 class Chart:
@@ -33,7 +33,7 @@ class Chart:
         # OHLCV data structure
         self.ohlcv = pd.DataFrame(columns=['dates', 'opens', 'highs', 'lows', 'closes', 'volumes'])
         self.timeframe_str = self.exchange_settings['last_timeframe'] if self.exchange_settings else '15m'
-        self.timeframe_seconds = str_timeframe_to_minutes(self.timeframe_str)  # Timeframe for the candles in seconds
+        self.timeframe_seconds = timeframe_to_seconds(self.timeframe_str)  # Timeframe for the candles in seconds
         self.last_candle_timestamp = None
         self.active_symbol = self.exchange_settings['last_symbol'] if self.exchange_settings else None
         
@@ -42,20 +42,21 @@ class Chart:
         self.register_event_listeners()
 
     def setup_ui_elements(self):
-        with dpg.child_window(menubar=True, tag=self.tag, parent=self.parent):
-            self.setup_menus()
-            self.setup_candlestick_chart()
+        with dpg.tab(label=self.active_exchange.upper(), parent=self.parent):
+            with dpg.child_window(menubar=True, tag=self.tag):
+                self.setup_menus()
+                self.setup_candlestick_chart()
 
     def setup_menus(self):
         with dpg.menu_bar():
             self.setup_exchange_menu()
             self.setup_settings_menu()
             self.trading.setup_trading_menu()
-            self.indicators.setup_line_series_menu()
+            self.indicators.create_indicators_menu()
             self.orderbook.setup_orderbook_menu()
 
     def setup_exchange_menu(self):
-        with dpg.menu(label=self.active_exchange.upper()):
+        with dpg.menu(label="Markets"):
             dpg.add_text('Symbols')
             dpg.add_listbox(
                 items=self.data.exchange_list[self.active_exchange]['symbols'], 
@@ -101,7 +102,7 @@ class Chart:
                                 time_unit=dpg.mvTimeUnit_Min,
                                 label=f"{self.active_symbol}"
                             )
-                            self.trading.candle_series_yaxis = self.candle_series_yaxis
+                            self.trading.candlestick_plot = self.candlestick_plot
                             self.indicators.candle_series_yaxis = self.candle_series_yaxis
                             
                         

@@ -4,8 +4,8 @@ from typing import List
 import pandas as pd
 from tabulate import tabulate
 
-from src.data.influx import InfluxDB
-from src.gui.signals import SignalEmitter
+from trade_suite.data.influx import InfluxDB
+from trade_suite.gui.signals import SignalEmitter
 
 
 class MarketAggregator:

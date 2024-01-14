@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 
-def str_timeframe_to_minutes(timeframe_str):
+def timeframe_to_seconds(timeframe_str):
     # Extracts the numerical value and unit from the timeframe string
     numeric_part = int(timeframe_str[:-1])
     unit = timeframe_str[-1]

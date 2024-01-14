@@ -1,11 +1,12 @@
 import logging
+
 import dearpygui.dearpygui as dpg
 
-from src.config import ConfigManager
-from src.data.data_source import Data
-from src.gui.program import Program
-from src.gui.signals import SignalEmitter, Signals
-from src.gui.task_manager import TaskManager
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.gui.program import Program
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
 
 
 class Viewport:

@@ -1,11 +1,11 @@
 import dearpygui.dearpygui as dpg
 import dearpygui.demo as demo
 
-from src.config import ConfigManager
-from src.data.data_source import Data
-from src.gui.components.chart import Chart
-from src.gui.signals import SignalEmitter, Signals
-from src.gui.task_manager import TaskManager
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.gui.components.chart import Chart
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
 
 
 class MenuBar:
@@ -51,16 +51,20 @@ class Program:
         
         self.emitter.register(Signals.CREATE_CHART, callback=self.create_chart)
         
+    # First function called after DearPyGUI is setup
     def initialize(self):
         with dpg.window(tag=self.primary_window_tag, menubar=True):
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
-            self.create_chart(self.last_exchange)
-            if self.last_exchange:
-                self.chart.task_manager.start_stream(self.last_exchange, self.last_symbol, self.last_timeframe, False)
+            with dpg.tab_bar() as self.tab_bar:
+                #TODO: Implement tab system for each exchange
+                # For each exchange create a chart with the last market, or BTC-USD(T) on X timeframe (from list of available)      
+                self.create_chart(self.last_exchange)
             
     def create_chart(self, exchange):
         if self.last_exchange != exchange and dpg.does_alias_exist(self.last_exchange):
             dpg.delete_item(self.last_exchange)
             
         self.last_exchange = exchange
-        self.chart: Chart = Chart(self.primary_window_tag, exchange, self.emitter, self.data, self.task_manager, self.config_manager)
+        self.chart: Chart = Chart(self.tab_bar, exchange, self.emitter, self.data, self.task_manager, self.config_manager)
+        if self.last_exchange:
+            self.chart.task_manager.start_stream(self.last_exchange, self.last_symbol, self.last_timeframe, False)

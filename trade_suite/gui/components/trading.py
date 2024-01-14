@@ -1,13 +1,14 @@
 import datetime
 import json
+
 import dearpygui.dearpygui as dpg
 import pandas as pd
 
-from src.config import ConfigManager
-from src.data.data_source import Data
-from src.gui.signals import SignalEmitter, Signals
-from src.gui.task_manager import TaskManager
-from src.gui.utils import str_timeframe_to_minutes
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.utils import timeframe_to_seconds
 
 
 class Trading:
@@ -22,7 +23,7 @@ class Trading:
         
         self.in_trade_mode = False
         self.trade_mode_drag_line_tag = False
-        self.candle_series_yaxis = None # tag to candle stick plot
+        self.candlestick_plot = None # tag to candle stick plot
 
         self.order_table_id = None  # Keep track of the order table ID
         
@@ -51,7 +52,7 @@ class Trading:
            
             
     def on_timeframe_change(self, new_timeframe: str):
-        timeframe_in_minutes = str_timeframe_to_minutes(new_timeframe)
+        timeframe_in_minutes = timeframe_to_seconds(new_timeframe)
         self.timeframe_str = new_timeframe
         self.timeframe_seconds = timeframe_in_minutes
             
@@ -134,7 +135,7 @@ class Trading:
             color = (255, 255, 255, 255)  # Default to white if side is neither
 
         # Add a drag line with the specified color
-        dpg.add_drag_line(label=f"{side}|{price}", default_value=price, vertical=False, parent=self.candle_series_yaxis, color=color)
+        dpg.add_drag_line(label=f"{side}|{price}", default_value=price, vertical=False, parent=self.candlestick_plot, color=color)
 
     def setup_orders(self):
         orders = self.task_manager.run_task_until_complete(self.data.exchange_list['coinbasepro']['ccxt'].fetch_orders())

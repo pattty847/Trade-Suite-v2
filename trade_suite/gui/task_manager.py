@@ -2,8 +2,8 @@ import asyncio
 import logging
 import threading
 
-from src.data.data_source import Data
-from src.gui.utils import calculate_since
+from trade_suite.data.data_source import Data
+from trade_suite.gui.utils import calculate_since
 
 class TaskManager:
     def __init__(self, data: Data):
