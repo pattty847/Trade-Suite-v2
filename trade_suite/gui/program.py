@@ -87,17 +87,13 @@ class Program:
     # First function called after DearPyGUI is setup
     def initialize(self):
         with dpg.window(tag=self.primary_window_tag, menubar=True):
+            
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
-            with dpg.tab_bar() as self.tab_bar:
+            
+            with dpg.tab_bar(callback= self.task_manager.set_visable_tab) as self.tab_bar:
                 # Check if last_exchange exists and is valid
-                if self.last_exchange and self.last_exchange in self.data.exchange_list:
-                    # Create a chart with the last exchange
-                    self.create_chart(self.last_exchange)
-                else:
-                    # If last_exchange is not set or not valid, prompt user to select an exchange
-                    # You might want to show a dialog, or open the exchange selection menu directly
-                    self.prompt_for_exchange_selection()
-    
+                for exchange in self.data.exchange_list:
+                    self.create_chart(exchange)
     
     def prompt_for_exchange_selection(self):
         pass

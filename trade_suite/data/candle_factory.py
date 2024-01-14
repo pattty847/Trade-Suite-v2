@@ -34,6 +34,9 @@ class CandleFactory:
             self.ohlcv = candles
         
     def build_candle_from_stream(self, exchange, trade_data):
+        if exchange != self.exchange:
+            return 
+        
         timestamp = trade_data['timestamp'] / 1000  # Convert ms to seconds
         price = trade_data['price']
         volume = trade_data['amount']
@@ -64,7 +67,7 @@ class CandleFactory:
         
         self.emitter.emit(Signals.UPDATED_CANDLES, exchange=exchange, candles=self.ohlcv)
         
-    def resample_candle(self, new_timeframe: str, active_exchange, active_symbol):
+    def resample_candle(self, new_timeframe: str, active_exchange):
         timeframe_in_seconds = timeframe_to_seconds(new_timeframe)
         # if new timeframe > old timeframe
         if timeframe_in_seconds > self.timeframe_seconds:
@@ -72,5 +75,5 @@ class CandleFactory:
             self.emitter.emit(Signals.UPDATED_CANDLES, exchange=active_exchange, candles=ohlcv)
             self.ohlcv = ohlcv
         else:
-            self.task_manager.start_stream(active_exchange, active_symbol, new_timeframe, cant_resample=True)
+            return None
         self.timeframe_seconds = timeframe_in_seconds

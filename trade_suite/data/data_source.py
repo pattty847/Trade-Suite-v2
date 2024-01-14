@@ -75,17 +75,7 @@ class Data(CCXTInterface):
         write_trades: bool = False,
         write_stats: bool = False,
     ):
-        """
-        The stream_trades function is a coroutine that streams trades from the exchanges in exchange_list.
 
-        :param self: Represent the instance of the class
-        :param symbols: List[str]: Specify which symbols to stream trades for
-        :param since: str: Get trades after a certain timestamp
-        :param limit: int: Limit the number of trades returned
-        :param params: Pass additional parameters to the exchange
-        :return: A list of dictionaries
-        :doc-author: Trelent
-        """
         exchange_object = self.exchange_list[exchange]["ccxt"]
         logging.info(f"Starting trade stream for {symbol} on {exchange}")
         # TODO: Add a condition to streaming
@@ -111,6 +101,7 @@ class Data(CCXTInterface):
                     await self.influx.write_stats(exchange, stats, symbol)
             except Exception as e:
                 logging.error(e)
+                break
 
 
     async def watch_orderbooks(self, symbols: List[str]):
@@ -206,7 +197,7 @@ class Data(CCXTInterface):
 
             # Emitting the data
             if self.emitter:
-                self.emitter.emit(Signals.NEW_CANDLES, exchange=first_exchange, candles=first_candle_df)
+                self.emitter.emit(Signals.NEW_CANDLES, exchange=exchanges[0], candles=first_candle_df)
 
         return all_candles
 
