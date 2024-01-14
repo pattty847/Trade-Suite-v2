@@ -15,12 +15,12 @@ logging.info(f'Environment variables loaded and logging setup.')
 if __name__ == "__main__":
     
     # Setup program dependencies
-    exchanges = ["coinbasepro"]
+    exchanges = ["coinbasepro", "kucoin"]
     emitter = SignalEmitter()
     influx = InfluxDB()
     data = Data(influx, emitter, exchanges)
     config_manager = ConfigManager()
     
     # EZ START LETS GO
-    with Viewport(data=data, emitter=emitter, config_manager=config_manager) as viewport:
+    with Viewport(data=data, config_manager=config_manager) as viewport:
         pass

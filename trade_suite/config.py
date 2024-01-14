@@ -8,13 +8,14 @@ class ConfigManager:
         if cls._instance is None:
             cls._instance = super(ConfigManager, cls).__new__(cls)
             cls._config_file = "config.json"
-            cls._default_config = {"last_exchange": "coinbasepro"}
+            cls._default_config = {"last_exchange": ""}
             cls._config = cls.load_config()
         return cls._instance
 
     @classmethod
     def load_config(cls):
-        if not os.path.exists(cls._config_file):
+        if not os.path.exists(cls._config_file) or os.path.getsize(cls._config_file) == 0:
+            # File does not exist or is empty. Initialize with default config.
             with open(cls._config_file, 'w') as file:
                 json.dump(cls._default_config, file)
             return cls._default_config
@@ -29,3 +30,5 @@ class ConfigManager:
         self._config[key] = value
         with open(self._config_file, 'w') as file:
             json.dump(self._config, file)
+            
+# {"last_exchange": "coinbasepro", "coinbasepro": {"last_symbol": "BTC/USD", "last_timeframe": "5m"}, "kucoin": {"last_symbol": "BTC/USDT", "last_timeframe": "1m"}}

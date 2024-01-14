@@ -32,14 +32,24 @@ class Chart:
 
         # OHLCV data structure
         self.ohlcv = pd.DataFrame(columns=['dates', 'opens', 'highs', 'lows', 'closes', 'volumes'])
-        self.timeframe_str = self.exchange_settings['last_timeframe'] if self.exchange_settings else '15m'
-        self.timeframe_seconds = timeframe_to_seconds(self.timeframe_str)  # Timeframe for the candles in seconds
+        # Grab timeframe saved in config file or use the second timeframe the exchange offers as 1m contains candle stick issues sometimes with dearpygui
+        self.timeframe_str = self.exchange_settings['last_timeframe'] if self.exchange_settings else \
+            self.data.exchange_list[self.active_exchange]['timeframes'][1]
+        # Grab last symbol saved in config or pick a bitcoin market being USD or USDT.
+        self.active_symbol = self.exchange_settings['last_symbol'] if self.exchange_settings else \
+            next((symbol for symbol in self.data.exchange_list[self.active_exchange]['symbols'] if symbol in ['BTC/USD', 'BTC/USDT']), None)
+        # Convert the string to numerical seconds
+        self.timeframe_seconds = timeframe_to_seconds(self.timeframe_str)
         self.last_candle_timestamp = None
-        self.active_symbol = self.exchange_settings['last_symbol'] if self.exchange_settings else None
         
         
         self.setup_ui_elements()
         self.register_event_listeners()
+        if self.active_exchange:
+            self.task_manager.start_stream(
+                exchange=self.active_exchange, symbol=self.active_symbol, timeframe=self.timeframe_str, cant_resample=False
+            )
+
 
     def setup_ui_elements(self):
         with dpg.tab(label=self.active_exchange.upper(), parent=self.parent):
@@ -80,7 +90,7 @@ class Chart:
     def setup_candlestick_chart(self):
         with dpg.group(horizontal=True):  # Use horizontal grouping to align elements side by side
             
-            with dpg.group(width=dpg.get_viewport_width() * 0.7, height=-1, tag='charts_group'):  # This group will contain the charts, filling the available space
+            with dpg.group(width=dpg.get_viewport_width() * 0.7, height=-1, tag=f'{self.active_exchange}_charts_group'):  # This group will contain the charts, filling the available space
                                     
                 with dpg.subplots(rows=2, columns=1, row_ratios=[0.7, 0.3], link_all_x=True):
                     # Candlestick Chart
@@ -118,7 +128,7 @@ class Chart:
                             )
             
             
-            with dpg.group(width=300, tag='order_book_group'):
+            with dpg.group(width=300, tag=f'{self.active_exchange}_order_book_group'):
                 self.orderbook.create_order_book_ui()
                 
 
@@ -196,5 +206,5 @@ class Chart:
         order_book_width = width - charts_width  # Subtract the chart width from the total to get the order book width
         
         # Update the width of the groups
-        dpg.configure_item("charts_group", width=charts_width)
-        dpg.configure_item("order_book_group", width=order_book_width)
+        dpg.configure_item(f'{self.active_exchange}_charts_group', width=charts_width)
+        dpg.configure_item(f'{self.active_exchange}_order_book_group', width=order_book_width)

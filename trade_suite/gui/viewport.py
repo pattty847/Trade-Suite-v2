@@ -10,13 +10,12 @@ from trade_suite.gui.task_manager import TaskManager
 
 
 class Viewport:
-    def __init__(self, emitter: SignalEmitter, data: Data, config_manager: ConfigManager) -> None:
-        self.emitter = emitter
+    def __init__(self, data: Data, config_manager: ConfigManager) -> None:
         self.data = data
         self.config_manager = config_manager
     
         self.task_manager = TaskManager(self.data)
-        self.program = Program(self.emitter, self.data, self.task_manager, self.config_manager)
+        self.program = Program(self.data, self.task_manager, self.config_manager)
         
     def __enter__(self):
         # Load the ccxt exchanges, symbols, and timeframes to the Data class
@@ -92,7 +91,7 @@ class Viewport:
         self.program.initialize()
         dpg.set_primary_window(self.program.primary_window_tag, True)
         
-        dpg.set_viewport_resize_callback(lambda: self.emitter.emit(
+        dpg.set_viewport_resize_callback(lambda: self.data.emitter.emit(
             Signals.VIEWPORT_RESIZED, 
             width=dpg.get_viewport_width(),
             height=dpg.get_viewport_height()
