@@ -24,7 +24,7 @@ class Viewport:
 
         # Setup dearpygui
         dpg.create_context()
-        self.load_theme()
+        # self.load_theme()
         self.setup_dpg()
         return self
 

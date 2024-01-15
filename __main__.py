@@ -15,7 +15,7 @@ logging.info(f"Environment variables loaded and logging setup.")
 if __name__ == "__main__":
     # Setup program dependencies
     # TODO: Create argparser to start program from cmd line
-    exchanges = ["coinbasepro", "kucoin"]
+    exchanges = ["coinbasepro"]
     emitter = SignalEmitter()
     influx = InfluxDB()
     data = Data(influx, emitter, exchanges)

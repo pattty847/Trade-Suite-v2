@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from typing import List
@@ -43,6 +44,7 @@ class CCXTInterface:
                 )
 
                 await exchange_class.load_markets()
+
                 if (
                     exchange_class.has["watchTrades"]
                     and exchange_class.has["fetchOHLCV"]
@@ -50,7 +52,7 @@ class CCXTInterface:
                     and exchange_class.has["watchTradesForSymbols"]
                 ):
                     supported_exchanges[exchange_id] = {
-                        "ccxt": exchange_class,
+                        "ccxt": exchange_class, # type: ccxt.Exchange
                         "symbols": sorted(list(exchange_class.markets)),
                         "timeframes": list(exchange_class.timeframes.keys()),
                     }

@@ -3,14 +3,10 @@ from typing import Callable
 
 
 class Signals(Enum):
-    CREATE_CHART = auto()
-    CREATE_CHART_FOR_SYMBOL = auto()
-    EXCHANGE_SELECTED = auto()
+    CREATE_EXCHANGE_TAB = auto()
     NEW_CANDLES = auto()
     NEW_TRADE = auto()
     ORDER_BOOK_UPDATE = auto()
-    SELECT_EXCHANGE = auto()
-    STREAM_SYMBOL = auto()
     SYMBOL_CHANGED = auto()
     TIMEFRAME_CHANGED = auto()
     TRADE_STAT_UPDATE = auto()

@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 
 import dearpygui.dearpygui as dpg
 import pandas as pd
@@ -45,6 +46,7 @@ class Trading:
         event_mappings = {
             Signals.NEW_TRADE: self.on_new_trade,
             Signals.NEW_CANDLES: self.on_new_candles,
+            Signals.UPDATED_CANDLES: self.on_updated_candles,
             Signals.TIMEFRAME_CHANGED: self.on_timeframe_change,
         }
         for signal, handler in event_mappings.items():
@@ -63,13 +65,19 @@ class Trading:
                     "'Trade' will open the trade window at the line's price."
                 )
 
-    def on_timeframe_change(self, exchange: str, new_timeframe: str):
-        if exchange == self.exchange:
+    def on_timeframe_change(self, tab, exchange: str, new_timeframe: str):
+        if tab == self.tab:
             timeframe_in_minutes = timeframe_to_seconds(new_timeframe)
             self.timeframe_str = new_timeframe
             self.timeframe_seconds = timeframe_in_minutes
 
+    # Listens for initial candles
     def on_new_candles(self, tab, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and tab == self.tab:
+            self.ohlcv = candles
+    
+    # Always listening for the updated candle stick chart
+    def on_updated_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
 
@@ -77,10 +85,6 @@ class Trading:
         timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
         price = trade_data["price"]
         volume = trade_data["amount"]
-
-        # update x
-        # update y
-        # etc...
 
     def toggle_drag_line(self):
         self.in_trade_mode = not self.in_trade_mode
@@ -92,6 +96,7 @@ class Trading:
             )
         else:
             dpg.configure_item(self.trade_mode_drag_line_tag, show=False)
+            
 
     def toggle_place_order(self):
         price = dpg.get_value(self.trade_mode_drag_line_tag)
@@ -162,6 +167,14 @@ class Trading:
     def place_order(self, sender, app_data, user_data):
         price, stop, profit_pct, size = [dpg.get_value(item) for item in user_data[0]]
         side = user_data[1]
+        
+        # TODO: Add popups maybe confirming if they want to hit the ask that far, show the order book depth perhaps too
+        if side == "Long" and price <= self.ohlcv["closes"].tolist()[-1]:
+            logging.info(f"Cannot place long above the last close")
+            return
+        elif side == "Short" and price >= self.ohlcv["closes"].tolist()[-1]:
+            logging.info(f"Cannot place short below the last close")
+            return
 
         print(price, stop, profit_pct, size, side)
         # Set the color based on the value of 'side'

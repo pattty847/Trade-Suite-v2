@@ -53,7 +53,7 @@ class MenuBar:
                 dpg.add_listbox(
                     list(self.data.exchange_list.keys()),
                     callback=lambda s, a, u: self.emitter.emit(
-                        Signals.CREATE_CHART, exchange=a
+                        Signals.CREATE_EXCHANGE_TAB, exchange=a
                     ),
                 )
 
@@ -82,7 +82,7 @@ class Program:
             self.exchange_settings["last_timeframe"] if self.exchange_settings else None
         )
 
-        self.emitter.register(Signals.CREATE_CHART, callback=self.create_chart)
+        self.emitter.register(Signals.CREATE_EXCHANGE_TAB, callback=self.create_exchange_tab)
 
     # First function called after DearPyGUI is setup
     def initialize(self):
@@ -95,18 +95,11 @@ class Program:
                 if self.data.exchange_list:
                     # Check if last_exchange exists and is valid
                     for exchange in self.data.exchange_list:
-                        self.create_chart(exchange)
+                        self.create_exchange_tab(exchange)
                     # The first tab's id needs to be set initially as the visable tab
-                    self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[
-                        1
-                    ][0]
+                    self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[1][0]
 
-    def create_chart(self, exchange):
-        # No longer need to delete as we are adding individual tabs containing the exchange
-        # if self.last_exchange != exchange and dpg.does_alias_exist(self.last_exchange):
-        #     dpg.delete_item(self.last_exchange)
-
-        self.last_exchange = exchange
+    def create_exchange_tab(self, exchange):
         self.chart: Chart = Chart(
             parent=self.tab_bar,
             exchange=exchange,

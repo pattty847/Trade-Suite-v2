@@ -1,9 +1,10 @@
+import inspect
 import dearpygui.dearpygui as dpg
 import pandas as pd
 import pandas_ta
 
 from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.utils import timeframe_to_seconds
+from trade_suite.gui.utils import center_window, timeframe_to_seconds
 
 
 class Indicators:
@@ -82,15 +83,16 @@ class Indicators:
         volume = trade_data["amount"]
 
     def create_indicators_menu(self):
-        with dpg.menu(label="Indicators"):
+        with dpg.menu(label="Indicators") as menu:
             with dpg.menu(label="Moving Averages"):
                 dpg.add_checkbox(
                     label="EMAs", default_value=self.show_ema, callback=self.toggle_ema
                 )
                 dpg.add_button(label="test", callback=lambda: print(self.line_series_ids))
 
-            self.create_test_menu()
+            self.create_test_menu(menu)
 
+    # SIMPLE TEST INDICATOR
     def toggle_ema(self, sender, app_data, user_data):
         self.show_ema = not self.show_ema
         if not self.line_series_ids:
@@ -141,8 +143,10 @@ class Indicators:
         # Ensure that the visibility matches the current toggle state
         for line_series_id in self.line_series_ids.values():
             dpg.configure_item(line_series_id, show=self.show_ema)
+            
+    # END SIMPLE EMA TEST INDICATOR
 
-    def create_test_menu(self):
+    def create_test_menu(self, menu):
         indicators = pandas_ta.Category
         with dpg.menu(label="Indicators (Testing)"):
             for category, indicators in indicators.items():
@@ -150,10 +154,22 @@ class Indicators:
                     for indicator in indicators:
                         dpg.add_checkbox(
                             label=indicator,
-                            callback=lambda s, a, u: print(s, a, indicator),
+                            callback=lambda s: self.handle_indicator_selection(s, menu)
                         )
 
+    def handle_indicator_selection(self, sender, menu):
+        dpg.configure_item(menu, show=False)
+        indicator_name = dpg.get_item_configuration(sender)['label']
+        if self.get_required_args(getattr(pandas_ta, indicator_name)):
+            # If the indicator requires additional arguments
+            self.create_argument_popup(indicator_name)
+        else:
+            # If no additional arguments required, add the indicator directly
+            self.add_indicator_to_chart(indicator_name)
+
+
     def add_indicator_to_chart(self, indicator_name, **kwargs):
+
         # Retrieve the indicator function from pandas_ta
         indicator_function = getattr(pandas_ta, indicator_name, None)
 
@@ -180,8 +196,34 @@ class Indicators:
         # Assuming 'values' is a pandas Series with the indicator results
         # This function should add the line series to the chart using the DearPyGUI API
         line_series_id = dpg.add_line_series(
-            list(self.ohlcv.index), list(values), label=label
+            list(self.ohlcv.index), list(values), label=label, parent=self.candle_series_yaxis
         )
         self.line_series_ids[
             label
         ] = line_series_id  # Store the line series ID for future reference
+        
+    
+    def get_required_args(self, func):
+        sig = inspect.signature(func)
+        return [param.name for param in sig.parameters.values() if param.default == param.empty and param.name != 'self']
+
+        
+    def create_argument_popup(self, indicator_name):
+        required_args = self.get_required_args(getattr(pandas_ta, indicator_name))
+        with dpg.window(label=f"Configure {indicator_name}", autosize=True) as popup:
+            for arg in required_args:
+                dpg.add_input_text(label=arg, tag=f"{self.tab}_{indicator_name}_{arg}")
+            dpg.add_button(label="Apply", callback=lambda: self.apply_indicator_settings(indicator_name))
+
+        # make sure the window's centered
+        dpg.render_dearpygui_frame()
+        center_window(popup)
+            
+            
+    def apply_indicator_settings(self, indicator_name):
+        args = {}
+        required_args = self.get_required_args(getattr(pandas_ta, indicator_name))
+        for arg in required_args:
+            args[arg] = dpg.get_value(f"{self.tab}_{indicator_name}_{arg}")
+        self.add_indicator_to_chart(indicator_name, **args)
+        # Save args to config file

@@ -1,3 +1,4 @@
+import json
 import dearpygui.dearpygui as dpg
 
 from trade_suite.config import ConfigManager
@@ -7,10 +8,11 @@ from trade_suite.gui.signals import SignalEmitter, Signals
 
 class OrderBook:
     def __init__(
-        self, tab, exchange, emitter: SignalEmitter, data: Data, config: ConfigManager
+        self, tab, exchange, symbol: str, emitter: SignalEmitter, data: Data, config: ConfigManager,
     ):
         self.tab = tab
         self.exchange = exchange
+        self.symbol = symbol
         self.emitter = emitter
         self.data = data
         self.config = config
@@ -18,11 +20,13 @@ class OrderBook:
         self.show_orderbook = True
         self.aggregated_order_book = False
         self.order_book_levels = 100
-        self.tick_size = (
-            1  # TODO: This needs to be dynamic based on the symbols precision
-        )
+        self.tick_size = 0
+        self.market_info = self.data.exchange_list[self.exchange]['ccxt'].market(self.symbol)
 
         self.emitter.register(Signals.ORDER_BOOK_UPDATE, self.on_order_book_update)
+        self.emitter.register(Signals.SYMBOL_CHANGED, self.on_symbol_change)
+        
+        self.update_tick_size(None, None, self.symbol)
 
     def setup_orderbook_menu(self):
         with dpg.menu(label="Orderbook"):
@@ -36,13 +40,13 @@ class OrderBook:
         self.show_orderbook = not self.show_orderbook
         if self.show_orderbook:
             dpg.configure_item(
-                f"{self.tab}_order_book_group", show=self.show_orderbook
+                self.order_book_group, show=self.show_orderbook
             )
             dpg.configure_item(
-                f"{self.tab}_charts_group", width=dpg.get_viewport_width() * 0.7
+                self.charts_group, width=dpg.get_viewport_width() * 0.7
             )
         else:
-            dpg.configure_item(f"{self.tab}_charts_group", width=-1)
+            dpg.configure_item(self.charts_group, width=-1)
 
     # Rest of the methods related to order book (update_order_book, set_ob_levels, etc.)
 
@@ -87,3 +91,21 @@ class OrderBook:
 
     def set_ob_levels(self, sender, app_data, user_data):
         self.order_book_levels = app_data
+        
+    def on_symbol_change(self, exchange, tab, new_symbol):
+        self.symbol = new_symbol
+        
+        self.market_info = self.data.exchange_list[self.exchange]['ccxt'].market(self.symbol)
+        
+        print(self.market_info)
+        
+        self.update_tick_size(exchange, tab, self.symbol)
+        
+    def update_tick_size(self, exchange, tab, new_symbol):
+        price_precision = self.market_info['precision']['price']
+        self.set_tick_size(price_precision)
+
+    def set_tick_size(self, tick_size: float):
+        # Check if its within the precision limits 
+        self.tick_size = tick_size
+        print(self.tick_size)

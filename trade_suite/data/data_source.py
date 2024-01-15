@@ -83,6 +83,21 @@ class Data(CCXTInterface):
         write_trades: bool = False,
         write_stats: bool = False,
     ):
+        """
+        The watch_trades function is a coroutine that will continuously stream trades from the exchange.
+            It will also calculate trade statistics and write them to InfluxDB if enabled.
+        
+        :param self: Represent the instance of the class
+        :param tab: str: Identify the tab that is being used
+        :param symbol: str: Specify which coin you want to watch
+        :param exchange: str: Identify which exchange the data is coming from
+        :param track_stats: bool: Determine whether or not we want to track statistics
+        :param write_trades: bool: Write the trades to influxdb
+        :param write_stats: bool: Write the statistics to a database
+        :param : Determine which tab the data is being sent to
+        :return: The following:
+        :doc-author: Trelent
+        """
         exchange_object = self.exchange_list[exchange]["ccxt"]
         logging.info(f"Starting trade stream for {symbol} on {exchange}")
         # TODO: Add a condition to streaming
@@ -113,20 +128,15 @@ class Data(CCXTInterface):
 
     async def watch_orderbooks(self, symbols: List[str]):
         """
-        The stream_order_book function is a coroutine that streams the order book for a given symbol.
-            The function takes in two parameters:
-                1) symbol - A list of symbols to stream the order book for.
-                    Example: ['BTC/USDT', 'ETH/USDT']
-                2) limit - An integer representing how many orders to return on each side of the orderbook (bids and asks).
-                    Default value is 100, but can be set as high as 1000 depending on exchange API limits.
-
-        :param self: Represent the instance of the class
-        :param symbol: List[str]: Specify the list of symbols you want to stream
-        :param limit: int: Limit the number of orders returned in the orderbook
-        :param params: Pass additional parameters to the exchange
-        :return: A dictionary with the following keys:
+        The watch_orderbooks function is a coroutine that takes in a list of symbols and returns an orderbook for each symbol on the exchange.
+        The function will continue to run until it encounters an error, at which point it will log the error and restart itself.
+        
+        :param self: Make the function a method of the class
+        :param symbols: List[str]: Specify which symbols you want to watch
+        :return: An orderbook, which is a dictionary with the following keys:
         :doc-author: Trelent
         """
+        
         for exchange_id in self.exchange_list.keys():
             exchange_object = self.exchange_list[exchange_id]["ccxt"]
             logging.info(f"Starting orderbook stream for {symbols} on {exchange_id}")
@@ -149,6 +159,21 @@ class Data(CCXTInterface):
                         logging.error(e)
 
     async def watch_orderbook(self, tab, exchange: str, symbol: str):
+        """
+        The watch_orderbook function is a coroutine that takes in the tab, exchange and symbol as parameters.
+        It then creates an exchange_object variable which is equal to the ccxt object of the given exchange.
+        Then it logs that it has started streaming orderbooks for a given symbol on a given exchange. 
+        Next, while True: (meaning forever) try: to create an orderbook variable which is equal to await 
+        the watch_orderbook function from ccxt with the parameter of symbol (which was passed into this function). 
+        Then emit Signals.ORDER_BOOK_UPDATE with parameters tab=tab,exchange
+        
+        :param self: Access the class attributes and methods
+        :param tab: Identify the tab that is being updated
+        :param exchange: str: Identify the exchange that we want to get the orderbook from
+        :param symbol: str: Specify what symbol to watch
+        :return: A dictionary with the following keys:
+        :doc-author: Trelent
+        """
         exchange_object = self.exchange_list[exchange]["ccxt"]
         logging.info(f"Starting orderbook stream for {symbol} on {exchange}")
         while True:
@@ -173,6 +198,20 @@ class Data(CCXTInterface):
         timeframes: List[str],
         write_to_db=False,
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
+        """
+        The fetch_candles function is used to fetch candles from the exchanges.
+        
+        :param self: Access the attributes and methods of the class
+        :param tab: str: Identify the tab in which the data is being requested from
+        :param exchanges: List[str]: Specify which exchanges to get data from
+        :param symbols: List[str]: Define the symbols that we want to fetch data for
+        :param since: str: Specify the start date of the candles that we want to fetch
+        :param timeframes: List[str]: Specify the timeframes to fetch candles for
+        :param write_to_db: Write the data to the database
+        :param : Determine the exchange, symbol and timeframe for which we want to fetch candles
+        :return: A dictionary of dictionaries
+        :doc-author: Trelent
+        """
         exchange_objects = {
             exch: self.exchange_list[exch]["ccxt"] for exch in exchanges
         }
@@ -214,7 +253,7 @@ class Data(CCXTInterface):
             except Exception as e:
                 logging.error(f"Error writing to DB: {e}")
 
-        # If we're just requesting one exchange: symbol/timeframe pair we'll emit it for Charts
+        # If we're just requesting one exchange: symbol/timeframe pair we'll just that one
         if len(exchanges) == len(symbols) == len(timeframes) == 1 and self.emitter:
             first_exchange = next(iter(all_candles))
             first_symbol_timeframe_key = next(iter(all_candles[first_exchange]))
@@ -225,6 +264,7 @@ class Data(CCXTInterface):
                 self.emitter.emit(
                     Signals.NEW_CANDLES, tab=tab, exchange=exchanges[0], candles=first_candle_df
                 )
+                return
 
         return all_candles
 
