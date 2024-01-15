@@ -16,7 +16,7 @@ class OrderBook:
         self.config = config
 
         self.show_orderbook = True
-        self.aggregated_order_book = True
+        self.aggregated_order_book = False
         self.order_book_levels = 100
         self.tick_size = (
             1  # TODO: This needs to be dynamic based on the symbols precision
@@ -36,13 +36,13 @@ class OrderBook:
         self.show_orderbook = not self.show_orderbook
         if self.show_orderbook:
             dpg.configure_item(
-                f"{self.exchange}_order_book_group", show=self.show_orderbook
+                f"{self.tab}_order_book_group", show=self.show_orderbook
             )
             dpg.configure_item(
-                f"{self.exchange}_charts_group", width=dpg.get_viewport_width() * 0.7
+                f"{self.tab}_charts_group", width=dpg.get_viewport_width() * 0.7
             )
         else:
-            dpg.configure_item(f"{self.exchange}_charts_group", width=-1)
+            dpg.configure_item(f"{self.tab}_charts_group", width=-1)
 
     # Rest of the methods related to order book (update_order_book, set_ob_levels, etc.)
 

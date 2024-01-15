@@ -70,7 +70,7 @@ class Indicators:
                 self.recalculate_ema()
 
     def on_new_candles(self, tab, exchange, candles):
-        if isinstance(candles, pd.DataFrame) and tab != self.tab:
+        if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
 
         if self.show_ema:
@@ -87,6 +87,7 @@ class Indicators:
                 dpg.add_checkbox(
                     label="EMAs", default_value=self.show_ema, callback=self.toggle_ema
                 )
+                dpg.add_button(label="test", callback=lambda: print(self.line_series_ids))
 
             self.create_test_menu()
 
@@ -184,6 +185,3 @@ class Indicators:
         self.line_series_ids[
             label
         ] = line_series_id  # Store the line series ID for future reference
-
-    def toggle_indicator(self, u):
-        print(u)

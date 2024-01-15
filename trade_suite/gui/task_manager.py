@@ -20,7 +20,6 @@ class TaskManager:
 
     def set_visable_tab(self, sender, app_data, user_data):
         self.visable_tab = app_data
-        print(self.visable_tab)
 
     def run_loop(self):
         logging.info(f"Starting async thread.")
@@ -34,7 +33,6 @@ class TaskManager:
         task.add_done_callback(lambda t: self.tasks.pop(name, None))
 
     def start_stream_for_chart(self, tab, exchange, symbol, timeframe):
-        print(exchange, symbol, timeframe)
         trades_task = f"trades_{symbol}_{exchange}"
         orderbook_task = f"orderbook_{symbol}_{exchange}"
 

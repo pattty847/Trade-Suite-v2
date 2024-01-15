@@ -34,7 +34,9 @@ class Chart:
         self.exchange = exchange
         self.exchange_settings = self.config_manager.get_setting(
             self.exchange
-        )  # else make settings
+        )
+        
+        # Setup after tab's created
         self.tab = None
 
         # OHLCV data structure
@@ -102,7 +104,7 @@ class Chart:
             self.trading.tab = self.tab
             self.indicators.tab = self.tab
             self.candle_factory.tab = self.tab
-            with dpg.child_window(menubar=True, tag=self.tag):
+            with dpg.child_window(menubar=True, tag=f"{self.tag}"):
                 self.setup_menus()
                 self.setup_candlestick_chart()
 
@@ -161,7 +163,7 @@ class Chart:
             with dpg.group(
                 width=dpg.get_viewport_width() * 0.7,
                 height=-1,
-                tag=f"{self.tag}_charts_group",
+                tag=f"{self.tab}_charts_group",
             ):  # This group will contain the charts, filling the available space
                 with dpg.subplots(
                     rows=2, columns=1, row_ratios=[0.7, 0.3], link_all_x=True
@@ -216,7 +218,7 @@ class Chart:
                                 list(self.ohlcv["volumes"]),
                             )
 
-            with dpg.group(width=300, tag=f"{self.tag}_order_book_group"):
+            with dpg.group(width=300, tag=f"{self.tab}_order_book_group"):
                 dpg.add_checkbox(
                     label="Aggregate",
                     default_value=self.orderbook.aggregated_order_book,
@@ -294,8 +296,8 @@ class Chart:
     def on_new_trade(self, tab, exchange, trade_data):
         pass
 
-    def on_updated_candles(self, exchange, candles):
-        if exchange == self.exchange:
+    def on_updated_candles(self, tab, exchange, candles):
+        if tab == self.tab:
             self.ohlcv = candles
             self.update_candle_chart()
 
@@ -329,5 +331,5 @@ class Chart:
         )  # Subtract the chart width from the total to get the order book width
 
         # Update the width of the groups
-        dpg.configure_item(f"{self.tag}_charts_group", width=charts_width)
-        dpg.configure_item(f"{self.tag}_order_book_group", width=order_book_width)
+        dpg.configure_item(f"{self.tab}_charts_group", width=charts_width)
+        dpg.configure_item(f"{self.tab}_order_book_group", width=order_book_width)
