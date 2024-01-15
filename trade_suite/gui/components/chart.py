@@ -35,6 +35,7 @@ class Chart:
         self.exchange_settings = self.config_manager.get_setting(
             self.exchange
         )  # else make settings
+        self.tab = None
 
         # OHLCV data structure
         self.ohlcv = pd.DataFrame(
@@ -42,6 +43,7 @@ class Chart:
         )
         self.candle_factory = CandleFactory(
             self.exchange,
+            self.tab,
             self.emitter,
             self.task_manager,
             self.data,
@@ -49,9 +51,10 @@ class Chart:
             self.ohlcv,
         )
         self.indicators = Indicators(
-            self.exchange, self.emitter, self.exchange_settings
+            self.tab, self.exchange, self.emitter, self.exchange_settings
         )
         self.trading = Trading(
+            self.tab,
             self.exchange,
             self.emitter,
             self.data,
@@ -59,7 +62,7 @@ class Chart:
             self.task_manager,
         )
         self.orderbook = OrderBook(
-            self.exchange, self.emitter, self.data, self.config_manager
+            self.tab, self.exchange, self.emitter, self.data, self.config_manager
         )
 
         # Grab timeframe saved in config file or use the second timeframe the exchange offers as 1m contains candle stick issues sometimes with dearpygui
@@ -95,6 +98,10 @@ class Chart:
 
     def setup_ui_elements(self):
         with dpg.tab(label=self.exchange.upper(), parent=self.parent) as self.tab:
+            self.orderbook.tab = self.tab
+            self.trading.tab = self.tab
+            self.indicators.tab = self.tab
+            self.candle_factory.tab = self.tab
             with dpg.child_window(menubar=True, tag=self.tag):
                 self.setup_menus()
                 self.setup_candlestick_chart()
@@ -275,8 +282,8 @@ class Chart:
                 )
             self.timeframe_str = new_timeframe
 
-    def on_new_candles(self, exchange, candles):
-        if isinstance(candles, pd.DataFrame) and exchange == self.exchange:
+    def on_new_candles(self, tab, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
             self.update_candle_chart()
             dpg.fit_axis_data(self.candle_series_xaxis)
@@ -284,7 +291,7 @@ class Chart:
             dpg.fit_axis_data(self.volume_series_xaxis)
             dpg.fit_axis_data(self.volume_series_yaxis)
 
-    def on_new_trade(self, exchange, trade_data):
+    def on_new_trade(self, tab, exchange, trade_data):
         pass
 
     def on_updated_candles(self, exchange, candles):
@@ -322,5 +329,5 @@ class Chart:
         )  # Subtract the chart width from the total to get the order book width
 
         # Update the width of the groups
-        dpg.configure_item(f"{self.exchange}_charts_group", width=charts_width)
-        dpg.configure_item(f"{self.exchange}_order_book_group", width=order_book_width)
+        dpg.configure_item(f"{self.tag}_charts_group", width=charts_width)
+        dpg.configure_item(f"{self.tag}_order_book_group", width=order_book_width)

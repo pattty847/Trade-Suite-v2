@@ -45,34 +45,35 @@ class TaskManager:
                 self.stop_task(task)
 
         self.get_candles_for_market(
-            exchange, symbol, timeframe
+            tab, exchange, symbol, timeframe
         )  # This will emit the candles to listeners
 
         self.start_task(
             trades_task,
             coro=self.data.watch_trades(
-                exchange=exchange, symbol=symbol, track_stats=True
+                tab=tab, exchange=exchange, symbol=symbol, track_stats=True
             ),
         )
 
         self.start_task(
             orderbook_task,
             coro=self.data.watch_orderbook(
+                tab=tab,
                 exchange=exchange,
                 symbol=symbol,
             ),
         )
 
         self.tabs[tab] = [trades_task, orderbook_task]
-        print(self.tabs)
 
-    def get_candles_for_market(self, exchange, symbol, timeframe):
+    def get_candles_for_market(self, tab, exchange, symbol, timeframe):
         since = calculate_since(
             self.data.exchange_list[exchange]["ccxt"], timeframe, 365
         )
         # We need to fetch the candles (wait for them), this emits 'Signals.NEW_CANDLES', func 'on_new_candles' should set them
         self.run_task_until_complete(
             self.data.fetch_candles(
+                tab=tab,
                 exchanges=[exchange],
                 symbols=[symbol],
                 timeframes=[timeframe],

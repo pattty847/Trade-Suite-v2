@@ -14,12 +14,14 @@ from trade_suite.gui.utils import timeframe_to_seconds
 class Trading:
     def __init__(
         self,
+        tab,
         exchange,
         emitter: SignalEmitter,
         data: Data,
         config: ConfigManager,
         task_manager: TaskManager,
     ) -> None:
+        self.tab = tab
         self.exchange = exchange
         self.emitter = emitter
         self.data = data
@@ -67,11 +69,11 @@ class Trading:
             self.timeframe_str = new_timeframe
             self.timeframe_seconds = timeframe_in_minutes
 
-    def on_new_candles(self, exchange, candles):
-        if isinstance(candles, pd.DataFrame) and exchange == self.exchange:
+    def on_new_candles(self, tab, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
 
-    def on_new_trade(self, exchange, trade_data):
+    def on_new_trade(self, tab, exchange, trade_data):
         timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
         price = trade_data["price"]
         volume = trade_data["amount"]

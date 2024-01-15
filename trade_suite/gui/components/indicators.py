@@ -7,7 +7,8 @@ from trade_suite.gui.utils import timeframe_to_seconds
 
 
 class Indicators:
-    def __init__(self, exchange, emitter: SignalEmitter, exchange_settings) -> None:
+    def __init__(self, tab, exchange, emitter: SignalEmitter, exchange_settings) -> None:
+        self.tab = tab
         self.exchange = exchange
         self.emitter = emitter
         self.exchange_settings = exchange_settings
@@ -59,8 +60,8 @@ class Indicators:
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
 
-    def on_timeframe_change(self, exchange, new_timeframe: str):
-        if exchange == self.exchange:
+    def on_timeframe_change(self, tab, exchange, new_timeframe: str):
+        if tab != self.tab:
             timeframe_in_minutes = timeframe_to_seconds(new_timeframe)
             self.timeframe_str = new_timeframe
             self.timeframe_seconds = timeframe_in_minutes
@@ -68,14 +69,14 @@ class Indicators:
             if self.show_ema:
                 self.recalculate_ema()
 
-    def on_new_candles(self, exchange, candles):
-        if isinstance(candles, pd.DataFrame) and exchange == self.exchange:
+    def on_new_candles(self, tab, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and tab != self.tab:
             self.ohlcv = candles
 
         if self.show_ema:
             self.recalculate_ema()
 
-    def on_new_trade(self, exchange, trade_data):
+    def on_new_trade(self, tab, exchange, trade_data):
         timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
         price = trade_data["price"]
         volume = trade_data["amount"]

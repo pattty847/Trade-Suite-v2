@@ -7,8 +7,9 @@ from trade_suite.gui.signals import SignalEmitter, Signals
 
 class OrderBook:
     def __init__(
-        self, exchange, emitter: SignalEmitter, data: Data, config: ConfigManager
+        self, tab, exchange, emitter: SignalEmitter, data: Data, config: ConfigManager
     ):
+        self.tab = tab
         self.exchange = exchange
         self.emitter = emitter
         self.data = data
@@ -45,8 +46,8 @@ class OrderBook:
 
     # Rest of the methods related to order book (update_order_book, set_ob_levels, etc.)
 
-    def on_order_book_update(self, exchange, orderbook):
-        if exchange == self.exchange:
+    def on_order_book_update(self, tab, exchange, orderbook):
+        if exchange == self.exchange and tab == self.tab:
             bids_df, ask_df, price_column = self.data.agg.on_order_book_update(
                 exchange,
                 orderbook,

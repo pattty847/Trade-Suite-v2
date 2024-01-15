@@ -10,6 +10,7 @@ class CandleFactory:
     def __init__(
         self,
         exchange,
+        tab,
         emitter: SignalEmitter,
         task_manager: TaskManager,
         data: Data,
@@ -17,6 +18,7 @@ class CandleFactory:
         ohlcv,
     ) -> None:
         self.exchange = exchange
+        self.tab = tab
         self.emitter = emitter
         self.task_manager = task_manager
         self.data = data
@@ -43,12 +45,12 @@ class CandleFactory:
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
 
-    def on_new_candles(self, exchange, candles):
-        if isinstance(candles, pd.DataFrame) and exchange == self.exchange:
+    def on_new_candles(self, tab, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
 
-    def build_candle_from_stream(self, exchange, trade_data):
-        if exchange != self.exchange:
+    def build_candle_from_stream(self, tab, exchange, trade_data):
+        if exchange != self.exchange and tab != self.tab:
             return
 
         timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds

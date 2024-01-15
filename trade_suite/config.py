@@ -34,6 +34,3 @@ class ConfigManager:
         self._config[key] = value
         with open(self._config_file, "w") as file:
             json.dump(self._config, file)
-
-
-# {"last_exchange": "coinbasepro", "coinbasepro": {"last_symbol": "BTC/USD", "last_timeframe": "5m"}, "kucoin": {"last_symbol": "BTC/USDT", "last_timeframe": "1m"}}

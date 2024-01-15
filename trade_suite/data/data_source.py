@@ -76,6 +76,7 @@ class Data(CCXTInterface):
 
     async def watch_trades(
         self,
+        tab: str,
         symbol: str,
         exchange: str,
         track_stats: bool = False,
@@ -94,7 +95,7 @@ class Data(CCXTInterface):
 
                 if trades:
                     self.emitter.emit(
-                        Signals.NEW_TRADE, exchange=exchange, trade_data=trades[0]
+                        Signals.NEW_TRADE, tab=tab, exchange=exchange, trade_data=trades[0]
                     )
 
                 if track_stats:
@@ -147,7 +148,7 @@ class Data(CCXTInterface):
                     except Exception as e:
                         logging.error(e)
 
-    async def watch_orderbook(self, exchange: str, symbol: str):
+    async def watch_orderbook(self, tab, exchange: str, symbol: str):
         exchange_object = self.exchange_list[exchange]["ccxt"]
         logging.info(f"Starting orderbook stream for {symbol} on {exchange}")
         while True:
@@ -156,7 +157,7 @@ class Data(CCXTInterface):
                 # await self.influx.write_order_book(exchange_id, orderbook)
                 # orderbook = dict_keys(['bids': [[price, amount]], 'asks': [[price, amount]], 'timestamp', 'datetime', 'nonce', 'symbol'])
                 self.emitter.emit(
-                    Signals.ORDER_BOOK_UPDATE, exchange=exchange, orderbook=orderbook
+                    Signals.ORDER_BOOK_UPDATE, tab=tab, exchange=exchange, orderbook=orderbook
                 )
 
                 await asyncio.sleep(0.3)
@@ -165,6 +166,7 @@ class Data(CCXTInterface):
 
     async def fetch_candles(
         self,
+        tab: str,
         exchanges: List[str],
         symbols: List[str],
         since: str,
@@ -221,7 +223,7 @@ class Data(CCXTInterface):
             # Emitting the data
             if self.emitter:
                 self.emitter.emit(
-                    Signals.NEW_CANDLES, exchange=exchanges[0], candles=first_candle_df
+                    Signals.NEW_CANDLES, tab=tab, exchange=exchanges[0], candles=first_candle_df
                 )
 
         return all_candles
