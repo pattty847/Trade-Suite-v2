@@ -57,8 +57,3 @@ License
 -------
 
 TradeSuite is released under the MIT License. See the `LICENSE` file for details.
-
-Contact
--------
-
-For any questions or concerns, please contact the TradeSuite team at [tradesuite@example.com](mailto:tradesuite@example.com).
