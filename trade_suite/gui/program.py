@@ -96,6 +96,15 @@ class Program:
 
     # First function called after DearPyGUI is setup
     def initialize(self):
+        """
+        The initialize function is called when the program starts.
+        It creates a window with a menu bar and tab bar.
+        The tab bar has tabs for each exchange in the data object's exchange_list attribute.
+        
+        :param self: Refer to the object that is being created
+        :return: A tuple of the tab_bar and menu_bar
+        :doc-author: Trelent
+        """
         with dpg.window(tag=self.primary_window_tag, menubar=True):
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
 
@@ -110,9 +119,18 @@ class Program:
                     self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[1][0]
 
     def create_exchange_tab(self, exchange):
-        print(exchange)
+        """
+        The create_exchange_tab function is used to create a new tab for the exchange that was selected.
+            It will check if the exchange has already been loaded, and if not it will load it.
+            Then it creates a new Chart object with all of its parameters.
+        
+        :param self: Represent the instance of the object itself
+        :param exchange: Determine which exchange to load
+        :return: The chart class, which is a widget
+        :doc-author: Trelent
+        """
         if exchange not in self.data.exchange_list:
-            self.task_manager.run_task_return_future(self.data.load_exchanges(exchange=exchange))
+            self.task_manager.run_task_with_loading_popup(self.data.load_exchanges(exchange=exchange))
             self.chart: Chart = Chart(
                 parent=self.tab_bar,
                 exchange=exchange,

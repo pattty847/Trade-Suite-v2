@@ -17,8 +17,7 @@ if __name__ == "__main__":
     # TODO: Create argparser to start program from cmd line
     
     config_manager = ConfigManager()
-    # TODO: Initialize exchange after MeuBar clicks or only saved exchanges in config file
-    exchanges = config_manager.get_setting('last_exchange') or ['']
+    exchanges = config_manager.get_setting('last_exchange') or [''] # add exchange list to initialize premptively
     emitter = SignalEmitter()
     influx = InfluxDB()
     data = Data(influx, emitter, [exchanges])
