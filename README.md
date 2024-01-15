@@ -1,59 +1,75 @@
-# The Midst of a Trading Client? Idk (worked :D)
+Certainly, I can help you enhance the structure and content of your project's README file. A well-structured README is essential for providing clear information to potential users and contributors. Below is a revised version of your README file with improvements:
 
-## TODO: LOTS
+# TradeSuite - A Multi-Exchange Cryptocurrency Trading Platform
 
-![Crpnto Dahsbrod 2024-01-14 17-54-04](https://github.com/pattty847/Trade-Suite-v2/assets/23511285/2f5e732d-87ba-4132-b66e-7dd71e643393)
+![TradeSuite Screenshot](https://github.com/pattty847/Trade-Suite-v2/assets/23511285/2f5e732d-87ba-4132-b66e-7dd71e643393)
 
-TradeSuite
-============
+## Table of Contents
+- [Introduction](#introduction)
+- [Features](#features)
+- [Getting Started](#getting-started)
+- [Implemented Features](#implemented-features)
+- [Planned Features](#planned-features)
+- [Contributing](#contributing)
+- [License](#license)
 
-*definitely lots of bugs at this time, especially on minute timeframes. use settings menu to resize candles if needed and allowed...*
+## Introduction
 
-TradeSuite is a multi-exchange cryptocurrency trading platform built using DearPyGUI and ccxt pro. This platform provides a real-time streaming interface for multiple instances of the same exchange, with features such as:
+TradeSuite is a multi-exchange cryptocurrency trading platform built using DearPyGUI and ccxt pro. It provides a real-time streaming interface for multiple instances of the same exchange, with features such as basic candlestick charting and a real-time order book with price level zoom and aggregation toggle.
 
-* Basic candle stick charting interface
-* Real-time order book with price level zoom and aggregation toggle
+## Features
 
-Getting Started
----------------
+- Basic candlestick charting interface
+- Real-time order book with price level zoom and aggregation toggle
 
-To get started with TradeSuite, clone the repository and install the required dependencies:
+## Getting Started
 
-```
-git clone https://github.com/yourusername/trade-suite.git
-cd trade-suite
-pip install -r requirements.txt
-```
+To get started with TradeSuite, follow these steps:
 
-To run the program, simply execute the `main.py` script:
+1. Clone the repository:
 
-```
-python main.py
-```
+   ```bash
+   git clone https://github.com/yourusername/trade-suite.git
+   cd trade-suite
+   ```
 
-Implemented Features
---------------------
+2. Install the required dependencies:
 
-* Basic candle stick charting interface with DearPyGUI and trading (soon to be implemented) with ccxt pro.
-* Multiple tabs (numerous instances of the same exchange)
-* All tabs streaming candle sticks, building in real-time, etc.
-* Real time order book with price level zoom and aggregation toggle
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Planned Features
----------------
+3. Run the program:
 
-* ArgParser for command line entry into program
-* Trading capabilities
-* More indicators
-* Order interface
-* Lots more...
+   ```bash
+   python main.py
+   ```
 
-Contributing
-------------
+## Implemented Features
 
-We welcome contributions to TradeSuite! If you would like to contribute, please fork the repository and submit a pull request.
+- Basic candlestick charting interface with DearPyGUI
+- Multiple tabs (numerous instances of the same exchange)
+- Real-time candlestick updates
 
-License
--------
+## Planned Features
 
-TradeSuite is released under the MIT License. See the `LICENSE` file for details.
+- ArgParser for command-line entry into the program
+- Trading capabilities
+- More technical indicators
+- Order interface
+- And much more...
+
+## Contributing
+
+We welcome contributions to TradeSuite! If you'd like to contribute, please follow these steps:
+
+1. Fork the repository on GitHub.
+2. Create a new branch from the main branch for your work.
+3. Make your changes, commit them, and push them to your fork.
+4. Submit a pull request to the main repository.
+
+Please make sure to follow our [contribution guidelines](CONTRIBUTING.md).
+
+## License
+
+TradeSuite is released under the MIT License. See the [LICENSE](LICENSE) file for details.
