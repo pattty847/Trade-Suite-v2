@@ -123,13 +123,7 @@ class Trading:
             ):
                 account = dpg.add_button(
                     label="Account",
-                    callback=lambda: print(
-                        self.task_manager.run_task_until_complete(
-                            self.data.exchange_list["coinbasepro"][
-                                "ccxt"
-                            ].fetch_balance()
-                        )
-                    ),
+                    callback=self.setup_orders
                 )
                 price_ = dpg.add_input_float(label="Price", default_value=price)
                 stop = dpg.add_input_float(label="Stop Loss")
@@ -195,13 +189,14 @@ class Trading:
         )
 
     def setup_orders(self):
-        orders = self.task_manager.run_task_until_complete(
-            self.data.exchange_list["coinbasepro"]["ccxt"].fetch_orders()
+        orders = self.task_manager.run_task_with_loading_popup(
+            self.data.exchange_list[self.exchange]["ccxt"].fetch_orders(),
+            "Loading orders..."
         )
 
         with dpg.window(label="Order Book", width=800, height=300):
             # Create the table and store its ID for later use
-            with dpg.table(header_row=True, resizable=True) as self.order_table_id:
+            with dpg.table(header_row=True, resizable=True, sortable=True) as self.order_table_id:
                 dpg.add_table_column(label="Time Placed")
                 dpg.add_table_column(label="Symbol")
                 dpg.add_table_column(label="Type")

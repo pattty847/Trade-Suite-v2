@@ -37,6 +37,7 @@ class TaskManager:
         trades_task = f"trades_{symbol}_{exchange}"
         orderbook_task = f"orderbook_{symbol}_{exchange}"
 
+        # We want to stop the old symbol's tasks for the tab when requesting a new stream
         if tab in self.tabs:
             for task in self.tabs[tab]:
                 print(f"stopping {task}")
@@ -66,10 +67,11 @@ class TaskManager:
         self.tabs[tab] = [trades_task, orderbook_task]
 
     def get_candles_for_market(self, tab, exchange, symbol, timeframe):
+        # TODO: Make number of candles variable
         since = calculate_since(
-            self.data.exchange_list[exchange]["ccxt"], timeframe, 365
+            self.data.exchange_list[exchange]["ccxt"], timeframe, num_candles=365
         )
-        # We need to fetch the candles (wait for them), this emits 'Signals.NEW_CANDLES', func 'on_new_candles' should set them
+
         self.run_task_until_complete(
             self.data.fetch_candles(
                 tab=tab,
@@ -92,7 +94,7 @@ class TaskManager:
             logging.error(f"An unexpected error occurred: {e}")
             # Handle other exceptions
         
-    def run_task_return_future(self, coro, message="Please wait..."):
+    def run_task_with_loading_popup(self, coro, message="Please wait..."):
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         # Display the loading modal
         create_loading_modal(message)

@@ -1,4 +1,4 @@
-# The Midst of a Trading Client? Idk
+# The Midst of a Trading Client? Idk (worked :D)
 
 ## TODO: LOTS
 

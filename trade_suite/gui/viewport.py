@@ -148,7 +148,7 @@ class Viewport:
 
         logging.info("Done.")
 
-        self.task_manager.run_task_until_complete(self.data.close_all_exchanges())
+        self.task_manager.run_task_with_loading_popup(self.data.close_all_exchanges(), "Closing...")
         self.task_manager.stop_all_tasks()
         dpg.destroy_context()
         logging.info("Destroyed DearPyGUI context.")
