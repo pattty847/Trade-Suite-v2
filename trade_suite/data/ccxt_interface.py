@@ -18,51 +18,59 @@ class CCXTInterface:
         self.exchanges = exchanges
         self.exchange_list = None
 
-    async def load_exchanges(self):
+    async def load_exchange(self, exchange_id: str):
         """
-        The load_exchanges function is used to initialize the exchanges that are supported by ccxt.
-            It will load all of the markets for each exchange and then check if they have certain features,
-            such as watchTrades, fetchOHLCV, watchOrderBookForSymbols and watchTradesForSymbols. If they do not have these features then it will not be added to the list of supported exchanges.
-
-        :param self: Refer to the current instance of a class
-        :return: A dict of the exchanges and their symbols
-        :doc-author: Trelent
+        Initialize a single exchange and add it to the supported exchanges list.
         """
-        supported_exchanges = {}
-        for exchange_id in self.exchanges:
-            try:
-                logging.info(f"Initializing {exchange_id}.")
-                exchange_class = getattr(ccxtpro, exchange_id)(
-                    {
-                        "apiKey": os.getenv("COINBASE_KEY"),
-                        "secret": os.getenv("COINBASE_SECRET"),
-                        "password": os.getenv("COINBASE_PASS"),
-                        "newUpdates": True,
-                    }
-                    if exchange_id == "coinbasepro"
-                    else {}
-                )
+        try:
+            logging.info(f"Initializing {exchange_id}.")
+            exchange_class = getattr(ccxtpro, exchange_id)(
+                {
+                    "apiKey": os.getenv("COINBASE_KEY"),
+                    "secret": os.getenv("COINBASE_SECRET"),
+                    "password": os.getenv("COINBASE_PASS"),
+                    "newUpdates": True,
+                }
+                if exchange_id == "coinbasepro"
+                else {}
+            )
 
-                await exchange_class.load_markets()
+            await exchange_class.load_markets()
 
-                if (
-                    exchange_class.has["watchTrades"]
-                    and exchange_class.has["fetchOHLCV"]
-                    and exchange_class.has["watchOrderBookForSymbols"]
-                    and exchange_class.has["watchTradesForSymbols"]
-                ):
-                    supported_exchanges[exchange_id] = {
-                        "ccxt": exchange_class, # type: ccxt.Exchange
-                        "symbols": sorted(list(exchange_class.markets)),
-                        "timeframes": list(exchange_class.timeframes.keys()),
-                    }
+            if (
+                exchange_class.has["watchTrades"]
+                and exchange_class.has["fetchOHLCV"]
+            ):
+                return {
+                    "ccxt": exchange_class,  # type: ccxt.Exchange
+                    "symbols": sorted(list(exchange_class.markets)),
+                    "timeframes": list(exchange_class.timeframes.keys()),
+                }
+            else:
+                logging.info(f"{exchange_id} does not support all required features.")
+                return None
+        except ccxt.NetworkError as e:
+            logging.error(f"Network error with {exchange_id}: {e}")
+        except ccxt.ExchangeError as e:
+            logging.error(f"Exchange error with {exchange_id}: {e}")
+        except Exception as e:
+            logging.error(f"Unexpected error with {exchange_id}: {e}")
+        return None
+
+    async def load_exchanges(self, exchange: str = None):
+        """
+        Initialize the exchanges that are supported by ccxt. Optionally initialize a single exchange if provided.
+        """
+        supported_exchanges = self.exchange_list if self.exchange_list else {}
+
+        exchanges_to_load = [exchange] if exchange else self.exchanges
+
+        for exchange_id in exchanges_to_load:
+            exchange_data = await self.load_exchange(exchange_id)
+            if exchange_data:
+                supported_exchanges[exchange_id] = exchange_data
                 logging.info(f"{exchange_id.capitalize()} has been initialized.")
-            except ccxt.NetworkError as e:
-                logging.error(f"Network error with {exchange_id}: {e}")
-            except ccxt.ExchangeError as e:
-                logging.error(f"Exchange error with {exchange_id}: {e}")
-            except Exception as e:
-                logging.error(f"Unexpected error with {exchange_id}: {e}")
+
         self.exchange_list = supported_exchanges
 
     async def close_all_exchanges(self):

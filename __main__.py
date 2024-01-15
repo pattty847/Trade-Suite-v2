@@ -15,11 +15,13 @@ logging.info(f"Environment variables loaded and logging setup.")
 if __name__ == "__main__":
     # Setup program dependencies
     # TODO: Create argparser to start program from cmd line
-    exchanges = ["coinbasepro"]
+    
+    config_manager = ConfigManager()
+    # TODO: Initialize exchange after MeuBar clicks or only saved exchanges in config file
+    exchanges = config_manager.get_setting('last_exchange') or ['']
     emitter = SignalEmitter()
     influx = InfluxDB()
-    data = Data(influx, emitter, exchanges)
-    config_manager = ConfigManager()
+    data = Data(influx, emitter, [exchanges])
 
     # EZ START LETS GO
     with Viewport(data=data, config_manager=config_manager) as viewport:

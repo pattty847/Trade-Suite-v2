@@ -2,8 +2,8 @@ import logging
 
 import dearpygui.dearpygui as dpg
 import pandas as pd
-
 from trade_suite.config import ConfigManager
+
 from trade_suite.data.candle_factory import CandleFactory
 from trade_suite.data.data_source import Data
 from trade_suite.gui.components.indicators import Indicators
@@ -23,33 +23,17 @@ class Chart:
     def initialize_attributes(self, parent, exchange, emitter, data, task_manager, config_manager):
         self.tag = dpg.generate_uuid()
         self.tab = None
-        self.parent = parent
-        self.emitter = emitter
-        self.data = data
-        self.task_manager = task_manager
-        self.config_manager = config_manager
-        self.exchange = exchange
-        self.exchange_settings = self.config_manager.get_setting(exchange)
-        self.initialize_ohlcv()
-        self.initialize_default_values()
-        self.initialize_components()
-
-    def initialize_ohlcv(self):
+        self.parent: str = parent
+        self.emitter: SignalEmitter = emitter
+        self.data: Data = data
+        self.task_manager: TaskManager = task_manager
+        self.config_manager: ConfigManager = config_manager
+        self.exchange: str = exchange
+        self.exchange_settings = self.config_manager.get_setting(exchange) or {}
         self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
-
-    def initialize_default_values(self):
         self.timeframe_str = self.get_default_timeframe()
         self.active_symbol = self.get_default_symbol()
-
-    def get_default_timeframe(self):
-        return self.exchange_settings.get("last_timeframe") or self.data.exchange_list[self.exchange]["timeframes"][1]
-
-    def get_default_symbol(self):
-        return self.exchange_settings.get("last_symbol") or self.get_default_bitcoin_market()
-
-    def get_default_bitcoin_market(self):
-        symbols = self.data.exchange_list[self.exchange]["symbols"]
-        return next((symbol for symbol in symbols if symbol in ["BTC/USD", "BTC/USDT"]), None)
+        self.initialize_components()
 
     def initialize_components(self):
         self.candle_factory = CandleFactory(self.exchange, self.tab, self.emitter, self.task_manager, self.data, self.exchange_settings, self.ohlcv)
@@ -302,12 +286,23 @@ class Chart:
         pass
 
     def on_viewport_resize(self, width, height):
-        # Calculate new width for the charts and order book based on viewport size
+        # Calculate new width for the charts and order book based on viewport size (works for now)
         charts_width = width * 0.7
         order_book_width = (
             width - charts_width
-        )  # Subtract the chart width from the total to get the order book width
+        )
 
         # Update the width of the groups
         dpg.configure_item(self.orderbook.charts_group, width=charts_width)
         dpg.configure_item(self.orderbook.order_book_group, width=order_book_width)
+
+
+    def get_default_timeframe(self):
+        return self.exchange_settings.get("last_timeframe") or self.data.exchange_list[self.exchange]["timeframes"][1]
+
+    def get_default_symbol(self):
+        return self.exchange_settings.get("last_symbol") or self.get_default_bitcoin_market()
+
+    def get_default_bitcoin_market(self):
+        symbols = self.data.exchange_list[self.exchange]["symbols"]
+        return next((symbol for symbol in symbols if symbol in ["BTC/USD", "BTC/USDT"]), None)

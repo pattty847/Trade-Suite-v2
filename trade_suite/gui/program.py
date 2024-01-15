@@ -1,5 +1,6 @@
 import dearpygui.dearpygui as dpg
 import dearpygui.demo as demo
+import ccxt.pro as ccxt
 
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
@@ -50,12 +51,20 @@ class MenuBar:
                     )
 
             with dpg.menu(label="Exchanges"):
-                dpg.add_listbox(
-                    list(self.data.exchange_list.keys()),
-                    callback=lambda s, a, u: self.emitter.emit(
-                        Signals.CREATE_EXCHANGE_TAB, exchange=a
-                    ),
-                )
+                with dpg.menu(label="My Exchanges"):
+                    dpg.add_listbox(
+                        list(self.data.exchange_list.keys()),
+                        callback=lambda s, a, u: self.emitter.emit(
+                            Signals.CREATE_EXCHANGE_TAB, exchange=a
+                        ),
+                    )
+                with dpg.menu(label="All Exchanges"):
+                    dpg.add_listbox(
+                        list(ccxt.exchanges),
+                        callback=lambda s, a, u: self.emitter.emit(
+                            Signals.CREATE_EXCHANGE_TAB, exchange=a
+                        )
+                    )
 
 
 class Program:
@@ -100,11 +109,23 @@ class Program:
                     self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[1][0]
 
     def create_exchange_tab(self, exchange):
-        self.chart: Chart = Chart(
-            parent=self.tab_bar,
-            exchange=exchange,
-            emitter=self.emitter,
-            data=self.data,
-            task_manager=self.task_manager,
-            config_manager=self.config_manager,
-        )
+        print(exchange)
+        if exchange not in self.data.exchange_list:
+            self.task_manager.run_task_until_complete(self.data.load_exchanges(exchange=exchange))
+            self.chart: Chart = Chart(
+                parent=self.tab_bar,
+                exchange=exchange,
+                emitter=self.emitter,
+                data=self.data,
+                task_manager=self.task_manager,
+                config_manager=self.config_manager,
+            )
+        else:
+            self.chart: Chart = Chart(
+                parent=self.tab_bar,
+                exchange=exchange,
+                emitter=self.emitter,
+                data=self.data,
+                task_manager=self.task_manager,
+                config_manager=self.config_manager,
+            )
