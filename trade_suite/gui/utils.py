@@ -6,15 +6,16 @@ def timeframe_to_seconds(timeframe_str):
     numeric_part = int(timeframe_str[:-1])
     unit = timeframe_str[-1]
 
-    if unit == 'm':
+    if unit == "m":
         return numeric_part * 60
-    elif unit == 'h':
+    elif unit == "h":
         return numeric_part * 60 * 60
-    elif unit == 'd':
+    elif unit == "d":
         return numeric_part * 60 * 60 * 24
     else:
         raise ValueError("Invalid timeframe format")
-    
+
+
 def calculate_since(exchange, timeframe_str, num_candles):
     # Convert the timeframe string to timedelta
     timeframe_duration_in_seconds = exchange.parse_timeframe(timeframe_str)
@@ -30,5 +31,5 @@ def calculate_since(exchange, timeframe_str, num_candles):
     since_time = now - total_duration
 
     # Convert 'since' time to Unix timestamp in milliseconds
-    since_iso8601 = since_time.isoformat() + "Z"  
+    since_iso8601 = since_time.isoformat() + "Z"
     return since_iso8601

@@ -7,7 +7,6 @@ import numpy as np
 def calculate_indicators(
     exchange_id: str, symbol: str, timeframe: str, data: pd.DataFrame, csv: bool
 ):
-
     base, quote = symbol.split("/")
 
     base_volume_title = f"Base Volume {base}"
@@ -36,9 +35,7 @@ def calculate_indicators(
     pct_return = data["closes"].pct_change() * 100
     data.insert(data.columns.get_loc("closes") + 1, "PCT_RETURN", pct_return)
 
-    data["HULL-55"] = hull_moving_average(
-        data, 55, insert_next_to="CUM_LOG_RETURN"
-    )
+    data["HULL-55"] = hull_moving_average(data, 55, insert_next_to="CUM_LOG_RETURN")
     data["HULL-180"] = hull_moving_average(data, 180, insert_next_to="HULL_55")
 
     data.insert(data.columns.get_loc("CUM_LOG_RETURN") + 1, "HULL_55", data["HULL-55"])
@@ -115,6 +112,7 @@ def calculate_indicators(
 
     return data
 
+
 def ITrend(data: pd.DataFrame, window: int = 10):
     price = data["closes"]
     value1 = pd.Series(np.zeros(len(price)), index=price.index)
@@ -163,6 +161,7 @@ def ITrend(data: pd.DataFrame, window: int = 10):
     data["SmoothPrice"] = smooth_price
     return data
 
+
 # Let's define a helper function to calculate WMA
 def weighted_moving_average(data: pd.DataFrame, period: int, column="closes"):
     weights = np.arange(1, period + 1)
@@ -172,14 +171,13 @@ def weighted_moving_average(data: pd.DataFrame, period: int, column="closes"):
         .apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
     )
 
+
 def hull_moving_average(data: pd.DataFrame, period: int, column="closes"):
     # Calculate the square root of the period
     sqrt_period = int(np.sqrt(period))
 
     # Calculate the WMA for period n/2
-    half_period_wma = weighted_moving_average(
-        data, int(period / 2), column=column
-    )
+    half_period_wma = weighted_moving_average(data, int(period / 2), column=column)
 
     # Calculate the WMA for full period
     full_period_wma = weighted_moving_average(data, period, column=column)

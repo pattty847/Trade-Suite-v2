@@ -1,6 +1,7 @@
 import json
 import os
 
+
 class ConfigManager:
     _instance = None
 
@@ -14,13 +15,16 @@ class ConfigManager:
 
     @classmethod
     def load_config(cls):
-        if not os.path.exists(cls._config_file) or os.path.getsize(cls._config_file) == 0:
+        if (
+            not os.path.exists(cls._config_file)
+            or os.path.getsize(cls._config_file) == 0
+        ):
             # File does not exist or is empty. Initialize with default config.
-            with open(cls._config_file, 'w') as file:
+            with open(cls._config_file, "w") as file:
                 json.dump(cls._default_config, file)
             return cls._default_config
         else:
-            with open(cls._config_file, 'r') as file:
+            with open(cls._config_file, "r") as file:
                 return json.load(file)
 
     def get_setting(self, key):
@@ -28,7 +32,8 @@ class ConfigManager:
 
     def update_setting(self, key, value):
         self._config[key] = value
-        with open(self._config_file, 'w') as file:
+        with open(self._config_file, "w") as file:
             json.dump(self._config, file)
-            
+
+
 # {"last_exchange": "coinbasepro", "coinbasepro": {"last_symbol": "BTC/USD", "last_timeframe": "5m"}, "kucoin": {"last_symbol": "BTC/USDT", "last_timeframe": "1m"}}

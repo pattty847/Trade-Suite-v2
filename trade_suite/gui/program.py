@@ -87,17 +87,19 @@ class Program:
     # First function called after DearPyGUI is setup
     def initialize(self):
         with dpg.window(tag=self.primary_window_tag, menubar=True):
-            
             self.menu_bar: MenuBar = MenuBar(self.emitter, self.data, self.task_manager)
-            
-            with dpg.tab_bar(callback= self.task_manager.set_visable_tab) as self.tab_bar:
-                # Check if last_exchange exists and is valid
-                for exchange in self.data.exchange_list:
-                    self.create_chart(exchange)
-    
-    def prompt_for_exchange_selection(self):
-        pass
 
+            with dpg.tab_bar(
+                callback=self.task_manager.set_visable_tab
+            ) as self.tab_bar:
+                if self.data.exchange_list:
+                    # Check if last_exchange exists and is valid
+                    for exchange in self.data.exchange_list:
+                        self.create_chart(exchange)
+                    # The first tab's id needs to be set initially as the visable tab
+                    self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[
+                        1
+                    ][0]
 
     def create_chart(self, exchange):
         # No longer need to delete as we are adding individual tabs containing the exchange

@@ -10,6 +10,7 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import ASYNCHRONOUS
 from influxdb_client.client.query_api_async import QueryApiAsync
 
+
 class InfluxDB:
     def __init__(self, is_local: bool = True) -> None:
         # Create a config.json file and store your INFLUX token as a key value pair
@@ -174,11 +175,11 @@ class InfluxDB:
             A pandas DataFrame containing the candle data.
         """
         # Define the time range for the query. This example uses 5 years ago until now.
-        start_time = datetime.utcnow() - timedelta(days=5*365)
+        start_time = datetime.utcnow() - timedelta(days=5 * 365)
         end_time = datetime.utcnow()
-        
+
         # Construct the Flux query
-        flux_query = f'''
+        flux_query = f"""
         from(bucket: "candles")
         |> range(start: {start_time.isoformat()}Z, stop: {end_time.isoformat()}Z)
         |> filter(fn: (r) => 
@@ -188,8 +189,8 @@ class InfluxDB:
             r.timeframe == "{timeframe}")
         |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> keep(columns: ["_time", "open", "high", "low", "close"])
-        '''
-        
+        """
+
         # Execute the query and return the result as a pandas DataFrame
         result = self.query_api.query_data_frame(flux_query)
         return result

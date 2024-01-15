@@ -1,6 +1,7 @@
 from enum import Enum, auto
 from typing import Callable
 
+
 class Signals(Enum):
     CREATE_CHART = auto()
     CREATE_CHART_FOR_SYMBOL = auto()
