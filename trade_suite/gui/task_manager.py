@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import threading
+import dearpygui.dearpygui as dpg
 
 from trade_suite.data.data_source import Data
 from trade_suite.gui.signals import Signals
-from trade_suite.gui.utils import calculate_since
+from trade_suite.gui.utils import calculate_since, create_loading_modal
 
 
 class TaskManager:
@@ -90,6 +91,28 @@ class TaskManager:
         except Exception as e:
             logging.error(f"An unexpected error occurred: {e}")
             # Handle other exceptions
+        
+    def run_task_return_future(self, coro, message="Please wait..."):
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        # Display the loading modal
+        create_loading_modal(message)
+
+        def on_task_complete(fut):
+            # This function will be called when the future completes
+            dpg.delete_item("loading_modal")
+            try:
+                return fut.result()
+            except asyncio.CancelledError:
+                logging.error("Task was cancelled.")
+                # Handle task cancellation, if needed
+            except Exception as e:
+                logging.error(f"An unexpected error occurred: {e}")
+                # Handle other exceptions
+
+        # Add the completion callback to the future
+        future.add_done_callback(on_task_complete)
+        return future.result()
+
 
     def stop_task(self, name: str):
         if name in self.tasks:

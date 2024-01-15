@@ -47,3 +47,13 @@ def center_window(tag):
     
     # Set the window's position
     dpg.set_item_pos(tag, [pos_x, pos_y])
+    
+    
+def create_loading_modal(message):
+    with dpg.window(label="Loading", autosize=True, tag="loading_modal"):
+        dpg.add_text(message)
+        dpg.add_loading_indicator()
+
+    # Center the modal once it's rendered
+    dpg.render_dearpygui_frame()
+    center_window("loading_modal")

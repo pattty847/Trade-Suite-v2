@@ -63,7 +63,8 @@ class MenuBar:
                         list(ccxt.exchanges),
                         callback=lambda s, a, u: self.emitter.emit(
                             Signals.CREATE_EXCHANGE_TAB, exchange=a
-                        )
+                        ),
+                        num_items=10
                     )
 
 
@@ -111,7 +112,7 @@ class Program:
     def create_exchange_tab(self, exchange):
         print(exchange)
         if exchange not in self.data.exchange_list:
-            self.task_manager.run_task_until_complete(self.data.load_exchanges(exchange=exchange))
+            self.task_manager.run_task_return_future(self.data.load_exchanges(exchange=exchange))
             self.chart: Chart = Chart(
                 parent=self.tab_bar,
                 exchange=exchange,
