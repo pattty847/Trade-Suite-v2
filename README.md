@@ -1,5 +1,3 @@
-Certainly, I can help you enhance the structure and content of your project's README file. A well-structured README is essential for providing clear information to potential users and contributors. Below is a revised version of your README file with improvements:
-
 # TradeSuite - A Multi-Exchange Cryptocurrency Trading Platform
 
 ![TradeSuite Screenshot](https://github.com/pattty847/Trade-Suite-v2/assets/23511285/2f5e732d-87ba-4132-b66e-7dd71e643393)
