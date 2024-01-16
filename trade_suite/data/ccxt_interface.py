@@ -24,7 +24,7 @@ class CCXTInterface:
         """
         try:
             logging.info(f"Initializing {exchange_id}.")
-            exchange_class = getattr(ccxtpro, exchange_id)(
+            exchange_class = getattr(ccxtpro, exchange_id)( 
                 {
                     "apiKey": os.getenv("COINBASE_KEY"),
                     "secret": os.getenv("COINBASE_SECRET"),
@@ -33,7 +33,7 @@ class CCXTInterface:
                 }
                 if exchange_id == "coinbasepro"
                 else {}
-            )
+            ) # type: ccxtpro.Exchange
 
             await exchange_class.load_markets()
 
@@ -42,7 +42,7 @@ class CCXTInterface:
                 and exchange_class.has["fetchOHLCV"]
             ):
                 return {
-                    "ccxt": exchange_class,  # type: ccxt.Exchange
+                    "ccxt": exchange_class,  # type: ccxtpro.Exchange
                     "symbols": sorted(list(exchange_class.markets)),
                     "timeframes": list(exchange_class.timeframes.keys()),
                 }

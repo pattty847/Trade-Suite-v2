@@ -50,6 +50,13 @@ def center_window(tag):
     
     
 def create_loading_modal(message):
+    """
+    The create_loading_modal function creates a modal window with the given message and a loading indicator.
+    
+    :param message: Display a message to the user while they wait for the process to complete
+    :return: A window object, which we can use to close the modal later
+    :doc-author: Trelent
+    """
     with dpg.window(label="Loading", autosize=True, tag="loading_modal"):
         dpg.add_text(message)
         dpg.add_loading_indicator()
@@ -57,3 +64,29 @@ def create_loading_modal(message):
     # Center the modal once it's rendered
     dpg.render_dearpygui_frame()
     center_window("loading_modal")
+    
+    
+def searcher(searcher, result, search_list):
+    """ This function is used to search a listbox based on a list.
+
+    Args:
+        searcher (dpg input item): this is the tag of the input box the user types into
+        result (dpg listbox/combo box (maybe?)): this is the listbox tag 
+        search_list (list): list of items you want to search
+    """
+    modified_list = []
+
+    search_value = dpg.get_value(searcher)
+    if search_value is None:
+        search_value = ""
+
+    if search_value == "*":
+        modified_list.extend(iter(search_list))
+
+    elif search_value.lower():
+        modified_list.extend(item for item in search_list if search_value.lower() in item.lower())
+
+    else:
+        modified_list.extend(search_list)
+
+    dpg.configure_item(result, items=modified_list)

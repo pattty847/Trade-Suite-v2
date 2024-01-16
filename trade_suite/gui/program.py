@@ -7,6 +7,7 @@ from trade_suite.data.data_source import Data
 from trade_suite.gui.components.chart import Chart
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.utils import searcher
 
 
 class MenuBar:
@@ -59,13 +60,15 @@ class MenuBar:
                         ),
                     )
                 with dpg.menu(label="All Exchanges"):
-                    dpg.add_listbox(
+                    input_tag = dpg.add_input_text(label="Search")
+                    exchange_list = dpg.add_listbox(
                         list(ccxt.exchanges),
                         callback=lambda s, a, u: self.emitter.emit(
                             Signals.CREATE_EXCHANGE_TAB, exchange=a
                         ),
                         num_items=10
                     )
+                    dpg.set_item_callback(input_tag, callback=lambda: searcher(input_tag, exchange_list, list(ccxt.exchanges)))
 
 
 class Program:

@@ -11,6 +11,7 @@ from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.utils import timeframe_to_seconds
 
+# TODO: Lots in here
 
 class Trading:
     def __init__(
@@ -55,7 +56,7 @@ class Trading:
     def setup_trading_menu(self):
         with dpg.menu(label="Trading"):
             dpg.add_checkbox(label="Order Line", callback=self.toggle_drag_line)
-            dpg.add_menu_item(label="Trade", callback=self.toggle_place_order)
+            dpg.add_menu_item(label="Trade", callback=self.toggle_place_order_window)
 
             # Adding a tooltip to the menu to give users more information
             with dpg.tooltip(dpg.last_item()):
@@ -98,7 +99,7 @@ class Trading:
             dpg.configure_item(self.trade_mode_drag_line_tag, show=False)
             
 
-    def toggle_place_order(self):
+    def toggle_place_order_window(self):
         price = dpg.get_value(self.trade_mode_drag_line_tag)
 
         def apply_percentage(profit_pct):
@@ -111,7 +112,6 @@ class Trading:
             width, height = 400, 200
             with dpg.window(
                 label="Place Order",
-                modal=True,
                 tag=f"{self.tag}_order_window",
                 width=width,
                 height=height,
@@ -125,7 +125,7 @@ class Trading:
                     label="Account",
                     callback=self.setup_orders
                 )
-                price_ = dpg.add_input_float(label="Price", default_value=price)
+                self.order_window_price_input_tag = dpg.add_input_float(label="Price", default_value=price)
                 stop = dpg.add_input_float(label="Stop Loss")
                 profit_pct = dpg.add_input_float(label="Take Profit")
                 size = dpg.add_input_int(label="Size")
@@ -139,7 +139,7 @@ class Trading:
                             user_data=percent,
                         )
 
-                order = (price_, stop, profit_pct, size)
+                order = (self.order_window_price_input_tag, stop, profit_pct, size)
                 with dpg.group(horizontal=True):
                     dpg.add_button(
                         label="Long",
@@ -238,3 +238,12 @@ class Trading:
         for order in orders:  # Limit to first 100 orders for performance
             if order.get("status") == "closed":
                 self.add_order_to_table(order)
+
+
+    def set_order_line_price(self, sender, app_data, user_data):
+        price = dpg.get_value(sender)
+        self.drag_line_price = price
+        
+        # If the order window is open, update the price to the user's drag line
+        if dpg.does_item_exist(self.order_window_price_input_tag):
+            dpg.set_value(self.order_window_price_input_tag,  price)
