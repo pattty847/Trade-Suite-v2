@@ -55,6 +55,7 @@ class Indicators:
         event_mappings = {
             Signals.NEW_TRADE: self.on_new_trade,
             Signals.NEW_CANDLES: self.on_new_candles,
+            Signals.UPDATED_CANDLES: self.on_updated_candles,
             Signals.TIMEFRAME_CHANGED: self.on_timeframe_change,
         }
 
@@ -67,13 +68,17 @@ class Indicators:
             self.timeframe_str = new_timeframe
             self.timeframe_seconds = timeframe_in_minutes
 
-            if self.show_ema:
-                self.recalculate_ema()
 
+    # Listens for initial candles
     def on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
-
+    
+    # Always listening for the updated candle stick chart
+    def on_updated_candles(self, tab, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and tab == self.tab:
+            self.ohlcv = candles
+            
         if self.show_ema:
             self.recalculate_ema()
 

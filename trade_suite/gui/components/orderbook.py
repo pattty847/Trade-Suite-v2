@@ -22,6 +22,12 @@ class OrderBook:
         self.emitter = emitter
         self.data = data
         self.config = config
+        self.charts_group = (
+            f"{self.tab}_charts_group"  # tag id for chart's grouping
+        )
+        self.order_book_group = (
+            f"{self.tab}_order_book_group"  # tag id for order book group
+        )
 
         self.show_orderbook = True
         self.aggregated_order_book = False

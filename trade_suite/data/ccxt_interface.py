@@ -9,6 +9,9 @@ import ccxt.pro as ccxtpro
 
 
 class CCXTInterface:
+    _instances = {}
+    
+    
     """
     This class manages connections to CCXT exchanges.
         exchange_list[exchange][ccxt/symbols/timeframes]
@@ -16,12 +19,17 @@ class CCXTInterface:
 
     def __init__(self, exchanges: List[str]):
         self.exchanges = exchanges
-        self.exchange_list = None
+        self.exchange_list = {}
 
     async def load_exchange(self, exchange_id: str):
         """
         Initialize a single exchange and add it to the supported exchanges list.
         """
+        if exchange_id in self._instances:
+            logging.info(f"Using existing instance for {exchange_id}.")
+            return self._instances[exchange_id]
+        
+        
         try:
             logging.info(f"Initializing {exchange_id}.")
             exchange_class = getattr(ccxtpro, exchange_id)( 
@@ -41,11 +49,13 @@ class CCXTInterface:
                 exchange_class.has["watchTrades"]
                 and exchange_class.has["fetchOHLCV"]
             ):
-                return {
-                    "ccxt": exchange_class,  # type: ccxtpro.Exchange
+                exchange_data = {
+                    "ccxt": exchange_class,
                     "symbols": sorted(list(exchange_class.markets)),
                     "timeframes": list(exchange_class.timeframes.keys()),
                 }
+                self._instances[exchange_id] = exchange_data
+                return exchange_data
             else:
                 logging.info(f"{exchange_id} does not support all required features.")
                 return None
@@ -61,17 +71,14 @@ class CCXTInterface:
         """
         Initialize the exchanges that are supported by ccxt. Optionally initialize a single exchange if provided.
         """
-        supported_exchanges = self.exchange_list if self.exchange_list else {}
-
         exchanges_to_load = [exchange] if exchange else self.exchanges
 
         for exchange_id in exchanges_to_load:
             exchange_data = await self.load_exchange(exchange_id)
             if exchange_data:
-                supported_exchanges[exchange_id] = exchange_data
+                self.exchange_list[exchange_id] = exchange_data
                 logging.info(f"{exchange_id.capitalize()} has been initialized.")
 
-        self.exchange_list = supported_exchanges
 
     async def close_all_exchanges(self):
         """

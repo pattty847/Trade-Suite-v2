@@ -88,7 +88,7 @@ class CandleFactory:
             self.ohlcv.at[self.ohlcv.index[-1], "volumes"] += volume
 
         self.emitter.emit(
-            Signals.UPDATED_CANDLES, tab, exchange=exchange, candles=self.ohlcv
+            Signals.UPDATED_CANDLES, tab=tab, exchange=exchange, candles=self.ohlcv
         )
 
     def resample_candle(self, new_timeframe: str, active_exchange):

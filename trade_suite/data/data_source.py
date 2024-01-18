@@ -99,7 +99,7 @@ class Data(CCXTInterface):
         :doc-author: Trelent
         """
         exchange_object = self.exchange_list[exchange]["ccxt"]
-        logging.info(f"Starting trade stream for {symbol} on {exchange}")
+        logging.info(f"Starting trade stream for {symbol} on {exchange} tab {tab}")
         # TODO: Add a condition to streaming
         while True:
             try:

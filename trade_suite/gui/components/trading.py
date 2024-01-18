@@ -163,11 +163,20 @@ class Trading:
         side = user_data[1]
         
         # TODO: Add popups maybe confirming if they want to hit the ask that far, show the order book depth perhaps too
-        if side == "Long" and price <= self.ohlcv["closes"].tolist()[-1]:
+        if side == "Long" and price >= self.ohlcv["closes"].tolist()[-1]:
             logging.info(f"Cannot place long above the last close")
+            with dpg.window(modal=True, autosize=True) as cannot_long:
+                dpg.add_text("Cannot long above price.")
+                dpg.add_button(label="Ok", callback=lambda: dpg.delete_item(cannot_long))
+            self.reset_drag_line_to_close()
             return
-        elif side == "Short" and price >= self.ohlcv["closes"].tolist()[-1]:
+        
+        elif side == "Short" and price <= self.ohlcv["closes"].tolist()[-1]:
             logging.info(f"Cannot place short below the last close")
+            with dpg.window(modal=True, autosize=True) as cannot_short:
+                dpg.add_text("Cannot short below price.")
+                dpg.add_button(label="Ok", callback=lambda: dpg.delete_item(cannot_short))
+            self.reset_drag_line_to_close()
             return
 
         print(price, stop, profit_pct, size, side)
@@ -187,6 +196,11 @@ class Trading:
             parent=self.candlestick_plot,
             color=color,
         )
+        
+        self.reset_drag_line_to_close()
+        
+    def reset_drag_line_to_close(self):
+        dpg.set_value(self.trade_mode_drag_line_tag, self.ohlcv["closes"].iloc[-1])
 
     def setup_orders(self):
         orders = self.task_manager.run_task_with_loading_popup(

@@ -28,14 +28,14 @@ class TaskManager:
         self.loop.run_forever()
 
     def start_task(self, name: str, coro):
-        logging.info(f"Starting new task {name}")
         task = asyncio.run_coroutine_threadsafe(coro, self.loop)
         self.tasks[name] = task
         task.add_done_callback(lambda t: self.tasks.pop(name, None))
 
     def start_stream_for_chart(self, tab, exchange, symbol, timeframe):
-        trades_task = f"trades_{symbol}_{exchange}"
-        orderbook_task = f"orderbook_{symbol}_{exchange}"
+        
+        trades_task = f"trades_{tab}"
+        orderbook_task = f"orderbook_{tab}"
 
         # We want to stop the old symbol's tasks for the tab when requesting a new stream
         if tab in self.tabs:

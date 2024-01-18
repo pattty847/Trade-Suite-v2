@@ -94,6 +94,8 @@ class Program:
         self.last_timeframe = (
             self.exchange_settings["last_timeframe"] if self.exchange_settings else None
         )
+        
+        self.charts = {}
 
         self.emitter.register(Signals.CREATE_EXCHANGE_TAB, callback=self.create_exchange_tab)
 
@@ -120,6 +122,7 @@ class Program:
                         self.create_exchange_tab(exchange)
                     # The first tab's id needs to be set initially as the visable tab
                     self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[1][0]
+                    print(dpg.get_item_children(self.tab_bar)[1][0])
 
     def create_exchange_tab(self, exchange):
         """
@@ -133,8 +136,9 @@ class Program:
         :doc-author: Trelent
         """
         if exchange not in self.data.exchange_list:
+            # TODO: Add popup for error when exchange connot be loaded and why
             self.task_manager.run_task_with_loading_popup(self.data.load_exchanges(exchange=exchange))
-            self.chart: Chart = Chart(
+            chart: Chart = Chart(
                 parent=self.tab_bar,
                 exchange=exchange,
                 emitter=self.emitter,
@@ -143,7 +147,7 @@ class Program:
                 config_manager=self.config_manager,
             )
         else:
-            self.chart: Chart = Chart(
+            chart: Chart = Chart(
                 parent=self.tab_bar,
                 exchange=exchange,
                 emitter=self.emitter,
@@ -151,3 +155,4 @@ class Program:
                 task_manager=self.task_manager,
                 config_manager=self.config_manager,
             )
+        self.charts[chart.tab] = chart
