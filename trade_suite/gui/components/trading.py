@@ -72,7 +72,7 @@ class Trading:
             self.timeframe_str = new_timeframe
             self.timeframe_seconds = timeframe_in_minutes
 
-    # Listens for initial candles
+    # Listens for initial candle emissions
     def on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
@@ -179,7 +179,7 @@ class Trading:
             self.reset_drag_line_to_close()
             return
 
-        print(price, stop, profit_pct, size, side)
+        logging.info(price, stop, profit_pct, size, side)
         # Set the color based on the value of 'side'
         if side == "Short":
             color = (255, 0, 0, 255)  # Red color for 'Short'

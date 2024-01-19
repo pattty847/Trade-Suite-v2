@@ -46,7 +46,7 @@ class InfluxDB:
 
             points.append(point)
 
-        # Every 1000 ticks, print to console the amount saved thus far
+        # Every 1000 ticks, logging.info to console the amount saved thus far
         if self.tick_count % 1000 == 0:
             logging.info(f"Wrote {self.tick_count} trades to the database total.")
 

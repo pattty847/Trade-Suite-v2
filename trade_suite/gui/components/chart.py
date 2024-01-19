@@ -1,4 +1,5 @@
 import logging
+import ccxt
 
 import dearpygui.dearpygui as dpg
 import pandas as pd
@@ -26,7 +27,7 @@ class Chart:
     def initialize_attributes(
         self, parent, exchange, emitter, data, task_manager, config_manager
     ):
-        self.tab = dpg.generate_uuid()
+        self.tab_id = dpg.generate_uuid()
         self.parent: str = parent
         self.emitter: SignalEmitter = emitter
         self.data: Data = data
@@ -44,7 +45,7 @@ class Chart:
     def initialize_components(self):
         self.candle_factory = CandleFactory(
             self.exchange,
-            self.tab,
+            self.tab_id,
             self.emitter,
             self.task_manager,
             self.data,
@@ -52,10 +53,13 @@ class Chart:
             self.ohlcv,
         )
         self.indicators = Indicators(
-            self.tab, self.exchange, self.emitter, self.exchange_settings
+            self.tab_id, 
+            self.exchange, 
+            self.emitter, 
+            self.exchange_settings
         )
         self.trading = Trading(
-            self.tab,
+            self.tab_id,
             self.exchange,
             self.emitter,
             self.data,
@@ -63,7 +67,7 @@ class Chart:
             self.task_manager,
         )
         self.orderbook = OrderBook(
-            self.tab,
+            self.tab_id,
             self.exchange,
             self.active_symbol,
             self.emitter,
@@ -74,14 +78,14 @@ class Chart:
     def start_data_stream(self):
         if self.exchange:
             self.task_manager.start_stream_for_chart(
-                self.tab,
+                self.tab_id,
                 exchange=self.exchange,
                 symbol=self.active_symbol,
                 timeframe=self.timeframe_str,
             )
 
     def setup_ui_elements(self):
-        with dpg.tab(label=self.exchange.upper(), tag=self.tab, parent=self.parent):
+        with dpg.tab(label=self.exchange.upper(), tag=self.tab_id, parent=self.parent):
             with dpg.child_window(menubar=True):
                 self.setup_menus()
                 self.setup_candlestick_chart()
@@ -104,12 +108,19 @@ class Chart:
                 callback=lambda sender, symbol, user_data: self.emitter.emit(
                     Signals.SYMBOL_CHANGED,
                     exchange=self.exchange,
-                    tab=self.tab,
+                    tab=self.tab_id,
                     new_symbol=symbol,
                 ),
                 num_items=8,
             )
-            dpg.set_item_callback(input_tag, callback=lambda: searcher(input_tag,  symbols_list, self.data.exchange_list[self.exchange]["symbols"]))
+            dpg.set_item_callback(
+                input_tag,
+                callback=lambda: searcher(
+                    input_tag,
+                    symbols_list,
+                    self.data.exchange_list[self.exchange]["symbols"],
+                ),
+            )
 
             dpg.add_text("Timeframe")
             dpg.add_listbox(
@@ -117,7 +128,7 @@ class Chart:
                 callback=lambda sender, timeframe, user_data: self.emitter.emit(
                     Signals.TIMEFRAME_CHANGED,
                     exchange=self.exchange,
-                    tab=self.tab,
+                    tab=self.tab_id,
                     new_timeframe=timeframe,
                 ),
                 num_items=5,
@@ -147,23 +158,25 @@ class Chart:
                 tag=self.orderbook.charts_group,
             ):  # This group will contain the charts, filling the available space
                 with dpg.subplots(
-                    rows=2, columns=1, row_ratios=[0.7, 0.3], link_all_x=True,
-                    label=f"{self.active_symbol} | {self.timeframe_str}", height=-1
+                    rows=2,
+                    columns=1,
+                    row_ratios=[0.7, 0.3],
+                    link_all_x=True,
+                    label=f"{self.active_symbol} | {self.timeframe_str}",
+                    height=-1,
                 ) as self.plots:
                     # Candlestick Chart
                     with dpg.plot() as self.candlestick_plot:
                         dpg.add_plot_legend()
-                        
-                        logging.info(f"{self.exchange}:tab id ({self.tab}), candlestick id: ({self.plots})")
 
                         # Belongs to: self.candlestick_plot
-                        
+
                         self.trading.trade_mode_drag_line_tag = dpg.add_drag_line(
                             label="Order",
                             show=False,
                             color=[255, 255, 255, 255],
                             vertical=False,
-                            callback=self.trading.set_order_line_price
+                            callback=self.trading.set_order_line_price,
                         )
 
                         self.candle_series_xaxis = dpg.add_plot_axis(
@@ -182,7 +195,7 @@ class Chart:
                                 time_unit=dpg.mvTimeUnit_Min,
                                 label=f"{self.active_symbol}",
                             )
-                            
+
                             self.trading.candlestick_plot = self.candlestick_plot
                             self.indicators.candle_series_yaxis = (
                                 self.candle_series_yaxis
@@ -201,7 +214,7 @@ class Chart:
                             self.volume_series = dpg.add_bar_series(
                                 list(self.ohlcv["dates"]),
                                 list(self.ohlcv["volumes"]),
-                                weight=100
+                                weight=100,
                             )
 
             with dpg.group(width=-1, tag=self.orderbook.order_book_group):
@@ -220,50 +233,51 @@ class Chart:
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
 
-    def update_chart_settings_and_stream(self, exchange, new_settings, tab, new_symbol, new_timeframe):
+    def update_chart_settings_and_stream(
+        self, exchange, new_settings, tab, new_symbol, new_timeframe
+    ):
         self.config_manager.update_setting(exchange, new_settings)
         self.task_manager.start_stream_for_chart(
             tab, exchange, new_symbol, new_timeframe
         )
 
     def on_symbol_change(self, exchange, tab, new_symbol: str):
-        if tab == self.tab:
-            
-            logging.info(f"From {self.active_symbol} to {new_symbol}")
-            
-            dpg.configure_item(
-                self.plots, label=f"{new_symbol} | {self.timeframe_str}"
-            )
-            
-            
+        if tab == self.tab_id:
+            logging.info(f"{exchange}: Symbol change - from {self.active_symbol} to {new_symbol}")
+
+            dpg.configure_item(self.plots, label=f"{new_symbol} | {self.timeframe_str}")
+
             new_settings = {
                 "last_symbol": new_symbol,
                 "last_timeframe": self.timeframe_str,
             }
-            self.update_chart_settings_and_stream(exchange, new_settings, tab, new_symbol, self.timeframe_str)
+            self.update_chart_settings_and_stream(
+                exchange, new_settings, tab, new_symbol, self.timeframe_str
+            )
             self.active_symbol = new_symbol
 
-
     def on_timeframe_change(self, exchange, tab, new_timeframe: str):
-        logging.info(f"Does tab == visable one?: {tab == self.task_manager.visable_tab}")
-        if tab == self.tab:
-            
+        logging.info(f"{exchange}: Timeframe change - from {self.timeframe_str} to {new_timeframe}")
+        
+        if tab == self.tab_id:
             dpg.configure_item(
                 self.plots, label=f"{self.active_symbol} | {new_timeframe}"
             )
-            
+
             new_settings = {
                 "last_symbol": self.active_symbol,
                 "last_timeframe": new_timeframe,
             }
             candles = self.candle_factory.resample_candle(new_timeframe, self.exchange)
             if candles is None:
-                self.update_chart_settings_and_stream(exchange, new_settings, tab, self.active_symbol, new_timeframe)
+                self.update_chart_settings_and_stream(
+                    exchange, new_settings, tab, self.active_symbol, new_timeframe
+                )
             self.timeframe_str = new_timeframe
 
-
+    # Only called once after Charts initialization and start_data_stream fetches new candles
     def on_new_candles(self, tab, exchange, candles):
-        if isinstance(candles, pd.DataFrame) and tab == self.tab:
+        if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
             self.ohlcv = candles
             self.update_candle_chart()
             dpg.fit_axis_data(self.candle_series_xaxis)
@@ -276,10 +290,16 @@ class Chart:
         price = trade_data["price"]
         volume = trade_data["amount"] * 2
 
-        dpg.draw_circle(center=[timestamp, price], radius=volume, color=[255, 255, 255, 255], thickness=1, parent=self.candlestick_plot)
+        dpg.draw_circle(
+            center=[timestamp - (dpg.get_item_configuration(self.candle_series)['width'] / 2), price],
+            radius=volume,
+            color=[255, 255, 255, 255],
+            thickness=1,
+            parent=self.candlestick_plot,
+        )
 
     def on_updated_candles(self, tab, exchange, candles):
-        if tab == self.tab:
+        if tab == self.tab_id:
             self.ohlcv = candles
             self.update_candle_chart()
 

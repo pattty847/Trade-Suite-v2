@@ -34,13 +34,13 @@ class TaskManager:
 
     def start_stream_for_chart(self, tab, exchange, symbol, timeframe):
         
-        trades_task = f"trades_{tab}"
-        orderbook_task = f"orderbook_{tab}"
+        trades_task = f"trades_{exchange}_{symbol}_{tab}"
+        orderbook_task = f"orderbook_{exchange}_{symbol}_{tab}"
 
         # We want to stop the old symbol's tasks for the tab when requesting a new stream
         if tab in self.tabs:
             for task in self.tabs[tab]:
-                print(f"stopping {task}")
+                logging.info(f"stopping {task}")
                 self.stop_task(task)
                 self.stop_task(task)
 

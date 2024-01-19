@@ -55,7 +55,7 @@ class SignalEmitter:
             try:
                 callback(*args, **kwargs)
             except Exception as e:
-                print(f"Error in callback for {signal}: {e}")
+                logging.info(f"Error in callback for {signal}: {e}")
 
     def unregister(self, signal: Signals, callback: Callable):
         """

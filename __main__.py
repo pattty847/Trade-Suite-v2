@@ -40,7 +40,10 @@ from trade_suite.data.influx import InfluxDB
 from trade_suite.gui.signals import SignalEmitter
 from trade_suite.gui.viewport import Viewport
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s:%(filename)s%(funcName)s: %(message)s'
+)
 dotenv.load_dotenv()
 logging.info(f"Environment variables loaded and logging setup.")
 

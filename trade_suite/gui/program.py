@@ -1,3 +1,4 @@
+import logging
 import dearpygui.dearpygui as dpg
 import dearpygui.demo as demo
 import ccxt.pro as ccxt
@@ -122,7 +123,6 @@ class Program:
                         self.create_exchange_tab(exchange)
                     # The first tab's id needs to be set initially as the visable tab
                     self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[1][0]
-                    print(dpg.get_item_children(self.tab_bar)[1][0])
 
     def create_exchange_tab(self, exchange):
         """
@@ -155,4 +155,4 @@ class Program:
                 task_manager=self.task_manager,
                 config_manager=self.config_manager,
             )
-        self.charts[chart.tab] = chart
+        self.charts[chart.tab_id] = chart

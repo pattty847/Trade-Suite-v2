@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import List
+from typing import Any, Dict, List
 
 import ccxt
 import ccxt.pro as ccxtpro
@@ -19,7 +19,7 @@ class CCXTInterface:
 
     def __init__(self, exchanges: List[str]):
         self.exchanges = exchanges
-        self.exchange_list = {}
+        self.exchange_list: Dict[str, Dict[str, Any]] = {}
 
     async def load_exchange(self, exchange_id: str):
         """

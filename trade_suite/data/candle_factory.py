@@ -1,3 +1,5 @@
+from collections import deque
+import time
 import pandas as pd
 from trade_suite.data.data_source import Data
 
@@ -33,13 +35,17 @@ class CandleFactory:
         )  # Timeframe for the candles in seconds
         self.last_candle_timestamp = None
 
-        self.ohlcv = ohlcv
+        self.ohlcv: pd.DataFrame = ohlcv
+        self._trade_queue = deque()
+        self.max_trades_per_candle_update = 5
 
         self.register_event_listeners()
 
     def register_event_listeners(self):
         event_mappings = {
-            Signals.NEW_TRADE: self.build_candle_from_stream,
+            # Signals.NEW_TRADE: self.build_candle_from_stream,
+            # Batched new trade system
+            Signals.NEW_TRADE: self.batch_trades_for_candles,
             Signals.NEW_CANDLES: self.on_new_candles,
         }
         for signal, handler in event_mappings.items():
@@ -48,9 +54,41 @@ class CandleFactory:
     def on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
+            
+    def batch_trades_for_candles(self, tab, exchange, trade_data):
+        if tab != self.tab:
+            return
+
+        self._trade_queue.append(trade_data)
+        current_time = time.time()
+        
+        # Check if time or count threshold is reached
+        if (len(self._trade_queue) >= self.max_trades_per_candle_update or
+            (self.last_candle_timestamp is not None and 
+             current_time - self.last_candle_timestamp >= self.timeframe_seconds)):
+            self.build_candle_from_batch(tab, exchange)
+
+    def build_candle_from_batch(self, tab, exchange):
+        if not self._trade_queue:
+            return
+
+        # Assuming trade_data has 'timestamp', 'price', 'amount'
+        batch_trades = list(self._trade_queue)
+        self._trade_queue.clear()
+
+        # Process the batch to create a new candle
+        # Logic to compute OHLC and volume for the batch
+        # Update self.ohlcv with the new candle
+        for trade in batch_trades:
+            self.build_candle_from_stream(tab, exchange, trade)
+
+        # Emit the updated candles
+        self.emitter.emit(
+            Signals.UPDATED_CANDLES, tab=tab, exchange=exchange, candles=self.ohlcv
+        )
 
     def build_candle_from_stream(self, tab, exchange, trade_data):
-        if exchange != self.exchange and tab != self.tab:
+        if tab != self.tab:
             return
 
         timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds

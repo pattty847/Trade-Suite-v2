@@ -63,7 +63,7 @@ class Data(CCXTInterface):
 
                     if track_stats:
                         symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
-                        # self.agg.report_statistics() # print to console
+                        # self.agg.report_statistics() # logging.info to console
                         self.emitter.emit(
                             Signals.TRADE_STAT_UPDATE, symbol=symbol, stats=stats
                         )
@@ -115,7 +115,7 @@ class Data(CCXTInterface):
 
                 if track_stats:
                     symbol, stats = self.agg.calc_trade_stats(exchange, trades)
-                    # self.agg.report_statistics() # print to console
+                    # self.agg.report_statistics() # logging.info to console
                     self.emitter.emit(
                         Signals.TRADE_STAT_UPDATE, symbol=symbol, stats=stats
                     )
@@ -317,7 +317,7 @@ class Data(CCXTInterface):
             response = await exchange.publicGetProductsIdStats({"id": symbol})
             return response
         except Exception as e:
-            print(f"Error fetching stats for {symbol}: {e}")
+            logging.info(f"Error fetching stats for {symbol}: {e}")
             return None
 
     async def fetch_all_stats(self, exchange, currency: str = "USD"):

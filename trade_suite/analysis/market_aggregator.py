@@ -1,4 +1,5 @@
 from collections import defaultdict
+import logging
 from typing import List
 
 import pandas as pd
@@ -23,7 +24,9 @@ class MarketAggregator:
 
     def calc_trade_stats(self, exchange: str, trades: List[str]) -> None:
         """
-        The calc_trade_stats function will be passed a particular exchange and tick data (containing the symbol, and other relevant information).
+        The calc_trade_stats function will be passed a particular exchange and tick data (containing the symbol, 
+        and other relevant information).
+        
         It will then calculate the following metrics:
             - Total volume for an exchange and symbol pair
             - Total volume in USD for an exchange and symbol pair
@@ -61,19 +64,19 @@ class MarketAggregator:
                 symbol = trade["symbol"]
                 # Check if necessary fields are in the trade data
                 if not all(key in trade for key in ("price", "amount", "side")):
-                    print(f"Trade data is missing necessary fields: {trade}")
+                    logging.info(f"Trade data is missing necessary fields: {trade}")
                     return
 
                 # Convert amount to float once and store the result
                 try:
                     amount = float(trade["amount"])  # base currency
                 except ValueError:
-                    print(f"Amount is not a number: {trade['amount']}")
+                    logging.info(f"Amount is not a number: {trade['amount']}")
                     return
 
                 # Check if side is either "buy" or "sell"
                 if trade["side"] not in ("buy", "sell"):
-                    print(f"Invalid trade side: {trade['side']}")
+                    logging.info(f"Invalid trade side: {trade['side']}")
                     return
 
                 order_cost = float(trade["price"]) * amount  # quote currency
@@ -108,7 +111,7 @@ class MarketAggregator:
                 return symbol, self.trade_stats[(exchange, symbol)]
 
         except Exception as e:
-            print(f"Error processing trade data: {e}")
+            logging.info(f"Error processing trade data: {e}")
 
     def get_order_size_category_(self, order_cost):
         if order_cost < 1e4:
@@ -157,8 +160,8 @@ class MarketAggregator:
 
             rows.append(row)
 
-        print(tabulate(rows, headers=header, tablefmt="grid"))
-        # print(self.trade_stats)
+        logging.info(tabulate(rows, headers=header, tablefmt="grid"))
+        # logging.info(self.trade_stats)
 
     def on_order_book_update(
         self, exchange, orderbook, tick_size, aggregate
@@ -178,14 +181,18 @@ class MarketAggregator:
             asks_df = pd.DataFrame(asks, columns=["price", "quantity"])
             price_column = "price"
 
-        # Sorting and calculations
+        # Sorting
         bids_df = bids_df.sort_values(by=price_column, ascending=False)
         asks_df = asks_df.sort_values(by=price_column, ascending=True)
-        bids_df["cumulative_quantity"] = bids_df["quantity"].cumsum()
-        asks_df["cumulative_quantity"] = asks_df["quantity"].cumsum()
+
+        # Calculate cumulative quantities only if aggregated
+        if aggregate:
+            bids_df["cumulative_quantity"] = bids_df["quantity"].cumsum()
+            asks_df["cumulative_quantity"] = asks_df["quantity"].cumsum()
 
         # Update the series data
         return bids_df, asks_df, price_column
+
 
     def group_and_aggregate(self, orders, tick_size):
         df = pd.DataFrame(orders, columns=["price", "quantity"])

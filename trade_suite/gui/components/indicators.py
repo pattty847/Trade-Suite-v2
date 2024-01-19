@@ -69,7 +69,7 @@ class Indicators:
             self.timeframe_seconds = timeframe_in_minutes
 
 
-    # Listens for initial candles
+    # Listens for initial candle emissions
     def on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
@@ -93,7 +93,7 @@ class Indicators:
                 dpg.add_checkbox(
                     label="EMAs", default_value=self.show_ema, callback=self.toggle_ema
                 )
-                dpg.add_button(label="test", callback=lambda: print(self.line_series_ids))
+                dpg.add_button(label="test", callback=lambda: logging.info(self.line_series_ids))
 
             self.create_test_menu(menu)
 
@@ -179,7 +179,7 @@ class Indicators:
         indicator_function = getattr(pandas_ta, indicator_name, None)
 
         if indicator_function is None:
-            print(f"No indicator found with name: {indicator_name}")
+            logging.info(f"No indicator found with name: {indicator_name}")
             return
 
         # Calculate the indicator values. You may need to pass additional parameters depending on the indicator.
@@ -195,7 +195,7 @@ class Indicators:
         elif isinstance(indicator_values, pd.Series):
             self.plot_indicator_series(indicator_values, label=indicator_name)
         else:
-            print(f"Unhandled indicator result type: {type(indicator_values)}")
+            logging.info(f"Unhandled indicator result type: {type(indicator_values)}")
 
     def plot_indicator_series(self, values, label):
         # Assuming 'values' is a pandas Series with the indicator results
