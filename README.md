@@ -17,7 +17,8 @@ TradeSuite is a multi-exchange cryptocurrency trading platform built using DearP
 
 ## Features
 
-- Basic candlestick charting interface
+- Basic real-time candlestick charting interface
+- Real time EMA series for candle sticks
 - Real-time order book with price level zoom and aggregation toggle
 
 ## Getting Started
@@ -45,9 +46,10 @@ To get started with TradeSuite, follow these steps:
 
 ## Implemented Features
 
-- Basic candlestick charting interface with DearPyGUI
+- Basic real-time candlestick charting interface with DearPyGUI and CCXT PRO
 - Multiple tabs (numerous instances of the same exchange)
-- Real-time candlestick updates
+- Real-time candlestick updates and indicators
+- Object oriented design so you can build upon it
 
 ## Planned Features
 
