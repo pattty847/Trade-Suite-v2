@@ -25,7 +25,6 @@ class Viewport:
         # Setup dearpygui
         dpg.create_context()
         # self.load_theme()
-        self.setup_dpg()
         return self
 
     def load_theme(self):
@@ -86,7 +85,7 @@ class Viewport:
         dpg.bind_theme(global_theme)
         logging.info("Done loading theme.")
 
-    def setup_dpg(self):
+    def start_program(self):
         """
         The setup_dpg function is responsible for setting up the DearPyGUI event loop, viewport, and primary window.
             It also sets a frame callback to initialize the program once it has been set up.
@@ -137,20 +136,24 @@ class Viewport:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         logging.info("Trying to shutdown...")
-        if exc_type:
-            logging.error(
-                "An exception occurred: ", exc_info=(exc_type, exc_val, exc_tb)
-            )
 
         logging.info("Updating settings...")
 
         self.config_manager.update_setting("last_exchange", self.program.last_exchange)
 
         logging.info("Done.")
+        
+        self.task_manager.data.is_running = False
 
+        self.task_manager.stop_all_tasks(),
+        
         self.task_manager.run_task_with_loading_popup(
-            self.data.close_all_exchanges(), "Closing..."
+            self.data.close_all_exchanges(), "Closing CCXT exchanges."
         )
-        self.task_manager.stop_all_tasks()
         dpg.destroy_context()
         logging.info("Destroyed DearPyGUI context.")
+
+        if exc_type:
+            logging.error(
+                "An exception occurred: ", exc_info=(exc_type, exc_val, exc_tb)
+            )

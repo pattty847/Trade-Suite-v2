@@ -163,39 +163,6 @@ class MarketAggregator:
         logging.info(tabulate(rows, headers=header, tablefmt="grid"))
         # logging.info(self.trade_stats)
 
-    def on_order_book_update(self, exchange, orderbook, tick_size, aggregate):
-        # Extract bids and asks
-        bids = orderbook["bids"]
-        asks = orderbook["asks"]
-
-        if aggregate:
-            # Process for aggregated view
-            bids_df = self.group_and_aggregate(bids, tick_size)
-            asks_df = self.group_and_aggregate(asks, tick_size)
-            price_column = "price_group"
-        else:
-            # Process for non-aggregated view
-            bids_df = pd.DataFrame(bids, columns=["price", "quantity"])
-            asks_df = pd.DataFrame(asks, columns=["price", "quantity"])
-            price_column = "price"
-
-        # Sorting
-        bids_df = bids_df.sort_values(by=price_column, ascending=False)
-        asks_df = asks_df.sort_values(by=price_column, ascending=True)
-
-        # Calculate cumulative quantities only if aggregated
-        if aggregate:
-            bids_df["cumulative_quantity"] = bids_df["quantity"].cumsum()
-            asks_df["cumulative_quantity"] = asks_df["quantity"].cumsum()
-
-        # Update the series data
-        return bids_df, asks_df, price_column
-
-    def group_and_aggregate(self, orders, tick_size):
-        df = pd.DataFrame(orders, columns=["price", "quantity"])
-        df["price_group"] = (df["price"] // tick_size) * tick_size
-        return df.groupby("price_group").agg({"quantity": "sum"}).reset_index()
-
     def resample_data(self, ohlcv: pd.DataFrame, timeframe_str):
         temp_ohlcv = ohlcv.copy()
         temp_ohlcv["dates"] = pd.to_datetime(temp_ohlcv["dates"], unit="s")

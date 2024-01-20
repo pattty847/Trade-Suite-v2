@@ -72,4 +72,4 @@ if __name__ == "__main__":
 
     # EZ START LET'S GO
     with Viewport(data=data, config_manager=config_manager) as viewport:
-        pass
+        viewport.start_program()

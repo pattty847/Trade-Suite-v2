@@ -5,25 +5,14 @@ import pandas as pd
 
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
+from trade_suite.gui.components.orderbook_testing.abstract_ob import BaseOrderbook
 from trade_suite.gui.signals import SignalEmitter, Signals
 
 
-class OrderBook:
-    def __init__(
-        self,
-        tab,
-        exchange,
-        symbol: str,
-        emitter: SignalEmitter,
-        data: Data,
-        config: ConfigManager,
-    ):
-        self.tab = tab
-        self.exchange = exchange
-        self.symbol = symbol
-        self.emitter = emitter
-        self.data = data
-        self.config = config
+class OrderBook(BaseOrderbook):
+    def __init__(self, tab, exchange, symbol, emitter, data, config):
+        super().__init__(tab, exchange, symbol, emitter, data, config)
+        
         self.charts_group = f"{self.tab}_charts_group"  # tag id for chart's grouping
         self.order_book_group = (
             f"{self.tab}_order_book_group"  # tag id for order book group
@@ -54,59 +43,61 @@ class OrderBook:
 
     def draw_orderbook_plot(self):
         with dpg.child_window(menubar=True, width=-1):
-            with dpg.menu_bar():
-
-                with dpg.menu(label="Aggregate"):
-                    dpg.add_checkbox(
-                        label="Toggle",
-                        default_value=self.aggregated_order_book,
-                        callback=self._toggle_aggregated_order_book,
-                    )
-                    with dpg.tooltip(dpg.last_item()):
-                        dpg.add_text("Aggregates orderbook levels by the tick size.")
-
-                    # TICK SIZE SLIDER
-                    self.tick_size_slider_id = dpg.add_slider_float(
-                        label="Tick",
-                        default_value=self.market_info["precision"]["price"],
-                        callback=self._set_tick_size,
-                        min_value=self.market_info["precision"]["price"],
-                        max_value=10,
-                        show=self.aggregated_order_book,
-                    )
-                    with dpg.tooltip(dpg.last_item()):
-                        dpg.add_text("Set the aggregation tick size (CTRL+CLICK to enter size)")
-
-                with dpg.menu(label="Levels"):
-                    dpg.add_slider_float(
-                        label="Spread %",
-                        default_value=self.spread_percentage,
-                        min_value=0,
-                        max_value=1,
-                        callback=self._set_ob_levels,
-                    )
-                    with dpg.tooltip(dpg.last_item()):
-                        dpg.add_text("Change the midpoint spreadD %.")
+            self._draw_plots_menus()
 
             with dpg.group(horizontal=True):
                 dpg.add_text(f"Bid/Ask Ratio: ")
                 self.bid_ask_ratio = dpg.add_text("")
 
-            with dpg.plot(
-                label="Orderbook", no_title=True, height=-1, width=-1
-            ) as self.orderbook_tag:
-                dpg.add_plot_legend()
+            super().draw(label="Depth Chart")
+            
+            dpg.add_plot_legend()
 
-                self.ob_xaxis = dpg.add_plot_axis(dpg.mvXAxis)
-                with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.ob_yaxis:
+            self.ob_xaxis = dpg.add_plot_axis(dpg.mvXAxis)
+            with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.ob_yaxis:
 
-                    self.bids_stair_tag = dpg.add_stair_series([], [], label="Bids")
-                    self.asks_stair_tag = dpg.add_stair_series([], [], label="Asks")
+                self.bids_stair_tag = dpg.add_stair_series([], [], label="Bids")
+                self.asks_stair_tag = dpg.add_stair_series([], [], label="Asks")
+                    
+    
+    def _draw_plots_menus(self):
+        with dpg.menu_bar():
+            with dpg.menu(label="Aggregate"):
+                dpg.add_checkbox(
+                    label="Toggle",
+                    default_value=self.aggregated_order_book,
+                    callback=self._toggle_aggregated_order_book,
+                )
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text("Aggregates orderbook levels by the tick size.")
+
+                # TICK SIZE SLIDER
+                self.tick_size_slider_id = dpg.add_slider_float(
+                    label="Tick",
+                    default_value=self.market_info["precision"]["price"],
+                    callback=self._set_tick_size,
+                    min_value=self.market_info["precision"]["price"],
+                    max_value=10,
+                    show=self.aggregated_order_book,
+                )
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text("Set the aggregation tick size (CTRL+CLICK to enter size)")
+
+            with dpg.menu(label="Levels"):
+                dpg.add_slider_float(
+                    label="Spread %",
+                    default_value=self.spread_percentage,
+                    min_value=0,
+                    max_value=1,
+                    callback=self._set_ob_levels,
+                )
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text("Change the midpoint spreadD %.")
 
 
     # Listens for order book emissions
     def _on_order_book_update(self, tab, exchange, orderbook):
-        if exchange == self.exchange and tab == self.tab:
+        if self.is_active_tab_and_exchange(tab, exchange):
             # Pass the 'self.aggregated_order_book' to determine if aggregation is needed
             bids_df, asks_df, price_column = self._aggregate_and_group_order_book(
                 exchange,
@@ -236,13 +227,14 @@ class OrderBook:
 
 
     def _on_symbol_change(self, exchange, tab, new_symbol):
-        self.symbol = new_symbol
+        if self.is_active_tab_and_exchange(tab, exchange):
+            self.symbol = new_symbol
 
-        self.market_info = self.data.exchange_list[self.exchange]["ccxt"].market(
-            self.symbol
-        )
+            self.market_info = self.data.exchange_list[self.exchange]["ccxt"].market(
+                self.symbol
+            )
 
-        self._update_tick_size(exchange, tab, self.symbol)
+            self._update_tick_size(exchange, tab, self.symbol)
 
     def _update_tick_size(self, exchange, tab, new_symbol):
         price_precision = self.market_info["precision"]["price"]
@@ -251,4 +243,3 @@ class OrderBook:
     def _set_tick_size(self, sender, app_data: float, user_data):
         # Check if its within the precision limits
         self.tick_size = app_data
-        print(app_data)

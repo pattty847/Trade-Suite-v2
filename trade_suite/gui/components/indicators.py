@@ -1,4 +1,5 @@
 import inspect
+import logging
 import dearpygui.dearpygui as dpg
 import pandas as pd
 import pandas_ta

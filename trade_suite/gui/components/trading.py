@@ -163,7 +163,7 @@ class Trading:
 
         # TODO: Add popups maybe confirming if they want to hit the ask that far, show the order book depth perhaps too
         if side == "Long" and price >= self.ohlcv["closes"].tolist()[-1]:
-            logging.info(f"Cannot place long above the last close")
+            logging.info("Cannot place long above the last close")
             with dpg.window(modal=True, autosize=True) as cannot_long:
                 dpg.add_text("Cannot long above price.")
                 dpg.add_button(
@@ -172,8 +172,8 @@ class Trading:
             self.reset_drag_line_to_close()
             return
 
-        elif side == "Short" and price <= self.ohlcv["closes"].tolist()[-1]:
-            logging.info(f"Cannot place short below the last close")
+        if side == "Short" and price <= self.ohlcv["closes"].tolist()[-1]:
+            logging.info("Cannot place short below the last close")
             with dpg.window(modal=True, autosize=True) as cannot_short:
                 dpg.add_text("Cannot short below price.")
                 dpg.add_button(

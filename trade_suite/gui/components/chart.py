@@ -102,6 +102,7 @@ class Chart:
             input_tag = dpg.add_input_text(label="Search")
             symbols_list = dpg.add_listbox(
                 items=self.data.exchange_list[self.exchange]["symbols"],
+                default_value=self.active_symbol,
                 callback=lambda sender, symbol, user_data: self.emitter.emit(
                     Signals.SYMBOL_CHANGED,
                     exchange=self.exchange,
@@ -122,6 +123,7 @@ class Chart:
             dpg.add_text("Timeframe")
             dpg.add_listbox(
                 items=self.data.exchange_list[self.exchange]["timeframes"],
+                default_value=self.timeframe_str,
                 callback=lambda sender, timeframe, user_data: self.emitter.emit(
                     Signals.TIMEFRAME_CHANGED,
                     exchange=self.exchange,
@@ -178,7 +180,9 @@ class Chart:
 
                         self.candle_series_xaxis = dpg.add_plot_axis(
                             dpg.mvXAxis, time=True
+
                         )
+                        
                         with dpg.plot_axis(
                             dpg.mvYAxis, label="USD"
                         ) as self.candle_series_yaxis:
@@ -293,11 +297,10 @@ class Chart:
 
         dpg.draw_circle(
             center=[
-                timestamp
-                - (dpg.get_item_configuration(self.candle_series)["width"] / 2),
+                timestamp,
                 price,
             ],
-            radius=volume,
+            radius=volume * 5,
             color=[255, 255, 255, 255],
             thickness=1,
             parent=self.candlestick_plot,

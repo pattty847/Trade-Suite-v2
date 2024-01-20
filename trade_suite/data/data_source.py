@@ -21,6 +21,8 @@ class Data(CCXTInterface):
         super().__init__(exchanges)
         self.agg = MarketAggregator(influx, emitter)
         self.emitter = emitter
+        
+        self.is_running = True
 
     async def watch_trades_list(
         self,
@@ -47,7 +49,7 @@ class Data(CCXTInterface):
 
             logging.info(f"Starting trade stream for {symbols} on {exchange_id}")
             # TODO: Add a condition to streaming
-            while True:
+            while self.is_running:
                 try:
                     # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
                     # returns whatever the latest tick was for whichever coin for the exchange.
@@ -101,7 +103,7 @@ class Data(CCXTInterface):
         exchange_object = self.exchange_list[exchange]["ccxt"]
         logging.info(f"Starting trade stream for {symbol} on {exchange} tab {tab}")
         # TODO: Add a condition to streaming
-        while True:
+        while self.is_running:
             try:
                 # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
                 # returns whatever the latest tick was for whichever coin for the exchange.
@@ -144,7 +146,7 @@ class Data(CCXTInterface):
             exchange_object = self.exchange_list[exchange_id]["ccxt"]
             logging.info(f"Starting orderbook stream for {symbols} on {exchange_id}")
             if exchange_object.has["watchOrderBookForSymbols"]:
-                while True:
+                while self.is_running:
                     try:
                         orderbook = await exchange_object.watchOrderBookForSymbols(
                             symbols
@@ -179,7 +181,7 @@ class Data(CCXTInterface):
         """
         exchange_object = self.exchange_list[exchange]["ccxt"]
         logging.info(f"Starting orderbook stream for {symbol} on {exchange}")
-        while True:
+        while self.is_running:
             try:
                 orderbook = await exchange_object.watch_order_book(symbol)
                 # await self.influx.write_order_book(exchange_id, orderbook)
