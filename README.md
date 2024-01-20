@@ -13,7 +13,7 @@
 
 ## Introduction
 
-TradeSuite is a multi-exchange cryptocurrency trading platform built using DearPyGUI and ccxt pro. It provides a real-time streaming interface for multiple instances of the same exchange, with features such as basic candlestick charting and a real-time order book with price level zoom and aggregation toggle.
+TradeSuite is a multi-exchange cryptocurrency trading platform built using DearPyGUI and CCXT PRO. It provides a real-time streaming interface for multiple instances of the same exchange, with features such as real-time candlestick charting and a real-time order book with price level zoom and aggregation toggle. 
 
 ## Features
 
