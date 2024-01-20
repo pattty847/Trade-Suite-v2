@@ -67,9 +67,14 @@ class MenuBar:
                         callback=lambda s, a, u: self.emitter.emit(
                             Signals.CREATE_EXCHANGE_TAB, exchange=a
                         ),
-                        num_items=10
+                        num_items=10,
                     )
-                    dpg.set_item_callback(input_tag, callback=lambda: searcher(input_tag, exchange_list, list(ccxt.exchanges)))
+                    dpg.set_item_callback(
+                        input_tag,
+                        callback=lambda: searcher(
+                            input_tag, exchange_list, list(ccxt.exchanges)
+                        ),
+                    )
 
 
 class Program:
@@ -95,10 +100,12 @@ class Program:
         self.last_timeframe = (
             self.exchange_settings["last_timeframe"] if self.exchange_settings else None
         )
-        
+
         self.charts = {}
 
-        self.emitter.register(Signals.CREATE_EXCHANGE_TAB, callback=self.create_exchange_tab)
+        self.emitter.register(
+            Signals.CREATE_EXCHANGE_TAB, callback=self.create_exchange_tab
+        )
 
     # First function called after DearPyGUI is setup
     def initialize(self):
@@ -106,7 +113,7 @@ class Program:
         The initialize function is called when the program starts.
         It creates a window with a menu bar and tab bar.
         The tab bar has tabs for each exchange in the data object's exchange_list attribute.
-        
+
         :param self: Refer to the object that is being created
         :return: A tuple of the tab_bar and menu_bar
         :doc-author: Trelent
@@ -122,14 +129,16 @@ class Program:
                     for exchange in self.data.exchange_list:
                         self.create_exchange_tab(exchange)
                     # The first tab's id needs to be set initially as the visable tab
-                    self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[1][0]
+                    self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[
+                        1
+                    ][0]
 
     def create_exchange_tab(self, exchange):
         """
         The create_exchange_tab function is used to create a new tab for the exchange that was selected.
             It will check if the exchange has already been loaded, and if not it will load it.
             Then it creates a new Chart object with all of its parameters.
-        
+
         :param self: Represent the instance of the object itself
         :param exchange: Determine which exchange to load
         :return: The chart class, which is a widget
@@ -137,7 +146,9 @@ class Program:
         """
         if exchange not in self.data.exchange_list:
             # TODO: Add popup for error when exchange connot be loaded and why
-            self.task_manager.run_task_with_loading_popup(self.data.load_exchanges(exchange=exchange))
+            self.task_manager.run_task_with_loading_popup(
+                self.data.load_exchanges(exchange=exchange)
+            )
             chart: Chart = Chart(
                 parent=self.tab_bar,
                 exchange=exchange,

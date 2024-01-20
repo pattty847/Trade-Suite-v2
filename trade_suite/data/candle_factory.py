@@ -54,18 +54,19 @@ class CandleFactory:
     def on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
-            
+
     def batch_trades_for_candles(self, tab, exchange, trade_data):
         if tab != self.tab:
             return
 
         self._trade_queue.append(trade_data)
         current_time = time.time()
-        
+
         # Check if time or count threshold is reached
-        if (len(self._trade_queue) >= self.max_trades_per_candle_update or
-            (self.last_candle_timestamp is not None and 
-             current_time - self.last_candle_timestamp >= self.timeframe_seconds)):
+        if len(self._trade_queue) >= self.max_trades_per_candle_update or (
+            self.last_candle_timestamp is not None
+            and current_time - self.last_candle_timestamp >= self.timeframe_seconds
+        ):
             self.build_candle_from_batch(tab, exchange)
 
     def build_candle_from_batch(self, tab, exchange):

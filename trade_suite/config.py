@@ -20,12 +20,11 @@ class ConfigManager:
             or os.path.getsize(cls._config_file) == 0
         ):
             # File does not exist or is empty. Initialize with default config.
-            with open(cls._config_file, "w", encoding='utf-8') as file:
+            with open(cls._config_file, "w", encoding="utf-8") as file:
                 json.dump(cls._default_config, file)
             return cls._default_config
-        
-        
-        with open(cls._config_file, "r", encoding='utf-8') as file:
+
+        with open(cls._config_file, "r", encoding="utf-8") as file:
             return json.load(file)
 
     def get_setting(self, key):
@@ -33,5 +32,5 @@ class ConfigManager:
 
     def update_setting(self, key, value):
         self._config[key] = value
-        with open(self._config_file, "w", encoding='utf-8') as file:
+        with open(self._config_file, "w", encoding="utf-8") as file:
             json.dump(self._config, file)

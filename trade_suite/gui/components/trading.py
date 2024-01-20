@@ -13,6 +13,7 @@ from trade_suite.gui.utils import timeframe_to_seconds
 
 # TODO: Lots in here
 
+
 class Trading:
     def __init__(
         self,
@@ -76,7 +77,7 @@ class Trading:
     def on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
-    
+
     # Always listening for the updated candle stick chart
     def on_updated_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
@@ -97,7 +98,6 @@ class Trading:
             )
         else:
             dpg.configure_item(self.trade_mode_drag_line_tag, show=False)
-            
 
     def toggle_place_order_window(self):
         price = dpg.get_value(self.trade_mode_drag_line_tag)
@@ -121,11 +121,10 @@ class Trading:
                 ),
                 show=False,
             ):
-                account = dpg.add_button(
-                    label="Account",
-                    callback=self.setup_orders
+                account = dpg.add_button(label="Account", callback=self.setup_orders)
+                self.order_window_price_input_tag = dpg.add_input_float(
+                    label="Price", default_value=price
                 )
-                self.order_window_price_input_tag = dpg.add_input_float(label="Price", default_value=price)
                 stop = dpg.add_input_float(label="Stop Loss")
                 profit_pct = dpg.add_input_float(label="Take Profit")
                 size = dpg.add_input_int(label="Size")
@@ -161,21 +160,25 @@ class Trading:
     def place_order(self, sender, app_data, user_data):
         price, stop, profit_pct, size = [dpg.get_value(item) for item in user_data[0]]
         side = user_data[1]
-        
+
         # TODO: Add popups maybe confirming if they want to hit the ask that far, show the order book depth perhaps too
         if side == "Long" and price >= self.ohlcv["closes"].tolist()[-1]:
             logging.info(f"Cannot place long above the last close")
             with dpg.window(modal=True, autosize=True) as cannot_long:
                 dpg.add_text("Cannot long above price.")
-                dpg.add_button(label="Ok", callback=lambda: dpg.delete_item(cannot_long))
+                dpg.add_button(
+                    label="Ok", callback=lambda: dpg.delete_item(cannot_long)
+                )
             self.reset_drag_line_to_close()
             return
-        
+
         elif side == "Short" and price <= self.ohlcv["closes"].tolist()[-1]:
             logging.info(f"Cannot place short below the last close")
             with dpg.window(modal=True, autosize=True) as cannot_short:
                 dpg.add_text("Cannot short below price.")
-                dpg.add_button(label="Ok", callback=lambda: dpg.delete_item(cannot_short))
+                dpg.add_button(
+                    label="Ok", callback=lambda: dpg.delete_item(cannot_short)
+                )
             self.reset_drag_line_to_close()
             return
 
@@ -196,21 +199,23 @@ class Trading:
             parent=self.candlestick_plot,
             color=color,
         )
-        
+
         self.reset_drag_line_to_close()
-        
+
     def reset_drag_line_to_close(self):
         dpg.set_value(self.trade_mode_drag_line_tag, self.ohlcv["closes"].iloc[-1])
 
     def setup_orders(self):
         orders = self.task_manager.run_task_with_loading_popup(
             self.data.exchange_list[self.exchange]["ccxt"].fetch_orders(),
-            "Loading orders..."
+            "Loading orders...",
         )
 
         with dpg.window(label="Order Book", width=800, height=300):
             # Create the table and store its ID for later use
-            with dpg.table(header_row=True, resizable=True, sortable=True) as self.order_table_id:
+            with dpg.table(
+                header_row=True, resizable=True, sortable=True
+            ) as self.order_table_id:
                 dpg.add_table_column(label="Time Placed")
                 dpg.add_table_column(label="Symbol")
                 dpg.add_table_column(label="Type")
@@ -253,11 +258,10 @@ class Trading:
             if order.get("status") == "closed":
                 self.add_order_to_table(order)
 
-
     def set_order_line_price(self, sender, app_data, user_data):
         price = dpg.get_value(sender)
         self.drag_line_price = price
-        
+
         # If the order window is open, update the price to the user's drag line
         if dpg.does_item_exist(self.order_window_price_input_tag):
-            dpg.set_value(self.order_window_price_input_tag,  price)
+            dpg.set_value(self.order_window_price_input_tag, price)

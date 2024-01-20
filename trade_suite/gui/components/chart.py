@@ -53,10 +53,7 @@ class Chart:
             self.ohlcv,
         )
         self.indicators = Indicators(
-            self.tab_id, 
-            self.exchange, 
-            self.emitter, 
-            self.exchange_settings
+            self.tab_id, self.exchange, self.emitter, self.exchange_settings
         )
         self.trading = Trading(
             self.tab_id,
@@ -243,7 +240,9 @@ class Chart:
 
     def on_symbol_change(self, exchange, tab, new_symbol: str):
         if tab == self.tab_id:
-            logging.info(f"{exchange}: Symbol change - from {self.active_symbol} to {new_symbol}")
+            logging.info(
+                f"{exchange}: Symbol change - from {self.active_symbol} to {new_symbol}"
+            )
 
             dpg.configure_item(self.plots, label=f"{new_symbol} | {self.timeframe_str}")
 
@@ -257,8 +256,10 @@ class Chart:
             self.active_symbol = new_symbol
 
     def on_timeframe_change(self, exchange, tab, new_timeframe: str):
-        logging.info(f"{exchange}: Timeframe change - from {self.timeframe_str} to {new_timeframe}")
-        
+        logging.info(
+            f"{exchange}: Timeframe change - from {self.timeframe_str} to {new_timeframe}"
+        )
+
         if tab == self.tab_id:
             dpg.configure_item(
                 self.plots, label=f"{self.active_symbol} | {new_timeframe}"
@@ -291,7 +292,11 @@ class Chart:
         volume = trade_data["amount"] * 2
 
         dpg.draw_circle(
-            center=[timestamp - (dpg.get_item_configuration(self.candle_series)['width'] / 2), price],
+            center=[
+                timestamp
+                - (dpg.get_item_configuration(self.candle_series)["width"] / 2),
+                price,
+            ],
             radius=volume,
             color=[255, 255, 255, 255],
             thickness=1,

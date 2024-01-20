@@ -10,8 +10,7 @@ import ccxt.pro as ccxtpro
 
 class CCXTInterface:
     _instances = {}
-    
-    
+
     """
     This class manages connections to CCXT exchanges.
         exchange_list[exchange][ccxt/symbols/timeframes]
@@ -28,11 +27,10 @@ class CCXTInterface:
         if exchange_id in self._instances:
             logging.info(f"Using existing instance for {exchange_id}.")
             return self._instances[exchange_id]
-        
-        
+
         try:
             logging.info(f"Initializing {exchange_id}.")
-            exchange_class = getattr(ccxtpro, exchange_id)( 
+            exchange_class = getattr(ccxtpro, exchange_id)(
                 {
                     "apiKey": os.getenv("COINBASE_KEY"),
                     "secret": os.getenv("COINBASE_SECRET"),
@@ -41,14 +39,11 @@ class CCXTInterface:
                 }
                 if exchange_id == "coinbasepro"
                 else {}
-            ) # type: ccxtpro.Exchange
+            )  # type: ccxtpro.Exchange
 
             await exchange_class.load_markets()
 
-            if (
-                exchange_class.has["watchTrades"]
-                and exchange_class.has["fetchOHLCV"]
-            ):
+            if exchange_class.has["watchTrades"] and exchange_class.has["fetchOHLCV"]:
                 exchange_data = {
                     "ccxt": exchange_class,
                     "symbols": sorted(list(exchange_class.markets)),
@@ -78,7 +73,6 @@ class CCXTInterface:
             if exchange_data:
                 self.exchange_list[exchange_id] = exchange_data
                 logging.info(f"{exchange_id.capitalize()} has been initialized.")
-
 
     async def close_all_exchanges(self):
         """

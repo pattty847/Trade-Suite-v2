@@ -86,7 +86,7 @@ class Data(CCXTInterface):
         """
         The watch_trades function is a coroutine that will continuously stream trades from the exchange.
             It will also calculate trade statistics and write them to InfluxDB if enabled.
-        
+
         :param self: Represent the instance of the class
         :param tab: str: Identify the tab that is being used
         :param symbol: str: Specify which coin you want to watch
@@ -110,7 +110,10 @@ class Data(CCXTInterface):
 
                 if trades:
                     self.emitter.emit(
-                        Signals.NEW_TRADE, tab=tab, exchange=exchange, trade_data=trades[0]
+                        Signals.NEW_TRADE,
+                        tab=tab,
+                        exchange=exchange,
+                        trade_data=trades[0],
                     )
 
                 if track_stats:
@@ -130,13 +133,13 @@ class Data(CCXTInterface):
         """
         The watch_orderbooks function is a coroutine that takes in a list of symbols and returns an orderbook for each symbol on the exchange.
         The function will continue to run until it encounters an error, at which point it will log the error and restart itself.
-        
+
         :param self: Make the function a method of the class
         :param symbols: List[str]: Specify which symbols you want to watch
         :return: An orderbook, which is a dictionary with the following keys:
         :doc-author: Trelent
         """
-        
+
         for exchange_id in self.exchange_list.keys():
             exchange_object = self.exchange_list[exchange_id]["ccxt"]
             logging.info(f"Starting orderbook stream for {symbols} on {exchange_id}")
@@ -162,11 +165,11 @@ class Data(CCXTInterface):
         """
         The watch_orderbook function is a coroutine that takes in the tab, exchange and symbol as parameters.
         It then creates an exchange_object variable which is equal to the ccxt object of the given exchange.
-        Then it logs that it has started streaming orderbooks for a given symbol on a given exchange. 
-        Next, while True: (meaning forever) try: to create an orderbook variable which is equal to await 
-        the watch_orderbook function from ccxt with the parameter of symbol (which was passed into this function). 
+        Then it logs that it has started streaming orderbooks for a given symbol on a given exchange.
+        Next, while True: (meaning forever) try: to create an orderbook variable which is equal to await
+        the watch_orderbook function from ccxt with the parameter of symbol (which was passed into this function).
         Then emit Signals.ORDER_BOOK_UPDATE with parameters tab=tab,exchange
-        
+
         :param self: Access the class attributes and methods
         :param tab: Identify the tab that is being updated
         :param exchange: str: Identify the exchange that we want to get the orderbook from
@@ -182,7 +185,10 @@ class Data(CCXTInterface):
                 # await self.influx.write_order_book(exchange_id, orderbook)
                 # orderbook = dict_keys(['bids': [[price, amount]], 'asks': [[price, amount]], 'timestamp', 'datetime', 'nonce', 'symbol'])
                 self.emitter.emit(
-                    Signals.ORDER_BOOK_UPDATE, tab=tab, exchange=exchange, orderbook=orderbook
+                    Signals.ORDER_BOOK_UPDATE,
+                    tab=tab,
+                    exchange=exchange,
+                    orderbook=orderbook,
                 )
 
                 await asyncio.sleep(0.3)
@@ -200,7 +206,7 @@ class Data(CCXTInterface):
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
         The fetch_candles function is used to fetch candles from the exchanges.
-        
+
         :param self: Access the attributes and methods of the class
         :param tab: str: Identify the tab in which the data is being requested from
         :param exchanges: List[str]: Specify which exchanges to get data from
@@ -262,7 +268,10 @@ class Data(CCXTInterface):
             # Emitting the data
             if self.emitter:
                 self.emitter.emit(
-                    Signals.NEW_CANDLES, tab=tab, exchange=exchanges[0], candles=first_candle_df
+                    Signals.NEW_CANDLES,
+                    tab=tab,
+                    exchange=exchanges[0],
+                    candles=first_candle_df,
                 )
                 return
 

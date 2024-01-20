@@ -24,9 +24,9 @@ class MarketAggregator:
 
     def calc_trade_stats(self, exchange: str, trades: List[str]) -> None:
         """
-        The calc_trade_stats function will be passed a particular exchange and tick data (containing the symbol, 
+        The calc_trade_stats function will be passed a particular exchange and tick data (containing the symbol,
         and other relevant information).
-        
+
         It will then calculate the following metrics:
             - Total volume for an exchange and symbol pair
             - Total volume in USD for an exchange and symbol pair
@@ -163,9 +163,7 @@ class MarketAggregator:
         logging.info(tabulate(rows, headers=header, tablefmt="grid"))
         # logging.info(self.trade_stats)
 
-    def on_order_book_update(
-        self, exchange, orderbook, tick_size, aggregate
-    ):
+    def on_order_book_update(self, exchange, orderbook, tick_size, aggregate):
         # Extract bids and asks
         bids = orderbook["bids"]
         asks = orderbook["asks"]
@@ -192,7 +190,6 @@ class MarketAggregator:
 
         # Update the series data
         return bids_df, asks_df, price_column
-
 
     def group_and_aggregate(self, orders, tick_size):
         df = pd.DataFrame(orders, columns=["price", "quantity"])

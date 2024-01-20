@@ -42,7 +42,7 @@ from trade_suite.gui.viewport import Viewport
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s:%(filename)s%(funcName)s: %(message)s'
+    format="%(asctime)s %(levelname)s:%(filename)s:%(funcName)s: %(message)s",
 )
 dotenv.load_dotenv()
 logging.info(f"Environment variables loaded and logging setup.")
@@ -61,9 +61,11 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    
+
     config_manager = ConfigManager()
-    exchanges = config_manager.get_setting('last_exchange') or args.exchanges # add exchange list to initialize premptively
+    exchanges = (
+        config_manager.get_setting("last_exchange") or args.exchanges
+    )  # add exchange list to initialize premptively
     emitter = SignalEmitter()
     influx = InfluxDB()
     data = Data(influx, emitter, [exchanges])

@@ -33,7 +33,6 @@ class TaskManager:
         task.add_done_callback(lambda t: self.tasks.pop(name, None))
 
     def start_stream_for_chart(self, tab, exchange, symbol, timeframe):
-        
         trades_task = f"trades_{exchange}_{symbol}_{tab}"
         orderbook_task = f"orderbook_{exchange}_{symbol}_{tab}"
 
@@ -93,7 +92,7 @@ class TaskManager:
         except Exception as e:
             logging.error(f"An unexpected error occurred: {e}")
             # Handle other exceptions
-        
+
     def run_task_with_loading_popup(self, coro, message="Please wait..."):
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         # Display the loading modal
@@ -114,7 +113,6 @@ class TaskManager:
         # Add the completion callback to the future
         future.add_done_callback(on_task_complete)
         return future.result()
-
 
     def stop_task(self, name: str):
         if name in self.tasks:
