@@ -5,7 +5,7 @@ import pandas as pd
 
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
-from trade_suite.gui.components.orderbook_testing.abstract_ob import BaseOrderbook
+from trade_suite.gui.components.component_testing.abstract_ob import BaseOrderbook
 from trade_suite.gui.signals import SignalEmitter, Signals
 
 

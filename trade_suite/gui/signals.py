@@ -1,15 +1,18 @@
 from enum import Enum, auto
+import logging
 from typing import Callable
 
 
 class Signals(Enum):
     CREATE_EXCHANGE_TAB = auto()
+    LAUNCH_TPO = auto()
     NEW_CANDLES = auto()
     NEW_TRADE = auto()
     ORDER_BOOK_UPDATE = auto()
     SYMBOL_CHANGED = auto()
     TIMEFRAME_CHANGED = auto()
     TRADE_STAT_UPDATE = auto()
+    TRADE_STAT_UPDATE_LIST = auto()
     VIEWPORT_RESIZED = auto()
     UPDATED_CANDLES = auto()
 

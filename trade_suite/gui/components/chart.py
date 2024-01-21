@@ -1,46 +1,25 @@
 import logging
-import ccxt
 
 import dearpygui.dearpygui as dpg
 import pandas as pd
-from trade_suite.config import ConfigManager
 
 from trade_suite.data.candle_factory import CandleFactory
-from trade_suite.data.data_source import Data
+from trade_suite.gui.components.component_testing.base_tab import BaseTab
 from trade_suite.gui.components.indicators import Indicators
 from trade_suite.gui.components.orderbook import OrderBook
 from trade_suite.gui.components.trading import Trading
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.signals import Signals
 from trade_suite.gui.utils import searcher
 
 
-class Chart:
+class Chart(BaseTab):
     def __init__(self, parent, exchange, emitter, data, task_manager, config_manager):
-        self.initialize_attributes(
-            parent, exchange, emitter, data, task_manager, config_manager
-        )
+        super().__init__(parent, exchange, emitter, data, task_manager, config_manager)
+        
+        self.initialize_components()
         self.setup_ui_elements()
         self.register_event_listeners()
         self.start_data_stream()
-
-    def initialize_attributes(
-        self, parent, exchange, emitter, data, task_manager, config_manager
-    ):
-        self.tab_id = dpg.generate_uuid()
-        self.parent: str = parent
-        self.emitter: SignalEmitter = emitter
-        self.data: Data = data
-        self.task_manager: TaskManager = task_manager
-        self.config_manager: ConfigManager = config_manager
-        self.exchange: str = exchange
-        self.exchange_settings = self.config_manager.get_setting(exchange) or {}
-        self.ohlcv = pd.DataFrame(
-            columns=["dates", "opens", "highs", "lows", "closes", "volumes"]
-        )
-        self.timeframe_str = self.get_default_timeframe()
-        self.active_symbol = self.get_default_symbol()
-        self.initialize_components()
 
     def initialize_components(self):
         self.candle_factory = CandleFactory(
@@ -53,7 +32,10 @@ class Chart:
             self.ohlcv,
         )
         self.indicators = Indicators(
-            self.tab_id, self.exchange, self.emitter, self.exchange_settings
+            self.tab_id, 
+            self.exchange, 
+            self.emitter, 
+            self.exchange_settings
         )
         self.trading = Trading(
             self.tab_id,
@@ -72,20 +54,11 @@ class Chart:
             self.config_manager,
         )
 
-    def start_data_stream(self):
-        if self.exchange:
-            self.task_manager.start_stream_for_chart(
-                self.tab_id,
-                exchange=self.exchange,
-                symbol=self.active_symbol,
-                timeframe=self.timeframe_str,
-            )
-
     def setup_ui_elements(self):
-        with dpg.tab(label=self.exchange.upper(), tag=self.tab_id, parent=self.parent):
+        with dpg.tab(label=f"Candle: {self.exchange.upper()}", tag=self.tab_id, parent=self.parent):
             with dpg.child_window(menubar=True):
                 self.setup_menus()
-                self.setup_candlestick_chart()
+                self.setup_display()
 
     def setup_menus(self):
         with dpg.menu_bar():
@@ -147,7 +120,7 @@ class Chart:
                 label="Stop All Streaming", callback=self.task_manager.stop_all_tasks
             )
 
-    def setup_candlestick_chart(self):
+    def setup_display(self):
         with dpg.group(
             horizontal=True
         ):  # Use horizontal grouping to align elements side by side
@@ -220,6 +193,15 @@ class Chart:
 
             with dpg.group(width=-1, tag=self.orderbook.order_book_group):
                 self.orderbook.draw_orderbook_plot()
+                
+    def start_data_stream(self):
+        if self.exchange:
+            self.task_manager.start_stream_for_chart(
+                self.tab_id,
+                exchange=self.exchange,
+                symbol=self.active_symbol,
+                timeframe=self.timeframe_str,
+            )
 
     def register_event_listeners(self):
         event_mappings = {
@@ -291,25 +273,24 @@ class Chart:
             dpg.fit_axis_data(self.volume_series_yaxis)
 
     def on_new_trade(self, tab, exchange, trade_data):
-        timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
-        price = trade_data["price"]
-        volume = trade_data["amount"] * 2
-
-        dpg.draw_circle(
-            center=[
-                timestamp,
-                price,
-            ],
-            radius=volume * 5,
-            color=[255, 255, 255, 255],
-            thickness=1,
-            parent=self.candlestick_plot,
-        )
+        if tab == self.tab_id:
+            timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
+            price = trade_data["price"]
+            volume = trade_data["amount"] * 2
 
     def on_updated_candles(self, tab, exchange, candles):
         if tab == self.tab_id:
             self.ohlcv = candles
             self.update_candle_chart()
+    
+    def on_viewport_resize(self, width, height):
+        # Calculate new width for the charts and order book based on viewport size (works for now)
+        charts_width = width * 0.7
+        order_book_width = width - charts_width
+
+        # Update the width of the groups
+        dpg.configure_item(self.orderbook.charts_group, width=charts_width)
+        dpg.configure_item(self.orderbook.order_book_group, width=order_book_width)
 
     def update_candle_chart(self):
         # Redraw the candle stick series (assuming the dataframe has changed)
@@ -327,32 +308,6 @@ class Chart:
             y=self.ohlcv["volumes"].tolist(),
         )
 
-    def on_trade_stat_update(self, symbol, stats):
-        pass
-
-    def on_viewport_resize(self, width, height):
-        # Calculate new width for the charts and order book based on viewport size (works for now)
-        charts_width = width * 0.7
-        order_book_width = width - charts_width
-
-        # Update the width of the groups
-        dpg.configure_item(self.orderbook.charts_group, width=charts_width)
-        dpg.configure_item(self.orderbook.order_book_group, width=order_book_width)
-
-    def get_default_timeframe(self):
-        return (
-            self.exchange_settings.get("last_timeframe")
-            or self.data.exchange_list[self.exchange]["timeframes"][1]
-        )
-
-    def get_default_symbol(self):
-        return (
-            self.exchange_settings.get("last_symbol")
-            or self.get_default_bitcoin_market()
-        )
-
-    def get_default_bitcoin_market(self):
-        symbols = self.data.exchange_list[self.exchange]["symbols"]
-        return next(
-            (symbol for symbol in symbols if symbol in ["BTC/USD", "BTC/USDT"]), None
-        )
+    def on_trade_stat_update(self, tab, symbol, stats):
+        if tab == self.tab_id:
+            pass

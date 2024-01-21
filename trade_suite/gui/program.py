@@ -6,6 +6,7 @@ import ccxt.pro as ccxt
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
 from trade_suite.gui.components.chart import Chart
+from trade_suite.gui.components.tpo import TPO
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.utils import searcher
@@ -20,39 +21,38 @@ class MenuBar:
         self.data = data
         self.task_manger = task_manger
         with dpg.menu_bar(tag=self.tag):
-            with dpg.menu(label="DPG"):
-                with dpg.menu(label="Tools"):
-                    dpg.add_menu_item(label="Show Demo", callback=demo.show_demo)
-                    dpg.add_menu_item(
-                        label="Show About",
-                        callback=lambda: dpg.show_tool(dpg.mvTool_About),
-                    )
-                    dpg.add_menu_item(
-                        label="Show Metrics",
-                        callback=lambda: dpg.show_tool(dpg.mvTool_Metrics),
-                    )
-                    dpg.add_menu_item(
-                        label="Show Documentation",
-                        callback=lambda: dpg.show_tool(dpg.mvTool_Doc),
-                    )
-                    dpg.add_menu_item(
-                        label="Show Debug",
-                        callback=lambda: dpg.show_tool(dpg.mvTool_Debug),
-                    )
-                    dpg.add_menu_item(
-                        label="Show Style Editor",
-                        callback=lambda: dpg.show_tool(dpg.mvTool_Style),
-                    )
-                    dpg.add_menu_item(
-                        label="Show Font Manager",
-                        callback=lambda: dpg.show_tool(dpg.mvTool_Font),
-                    )
-                    dpg.add_menu_item(
-                        label="Show Item Registry",
-                        callback=lambda: dpg.show_tool(dpg.mvTool_ItemRegistry),
-                    )
-
-            with dpg.menu(label="Exchanges"):
+            with dpg.menu(label="DPG Tools"):
+                dpg.add_menu_item(label="Show Demo", callback=demo.show_demo)
+                dpg.add_menu_item(
+                    label="Show About",
+                    callback=lambda: dpg.show_tool(dpg.mvTool_About),
+                )
+                dpg.add_menu_item(
+                    label="Show Metrics",
+                    callback=lambda: dpg.show_tool(dpg.mvTool_Metrics),
+                )
+                dpg.add_menu_item(
+                    label="Show Documentation",
+                    callback=lambda: dpg.show_tool(dpg.mvTool_Doc),
+                )
+                dpg.add_menu_item(
+                    label="Show Debug",
+                    callback=lambda: dpg.show_tool(dpg.mvTool_Debug),
+                )
+                dpg.add_menu_item(
+                    label="Show Style Editor",
+                    callback=lambda: dpg.show_tool(dpg.mvTool_Style),
+                )
+                dpg.add_menu_item(
+                    label="Show Font Manager",
+                    callback=lambda: dpg.show_tool(dpg.mvTool_Font),
+                )
+                dpg.add_menu_item(
+                    label="Show Item Registry",
+                    callback=lambda: dpg.show_tool(dpg.mvTool_ItemRegistry),
+                )
+                    
+            with dpg.menu(label="New Tab"):
                 with dpg.menu(label="My Exchanges"):
                     dpg.add_listbox(
                         list(self.data.exchange_list.keys()),
@@ -61,8 +61,8 @@ class MenuBar:
                         ),
                     )
                 with dpg.menu(label="All Exchanges"):
-                    input_tag = dpg.add_input_text(label="Search")
-                    exchange_list = dpg.add_listbox(
+                    new_chart_search = dpg.add_input_text(label="Search")
+                    new_chart_exchange_list = dpg.add_listbox(
                         list(ccxt.exchanges),
                         callback=lambda s, a, u: self.emitter.emit(
                             Signals.CREATE_EXCHANGE_TAB, exchange=a
@@ -70,11 +70,27 @@ class MenuBar:
                         num_items=10,
                     )
                     dpg.set_item_callback(
-                        input_tag,
+                        new_chart_search,
                         callback=lambda: searcher(
-                            input_tag, exchange_list, list(ccxt.exchanges)
+                            new_chart_search, new_chart_exchange_list, list(ccxt.exchanges)
                         ),
                     )
+                with dpg.menu(label="TPO Testing"):
+                    with dpg.menu(label="My Exchanges"):
+                        new_tpo_search = dpg.add_input_text(label="Search")
+                        new_tpo_exchange_list = dpg.add_listbox(
+                            list(ccxt.exchanges),
+                            callback=lambda s, a, u: self.emitter.emit(
+                                Signals.LAUNCH_TPO, exchange=a
+                            ),
+                            num_items=10,
+                        )
+                        dpg.set_item_callback(
+                            new_tpo_search,
+                            callback=lambda: searcher(
+                                new_tpo_search, new_tpo_exchange_list, list(ccxt.exchanges)
+                            ),
+                        )
 
 
 class Program:
@@ -105,6 +121,9 @@ class Program:
 
         self.emitter.register(
             Signals.CREATE_EXCHANGE_TAB, callback=self.create_exchange_tab
+        )
+        self.emitter.register(
+            Signals.LAUNCH_TPO, callback=self.create_tpo_tab
         )
 
     # First function called after DearPyGUI is setup
@@ -166,4 +185,16 @@ class Program:
                 task_manager=self.task_manager,
                 config_manager=self.config_manager,
             )
-        self.charts[chart.tab_id] = chart
+        self.charts["Chart", chart.tab_id]: Chart = chart
+    
+    
+    def create_tpo_tab(self, exchange):
+        tpo = TPO(                
+            parent=self.tab_bar,
+            exchange=exchange,
+            emitter=self.emitter,
+            data=self.data,
+            task_manager=self.task_manager,
+            config_manager=self.config_manager
+        )
+        self.charts["TPO", tpo.tab_id]: TPO = tpo

@@ -3,25 +3,14 @@ from abc import ABC, abstractmethod
 import dearpygui.dearpygui as dpg
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
+from trade_suite.gui.components.component_testing.base_tab import BaseTab
 from trade_suite.gui.signals import SignalEmitter, Signals
 
 
-class BaseOrderbook(ABC):
-    def __init__(
-        self,
-        tab,
-        exchange,
-        symbol: str,
-        emitter: SignalEmitter,
-        data: Data,
-        config: ConfigManager,
-    ):
-        self.tab = tab
-        self.exchange = exchange
-        self.symbol = symbol
-        self.emitter = emitter
-        self.data = data
-        self.config = config
+class BaseOrderbook(ABC, BaseTab):
+    def __init__(self, parent, exchange, emitter, data, task_manager, config_manager):
+        super().__init__(parent, exchange, emitter, data, task_manager, config_manager)
+        
         # tag id for chart's grouping
         self.charts_group = f"{self.tab}_charts_group"
         self.order_book_group = (
@@ -36,9 +25,7 @@ class BaseOrderbook(ABC):
 
     @abstractmethod
     def draw(self, label):
-        with dpg.plot(
-            label=label, height=-1, width=-1
-        ) as self.plot:
+        with dpg.child_window(label=f'Test OrderBook: {self.exchange}'):
             pass
         
     @abstractmethod
@@ -57,14 +44,18 @@ class TestOB(BaseOrderbook):
         # First, call the base class draw to setup the plot
         super().draw(label=label)
         
-        dpg.add_plot_legend()
+        with dpg.plot(
+            label=label, height=-1, width=-1
+        ) as self.plot:
+            
+            dpg.add_plot_legend()
 
-        self.ob_xaxis = dpg.add_plot_axis(dpg.mvXAxis)
-        
-        with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.yaxis:
-            # Assuming self.plot is already created by the base class
-            self.bids_bar_series = dpg.add_bar_series([], [], label="Bids", parent=self.yaxis)
-            self.asks_bar_series = dpg.add_bar_series([], [], label="Asks", parent=self.yaxis)
+            self.ob_xaxis = dpg.add_plot_axis(dpg.mvXAxis)
+            
+            with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.yaxis:
+                # Assuming self.plot is already created by the base class
+                self.bids_bar_series = dpg.add_bar_series([], [], label="Bids", parent=self.yaxis)
+                self.asks_bar_series = dpg.add_bar_series([], [], label="Asks", parent=self.yaxis)
 
     def on_order_book_update(self, tab, exchange, orderbook):
         # Here, handle updating the data for the bar series based on the orderbook update.

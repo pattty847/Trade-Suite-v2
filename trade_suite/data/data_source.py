@@ -26,7 +26,8 @@ class Data(CCXTInterface):
 
     async def watch_trades_list(
         self,
-        symbols: List[str],
+        tabs: List = None,
+        symbols: List[str] = None,
         track_stats: bool = False,
         write_trades: bool = False,
         write_stats: bool = False,
@@ -67,7 +68,7 @@ class Data(CCXTInterface):
                         symbol, stats = self.agg.calc_trade_stats(exchange_id, trades)
                         # self.agg.report_statistics() # logging.info to console
                         self.emitter.emit(
-                            Signals.TRADE_STAT_UPDATE, symbol=symbol, stats=stats
+                            Signals.TRADE_STAT_UPDATE, tab=tabs, symbol=symbol, stats=stats
                         )
 
                     if write_stats and write_trades:
@@ -122,7 +123,7 @@ class Data(CCXTInterface):
                     symbol, stats = self.agg.calc_trade_stats(exchange, trades)
                     # self.agg.report_statistics() # logging.info to console
                     self.emitter.emit(
-                        Signals.TRADE_STAT_UPDATE, symbol=symbol, stats=stats
+                        Signals.TRADE_STAT_UPDATE, tab=tab, symbol=symbol, stats=stats
                     )
 
                 if write_stats and write_trades:
