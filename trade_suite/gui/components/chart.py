@@ -20,6 +20,7 @@ class Chart:
         self.initialize_attributes(
             parent, exchange, emitter, data, task_manager, config_manager
         )
+        self.initialize_components()
         self.setup_ui_elements()
         self.register_event_listeners()
         self.start_data_stream()
@@ -40,7 +41,6 @@ class Chart:
         )
         self.timeframe_str = self.get_default_timeframe()
         self.active_symbol = self.get_default_symbol()
-        self.initialize_components()
 
     def initialize_components(self):
         self.candle_factory = CandleFactory(

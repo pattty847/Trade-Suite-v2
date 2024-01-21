@@ -6,6 +6,7 @@ import ccxt.pro as ccxt
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
 from trade_suite.gui.components.chart import Chart
+from trade_suite.gui.components.tpo import TPO
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.utils import searcher
@@ -53,26 +54,34 @@ class MenuBar:
                     )
 
             with dpg.menu(label="Exchanges"):
-                with dpg.menu(label="My Exchanges"):
-                    dpg.add_listbox(
-                        list(self.data.exchange_list.keys()),
-                        callback=lambda s, a, u: self.emitter.emit(
-                            Signals.CREATE_EXCHANGE_TAB, exchange=a
-                        ),
-                    )
-                with dpg.menu(label="All Exchanges"):
-                    input_tag = dpg.add_input_text(label="Search")
-                    exchange_list = dpg.add_listbox(
+                input_tag = dpg.add_input_text(label="Search")
+                exchange_list = dpg.add_listbox(
+                    list(ccxt.exchanges),
+                    callback=lambda s, a, u: self.emitter.emit(
+                        Signals.CREATE_EXCHANGE_TAB, exchange=a
+                    ),
+                    num_items=10,
+                )
+                dpg.set_item_callback(
+                    input_tag,
+                    callback=lambda: searcher(
+                        input_tag, exchange_list, list(ccxt.exchanges)
+                    ),
+                )
+                
+                with dpg.menu(label="TPO Testing"):
+                    new_tpo_search = dpg.add_input_text(label="Search")
+                    new_tpo_exchange_list = dpg.add_listbox(
                         list(ccxt.exchanges),
                         callback=lambda s, a, u: self.emitter.emit(
-                            Signals.CREATE_EXCHANGE_TAB, exchange=a
+                            Signals.LAUNCH_TPO, exchange=a
                         ),
                         num_items=10,
                     )
                     dpg.set_item_callback(
-                        input_tag,
+                        new_tpo_search,
                         callback=lambda: searcher(
-                            input_tag, exchange_list, list(ccxt.exchanges)
+                            new_tpo_search, new_tpo_exchange_list, list(ccxt.exchanges)
                         ),
                     )
 
@@ -166,4 +175,16 @@ class Program:
                 task_manager=self.task_manager,
                 config_manager=self.config_manager,
             )
-        self.charts[chart.tab_id] = chart
+        self.charts["Chart", chart.tab_id]: Chart = chart
+    
+    
+    def create_tpo_tab(self, exchange):
+        tpo = TPO(                
+            parent=self.tab_bar,
+            exchange=exchange,
+            emitter=self.emitter,
+            data=self.data,
+            task_manager=self.task_manager,
+            config_manager=self.config_manager
+        )
+        self.charts["TPO", tpo.tab_id]: TPO = tpo
