@@ -278,11 +278,13 @@ class InfluxDB:
 
     def get_influxdb_client(self, is_local):
         return InfluxDBClient(
-            url="http://localhost:8086"
-            if is_local
-            else "https://us-east-1-1.aws.cloud2.influxdata.com",
-            token=os.getenv("INFLUXDB_TOKEN_LOCAL")
-            if is_local
-            else os.getenv("INFLUXDB"),
+            url=(
+                "http://localhost:8086"
+                if is_local
+                else "https://us-east-1-1.aws.cloud2.influxdata.com"
+            ),
+            token=(
+                os.getenv("INFLUXDB_TOKEN_LOCAL") if is_local else os.getenv("INFLUXDB")
+            ),
             org="pepe",
         )

@@ -33,14 +33,11 @@ class OrderBook:
         self.aggregated_order_book = True
         self.spread_percentage = 0.005
         self.tick_size = 0.01
-        self.market_info = self.data.exchange_list[self.exchange].market(
-            self.symbol
-        )
+        self.market_info = self.data.exchange_list[self.exchange].market(self.symbol)
 
         self.emitter.register(Signals.ORDER_BOOK_UPDATE, self._on_order_book_update)
         self.emitter.register(Signals.SYMBOL_CHANGED, self._on_symbol_change)
         # self.emitter.register(Signals.NEW_TRADE, self._on_trade)
-        
 
         self._update_tick_size(None, None, self.symbol)
 
@@ -75,7 +72,9 @@ class OrderBook:
                         show=self.aggregated_order_book,
                     )
                     with dpg.tooltip(dpg.last_item()):
-                        dpg.add_text("Set the aggregation tick size (CTRL+CLICK to enter size)")
+                        dpg.add_text(
+                            "Set the aggregation tick size (CTRL+CLICK to enter size)"
+                        )
 
                 with dpg.menu(label="Levels"):
                     dpg.add_slider_float(
@@ -103,7 +102,6 @@ class OrderBook:
                     self.bids_stair_tag = dpg.add_stair_series([], [], label="Bids")
                     self.asks_stair_tag = dpg.add_stair_series([], [], label="Asks")
 
-
     # Listens for order book emissions
     def _on_order_book_update(self, tab, exchange, orderbook):
         if exchange == self.exchange and tab == self.tab:
@@ -117,8 +115,10 @@ class OrderBook:
 
             # Whether aggregated or not, update the order book display
             self._update_order_book(bids_df, asks_df, price_column)
-            
-    def _aggregate_and_group_order_book(self, exchange, orderbook, tick_size, aggregate):
+
+    def _aggregate_and_group_order_book(
+        self, exchange, orderbook, tick_size, aggregate
+    ):
         # Extract bids and asks
         bids = orderbook["bids"]
         asks = orderbook["asks"]
@@ -160,7 +160,6 @@ class OrderBook:
         ask_quantities = asks_df[
             "cumulative_quantity" if self.aggregated_order_book else "quantity"
         ].tolist()
-
 
         dpg.configure_item(self.bids_stair_tag, x=bid_prices, y=bid_quantities)
         dpg.configure_item(self.asks_stair_tag, x=ask_prices, y=ask_quantities)
@@ -215,7 +214,6 @@ class OrderBook:
         dpg.set_value(
             self.bid_ask_ratio, f"{bid_ask_ratio:.2f}"
         )  # Replace with actual UI element ID
-            
 
     def _toggle_show_hide_orderbook(self):
         self.show_orderbook = not self.show_orderbook
@@ -234,13 +232,10 @@ class OrderBook:
     def _set_ob_levels(self, sender, app_data, user_data):
         self.spread_percentage = app_data
 
-
     def _on_symbol_change(self, exchange, tab, new_symbol):
         self.symbol = new_symbol
 
-        self.market_info = self.data.exchange_list[self.exchange].market(
-            self.symbol
-        )
+        self.market_info = self.data.exchange_list[self.exchange].market(self.symbol)
 
         self._update_tick_size(exchange, tab, self.symbol)
 

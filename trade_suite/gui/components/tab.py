@@ -6,27 +6,32 @@ from gui.signals import SignalEmitter, Signals
 from gui.task_manager import TaskManager
 from gui.utils import searcher
 
+# TESTING CLASS
+
+"""
+    Want to create a BaseTab where the tab comes with a whole bunch of features out the box. Not sure what yet. 
+"""
 
 class Tab:
+    
     def __init__(self, parent, exchange, emitter, data, task_manager, config_manager):
         self.tab_id = dpg.generate_uuid()
         self.parent: str = parent
-        
+
         self.emitter: SignalEmitter = emitter
         self.data: Data = data
         self.task_manager: TaskManager = task_manager
         self.config_manager: ConfigManager = config_manager
-        
-        
+
         self.exchange: str = exchange
         self.exchange_settings = self.config_manager.get_setting(exchange) or {}
-        
+
         self.setup_ui_elements()
         self.setup_menus()
 
     def initialize_components(self):
         raise NotImplementedError("Subclasses must implement this method.")
-    
+
     def setup_content(self):
         raise NotImplementedError("Subclasses must implement this method.")
 

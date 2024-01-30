@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import threading
 import dearpygui.dearpygui as dpg
 
 
@@ -69,6 +70,38 @@ def create_loading_modal(message):
     # Center the modal once it's rendered
     dpg.render_dearpygui_frame()
     center_window("loading_modal")
+
+
+def create_timed_popup(message, time, label="Take Note", additional_ui_callback=None):
+    """
+    Create a popup modal that displays a message for a specified time.
+
+    :param message: The message to display in the popup.
+    :param time: The duration in seconds for which the popup is displayed.
+    :param additional_ui_callback: A callback function to add additional UI elements to the popup.
+    """
+
+    with dpg.window(label=label, autosize=True, tag="popup_modal"):
+        dpg.add_text(message)
+        if additional_ui_callback:
+            additional_ui_callback()
+
+    # Center the modal
+    dpg.render_dearpygui_frame()
+    center_window("popup_modal")
+
+    # Set a timer to close and delete the popup
+    threading.Timer(time, lambda: delete_popup_modal("popup_modal")).start()
+
+
+def delete_popup_modal(window_tag):
+    """
+    Close and delete the specified popup modal.
+
+    :param window_tag: The tag of the window to delete.
+    """
+    if dpg.does_item_exist(window_tag):
+        dpg.delete_item(window_tag)
 
 
 def searcher(searcher, result, search_list):

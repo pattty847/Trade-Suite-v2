@@ -68,7 +68,7 @@ class MenuBar:
                         input_tag, exchange_list_menu_bar, list(ccxt.exchanges)
                     ),
                 )
-                
+
             with dpg.menu(label="TPO Testing"):
                 new_tpo_search = dpg.add_input_text(label="Search")
                 new_tpo_exchange_list = dpg.add_listbox(
@@ -87,7 +87,6 @@ class MenuBar:
 
 
 class Program:
-
     """
     This is the MainWindow class which contains the set up of other windows, the navigation bar, etc.
     """
@@ -113,10 +112,12 @@ class Program:
         self.charts = {}
 
         self.emitter.register(
-            Signals.CREATE_EXCHANGE_TAB, callback=self.create_exchange_tab,
+            Signals.CREATE_EXCHANGE_TAB,
+            callback=self.create_exchange_tab,
         )
         self.emitter.register(
-            Signals.CREATE_TAB, callback=self.create_tab,
+            Signals.CREATE_TAB,
+            callback=self.create_tab,
         )
 
     # First function called after DearPyGUI is setup
@@ -142,7 +143,9 @@ class Program:
                     for exchange_id, _ in self.data.exchange_list.items():
                         self.create_exchange_tab(exchange_id)
                     # The visable tab will need to be set to the first chart
-                    self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[1][0]
+                    self.task_manager.visable_tab = dpg.get_item_children(self.tab_bar)[
+                        1
+                    ][0]
 
     def create_exchange_tab(self, exchange):
         """
@@ -178,15 +181,14 @@ class Program:
                 config_manager=self.config_manager,
             )
         self.charts["Chart", chart.tab_id]: Chart = chart
-    
-    
+
     def create_tab(self, exchange):
-        tpo = TPO(                
+        tpo = TPO(
             parent=self.tab_bar,
             exchange=exchange,
             emitter=self.emitter,
             data=self.data,
             task_manager=self.task_manager,
-            config_manager=self.config_manager
+            config_manager=self.config_manager,
         )
         self.charts["TPO", tpo.tab_id]: TPO = tpo

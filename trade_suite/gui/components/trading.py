@@ -104,31 +104,34 @@ class Trading:
             )
         else:
             dpg.configure_item(self.trade_mode_drag_line_tag, show=False)
-            
+
     def toggle_place_order_window(self):
         pass
-    
-    def build_trading_panel(self):
-        with dpg.child_window(label="Order Entry", width=-1, height=200):
-            with dpg.tab_bar():
-                with dpg.tab(label="Manual"):
-                    with dpg.group(horizontal=True):
-                        dpg.add_radio_button(items=["Live", "Paper"], horizontal=True)
 
-                        dpg.add_text("Accounts")
-                        accounts = ["Account 1", "Account 2"]
-                        dpg.add_combo(items=accounts, width=100, default_value=accounts[0])
-                        
-                        dpg.add_text("Balance: ")
-                        dpg.add_text("$10000", color=(0, 255, 0))
-                        
-                        dpg.add_button(label="MKT LONG")
-                        dpg.add_button(label="MKT SHORT")
+    def build_trading_panel(self):
+        with dpg.tab_bar():
+            with dpg.tab(label="Manual"):
+                with dpg.group(horizontal=True):
+                    dpg.add_radio_button(items=["Live", "Paper"], horizontal=True)
+                    
+                    dpg.add_spacer()
+
+                    dpg.add_text("Accounts")
+                    accounts = ["Account 1", "Account 2"]
+                    dpg.add_combo(
+                        items=accounts, width=100, default_value=accounts[0]
+                    )
+
+                    dpg.add_text("Balance: ")
+                    dpg.add_text("$10000", color=(0, 255, 0))
+
+                    dpg.add_button(label="MKT LONG")
+                    dpg.add_button(label="MKT SHORT")
                 
-                with dpg.tab(label="Automation"):
-                    pass
-            
-            
+                self.setup_orders()
+
+            with dpg.tab(label="Automation"):
+                pass
 
     def _toggle_place_order_window(self):
         price = dpg.get_value(self.trade_mode_drag_line_tag)
@@ -242,20 +245,18 @@ class Trading:
             "Loading orders...",
         )
 
-        with dpg.window(label="Order Book", width=800, height=300):
-            # Create the table and store its ID for later use
-            with dpg.table(
-                header_row=True, resizable=True, sortable=True
-            ) as self.order_table_id:
-                dpg.add_table_column(label="Time Placed")
-                dpg.add_table_column(label="Symbol")
-                dpg.add_table_column(label="Type")
-                dpg.add_table_column(label="Side")
-                dpg.add_table_column(label="Price")
-                dpg.add_table_column(label="Amount")
-                dpg.add_table_column(label="% Filled")
-                dpg.add_table_column(label="Total")
-                dpg.add_table_column(label="Status")
+        with dpg.table(
+            header_row=True, resizable=True, sortable=True
+        ) as self.order_table_id:
+            dpg.add_table_column(label="Time Placed")
+            dpg.add_table_column(label="Symbol")
+            dpg.add_table_column(label="Type")
+            dpg.add_table_column(label="Side")
+            dpg.add_table_column(label="Price")
+            dpg.add_table_column(label="Amount")
+            dpg.add_table_column(label="% Filled")
+            dpg.add_table_column(label="Total")
+            dpg.add_table_column(label="Status")
 
         self.create_order_table(orders)
 

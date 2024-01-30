@@ -21,7 +21,7 @@ class Data(CCXTInterface):
         super().__init__(exchanges)
         self.agg = MarketAggregator(influx, emitter)
         self.emitter = emitter
-        
+
         self.is_running = True
 
     async def watch_trades_list(

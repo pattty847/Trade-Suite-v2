@@ -8,7 +8,8 @@ from gui.signals import SignalEmitter, Signals
 from gui.task_manager import TaskManager
 from gui.utils import searcher
 
-class TPO():
+
+class TPO:
     def __init__(self, parent, exchange, emitter, data, task_manager, config_manager):
         self.initialize_attributes(
             parent, exchange, emitter, data, task_manager, config_manager
@@ -32,26 +33,24 @@ class TPO():
         self.ohlcv = pd.DataFrame(
             columns=["dates", "opens", "highs", "lows", "closes", "volumes"]
         )
-        
+
         self.timeframe_str = self.get_default_timeframe()
         self.active_symbol = self.get_default_symbol()
-        
-        
+
     def initialize_components(self):
         pass
-        
-        
+
     def start_data_stream(self):
         pass
-        
-        
+
     def setup_ui_elements(self):
-        with dpg.tab(label=f"TPO: {self.exchange.upper()}", tag=self.tab_id, parent=self.parent):
+        with dpg.tab(
+            label=f"TPO: {self.exchange.upper()}", tag=self.tab_id, parent=self.parent
+        ):
             with dpg.child_window(menubar=True):
                 self.setup_menus()
                 self.setup_display()
-                
-                
+
     def setup_menus(self):
         with dpg.menu_bar():
             self.setup_exchange_menu()
@@ -93,21 +92,15 @@ class TPO():
                 ),
                 num_items=5,
             )
-                
-                
+
     def setup_display(self):
         with dpg.plot(label="", no_title=True, height=-1):
             dpg.add_plot_legend()
-            self.series_xaxis = dpg.add_plot_axis(
-                dpg.mvXAxis, time=True
-            )
-            with dpg.plot_axis(
-                dpg.mvYAxis, label="Volume"
-            ) as self.series_yaxis:
+            self.series_xaxis = dpg.add_plot_axis(dpg.mvXAxis, time=True)
+            with dpg.plot_axis(dpg.mvYAxis, label="Volume") as self.series_yaxis:
                 # Ensure data is populated before adding series
                 self.series = dpg.add_line_series([], [])
-    
-        
+
     def register_event_listeners(self):
         event_mappings = {
             Signals.NEW_TRADE: self.on_new_trade,
@@ -117,28 +110,29 @@ class TPO():
         }
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
-           
 
     def on_new_trade(self, tab, exchange, trade_data):
         if tab == self.tab_id:
             timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
             price = trade_data["price"]
             volume = trade_data["amount"] * 2
-        
-        
+
     def on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
             self.ohlcv = candles
-            
-            self.series_ = {"dates": self.ohlcv['dates'].tolist(), "closes": self.ohlcv['closes'].tolist()}
-            dpg.configure_item(self.series, self.series_['dates'], self.series_['closes'])
-    
-    
+
+            self.series_ = {
+                "dates": self.ohlcv["dates"].tolist(),
+                "closes": self.ohlcv["closes"].tolist(),
+            }
+            dpg.configure_item(
+                self.series, self.series_["dates"], self.series_["closes"]
+            )
+
     def on_updated_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
             self.ohlcv = candles
-    
-                
+
     def on_viewport_resize(self, width, height):
         pass
 

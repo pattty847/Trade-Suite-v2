@@ -74,7 +74,10 @@ class CandleFactory:
 
             # Emit the updated candles
             self.emitter.emit(
-                Signals.UPDATED_CANDLES, tab=self.tab, exchange=exchange, candles=self.ohlcv
+                Signals.UPDATED_CANDLES,
+                tab=self.tab,
+                exchange=exchange,
+                candles=self.ohlcv,
             )
 
     def _build_candle_from_batch(self, tab, exchange, trade_data):
@@ -89,7 +92,10 @@ class CandleFactory:
             if self.last_candle_timestamp is None:
                 self.last_candle_timestamp = adjusted_timestamp
 
-            if adjusted_timestamp >= self.last_candle_timestamp + self.timeframe_seconds:
+            if (
+                adjusted_timestamp
+                >= self.last_candle_timestamp + self.timeframe_seconds
+            ):
                 # Start a new candle
                 new_candle = {
                     "dates": self.last_candle_timestamp + self.timeframe_seconds,
@@ -115,7 +121,10 @@ class CandleFactory:
                 self.ohlcv.at[self.ohlcv.index[-1], "volumes"] += volume
 
             self.emitter.emit(
-                Signals.UPDATED_CANDLES, tab=self.tab, exchange=exchange, candles=self.ohlcv
+                Signals.UPDATED_CANDLES,
+                tab=self.tab,
+                exchange=exchange,
+                candles=self.ohlcv,
             )
 
     def resample_candle(self, new_timeframe: str, active_exchange):
@@ -124,10 +133,16 @@ class CandleFactory:
         if new_timeframe_in_seconds > self.timeframe_seconds:
             ohlcv = self.data.agg.resample_data(self.ohlcv, new_timeframe)
             self.emitter.emit(
-                Signals.UPDATED_CANDLES, tab=self.tab, exchange=active_exchange, candles=ohlcv
+                Signals.UPDATED_CANDLES,
+                tab=self.tab,
+                exchange=active_exchange,
+                candles=ohlcv,
             )
             self.ohlcv = ohlcv
         else:
             return None
-        
+
         self.timeframe_seconds = new_timeframe_in_seconds
+
+    def set_trade_batch(self, sender, app_data, user_data):
+        self.max_trades_per_candle_update = app_data

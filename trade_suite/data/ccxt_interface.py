@@ -20,19 +20,6 @@ class CCXTInterface:
         self.exchanges = exchanges
         self.exchange_list: Dict[str, Dict[str, Any]] = {}
 
-    def get_credentials(self, exchange_id: str) -> Optional[Dict[str, str]]:
-        """
-        Retrieve API credentials for a given exchange from environment variables.
-        """
-        prefix = exchange_id.upper()
-        api_key = os.getenv(f"{prefix}_API_KEY")
-        secret = os.getenv(f"{prefix}_SECRET")
-        password = os.getenv(f"{prefix}_PASSWORD")
-
-        if api_key and secret:
-            return {"apiKey": api_key, "secret": secret, "password": password}
-        return None
-
     async def load_exchange(self, exchange_id: str):
         """
         Initialize a single exchange with credentials.
@@ -41,20 +28,22 @@ class CCXTInterface:
             logging.info(f"Using existing instance for {exchange_id}.")
             return self._instances[exchange_id]
 
-        credentials = self.get_credentials(exchange_id)
+        credentials = self._get_credentials(exchange_id)
         if not credentials:
             logging.error(f"Credentials not found for {exchange_id}")
             return None
 
         try:
             logging.info(f"Initializing {exchange_id} with credentials.")
-            exchange_class = getattr(ccxtpro, exchange_id)(credentials)
+            exchange_class: ccxt.Exchange = getattr(ccxtpro, exchange_id)(credentials)
 
             await exchange_class.load_markets()
-            
-            if all(feature in exchange_class.has for feature in 
-                   ["watchTrades", "watchOrderBook", "fetchOHLCV"]):
-                
+
+            if all(
+                feature in exchange_class.has
+                for feature in ["watchTrades", "watchOrderBook", "fetchOHLCV"]
+            ):
+
                 # Store only the exchange_class instance
                 self._instances[exchange_id] = exchange_class
                 return exchange_class
@@ -65,11 +54,11 @@ class CCXTInterface:
             logging.error(f"Error with {exchange_id}: {e}")
         return None
 
-    async def load_exchanges(self, exchanges: List[str]=None):
+    async def load_exchanges(self, exchanges: List[str] = None):
         """
         Initialize a list of exchanges passed to the function, or if nothing is passed, initialize all exchanges in self.exchangnes
         """
-        exchanges_to_load = exchanges if exchanges else self.exchanges
+        exchanges_to_load = [exchanges] if exchanges else self.exchanges
 
         for exchange_id in exchanges_to_load:
             exchange_data = await self.load_exchange(exchange_id)
@@ -100,31 +89,23 @@ class CCXTInterface:
             close_exchange(exchange_id) for exchange_id in self.exchange_list.keys()
         ]
         await asyncio.gather(*tasks)
-        
+
     def _has_required_features(self, exchange_class):
         return (
-            exchange_class.has["watchTrades"] and \
-            exchange_class.has["watchOrderBook"] and \
-            exchange_class.has["fetchOHLCV"]
+            exchange_class.has["watchTrades"]
+            and exchange_class.has["watchOrderBook"]
+            and exchange_class.has["fetchOHLCV"]
         )
 
-    def get_market_info(self, exchange_id: str, symbol: str):
+    def _get_credentials(self, exchange_id: str) -> Optional[Dict[str, str]]:
         """
-        Retrieve market information for a given symbol on a specific exchange.
+        Retrieve API credentials for a given exchange from environment variables.
         """
-        exchange = self.exchange_list[exchange_id]["ccxt"]
-        return exchange.market(symbol)
+        prefix = exchange_id.upper()
+        api_key = os.getenv(f"{prefix}_API_KEY")
+        secret = os.getenv(f"{prefix}_SECRET")
+        password = os.getenv(f"{prefix}_PASSWORD")
 
-    def adjust_amount_to_precision(self, exchange_id: str, symbol: str, amount: float):
-        """
-        Adjust the amount to the required precision for a given symbol on a specific exchange.
-        """
-        exchange = self.exchange_list[exchange_id]["ccxt"]
-        return exchange.amount_to_precision(symbol, amount)
-
-    def adjust_price_to_precision(self, exchange_id: str, symbol: str, price: float):
-        """
-        Adjust the price to the required precision for a given symbol on a specific exchange.
-        """
-        exchange = self.exchange_list[exchange_id]["ccxt"]
-        return exchange.price_to_precision(symbol, price)
+        if api_key and secret:
+            return {"apiKey": api_key, "secret": secret, "password": password}
+        return None

@@ -19,10 +19,10 @@ class Viewport:
 
     def __enter__(self):
         """
-        The __enter__ function is called when the with statement is executed. 
-        It returns an object that will be bound to the target of the with statement. 
+        The __enter__ function is called when the with statement is executed.
+        It returns an object that will be bound to the target of the with statement.
         The __exit__ function is called after all code in the block has been executed, or if an exception occurred while executing it.
-        
+
         :param self: Reference the class itself
         :return: Self, which is the data class
         :doc-author: Trelent
@@ -120,13 +120,13 @@ class Viewport:
         """
         The initialize_program function is responsible for initializing the program classes and subclasses.
             This function will initialize all UI components and register their callback.
-        
-        
+
+
         :param self: Reference the class instance
         :return: None
         :doc-author: Trelent
         """
-        
+
         # This will initialize all UI components and register their callback
         logging.info(f"Setting up the program classes and subclasses.")
 
@@ -146,11 +146,11 @@ class Viewport:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
         The __exit__ function is called when the context manager exits.
-        The __exit__ function takes three arguments: exc_type, exc_value and traceback. 
-        If an exception occurred while executing the body of with statement, 
-        the arguments will be the exception type, value and traceback object as returned by sys.exc_info(). 
+        The __exit__ function takes three arguments: exc_type, exc_value and traceback.
+        If an exception occurred while executing the body of with statement,
+        the arguments will be the exception type, value and traceback object as returned by sys.exc_info().
         Otherwise all three arguments will be None.
-        
+
         :param self: Represent the instance of the class
         :param exc_type: Determine if an exception has occurred
         :param exc_val: Get the exception value
@@ -163,11 +163,11 @@ class Viewport:
         self.config_manager.update_setting("last_exchange", self.program.last_exchange)
 
         self.task_manager.stop_all_tasks(),
-        
+
         self.task_manager.run_task_with_loading_popup(
             self.data.close_all_exchanges(), "Closing CCXT exchanges."
         )
-        
+
         dpg.destroy_context()
 
         if exc_type:

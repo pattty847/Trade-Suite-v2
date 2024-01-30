@@ -31,7 +31,6 @@ Note:
     - Make sure to customize the description in the argparse.ArgumentParser according to your program's needs.
 """
 
-
 import argparse
 import logging
 import dotenv
@@ -50,6 +49,7 @@ logging.basicConfig(
 dotenv.load_dotenv()
 logging.info(f"Environment variables loaded and logging setup.")
 
+
 def _get_args():
     # Setup program dependencies
     # Create argparser to start the program from the command line
@@ -64,6 +64,7 @@ def _get_args():
     )
 
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = _get_args()
