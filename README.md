@@ -46,18 +46,28 @@ To get started with TradeSuite, follow these steps:
 
 ## Implemented Features
 
-- Basic real-time candlestick charting interface with DearPyGUI and CCXT PRO
-- Multiple tabs (numerous instances of the same exchange)
-- Real-time candlestick updates and indicators
-- Object oriented design so you can build upon it
+- Basic Real-Time Candlestick Charting Interface: Implemented using DearPyGUI and CCXT PRO.
+- Multiple Tabs Feature: Support for numerous instances of the same exchange.
+- Real-Time Candlestick Updates and Indicators: Continuous updating of candlestick charts with relevant trading indicators.
+- Object-Oriented Design: Ensures ease of scalability and further development.
 
 ## Planned Features
 
-- ArgParser for command-line entry into the program
-- Trading capabilities
-- More technical indicators
-- Order interface
-- And much more...
+- Separate the Data storage aspect to a new continously running Influx server the client can request data from.
+- ArgParser for Command-Line Entry: To facilitate easier and more flexible program startup through the command line.
+- Trading Capabilities: Enabling actual trading actions (buy, sell, etc.) within the platform.
+- Multi-Exchange Portfolio Management: Cross-exchange portfolio aggregation and management system.
+- Expansion of Technical Indicators: Adding more indicators for comprehensive technical analysis.
+- Order Interface Development: To manage and execute trade orders directly from the platform.
+- Performance Optimization: Enhancing the efficiency and responsiveness of the application.
+- User Authentication and Security: Implementing secure login and data protection measures.
+- Mobile Compatibility: Adapting the platform for use on mobile devices.
+- Historical Data Analysis Features: Integrating tools for back-testing strategies with historical data.
+- Customizable UI Elements: Allowing users to personalize the interface to suit their preferences.
+- Integration with Additional Exchanges: Expanding the range of supported cryptocurrency exchanges.
+- Real-Time News and Market Updates: Incorporating a feature to provide live news and market updates.
+- Community Features: Adding forums or chatrooms for user interaction and discussion.
+- Advanced Charting Tools: Implementing more sophisticated charting options for in-depth analysis.
 
 ## Contributing
 
