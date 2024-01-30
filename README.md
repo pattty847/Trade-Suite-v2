@@ -38,6 +38,9 @@ To get started with TradeSuite, follow these steps:
    pip install -r requirements.txt
    ```
 
+_To do_
+3. Add .env file with exchange credentials
+
 3. Run the program:
 
    ```bash
