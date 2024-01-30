@@ -3,16 +3,16 @@ import ccxt
 
 import dearpygui.dearpygui as dpg
 import pandas as pd
-from trade_suite.config import ConfigManager
+from config import ConfigManager
 
-from trade_suite.data.candle_factory import CandleFactory
-from trade_suite.data.data_source import Data
-from trade_suite.gui.components.indicators import Indicators
-from trade_suite.gui.components.orderbook import OrderBook
-from trade_suite.gui.components.trading import Trading
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.task_manager import TaskManager
-from trade_suite.gui.utils import searcher
+from data.candle_factory import CandleFactory
+from data.data_source import Data
+from gui.components.indicators import Indicators
+from gui.components.orderbook import OrderBook
+from gui.components.trading import Trading
+from gui.signals import SignalEmitter, Signals
+from gui.task_manager import TaskManager
+from gui.utils import searcher
 
 
 class Chart:
@@ -50,6 +50,7 @@ class Chart:
             self.task_manager,
             self.data,
             self.exchange_settings,
+            self.timeframe_str,
             self.ohlcv,
         )
         self.indicators = Indicators(
@@ -94,6 +95,19 @@ class Chart:
             self.trading.setup_trading_menu()
             self.indicators.create_indicators_menu()
             self.orderbook.setup_orderbook_menu()
+            
+    def register_event_listeners(self):
+        event_mappings = {
+            Signals.NEW_TRADE: self.on_new_trade,
+            Signals.NEW_CANDLES: self.on_new_candles,  # first callback emitted when application starts (requests last chart user had)
+            Signals.UPDATED_CANDLES: self.on_updated_candles,
+            Signals.VIEWPORT_RESIZED: self.on_viewport_resize,
+            Signals.TRADE_STAT_UPDATE: self.on_trade_stat_update,
+            Signals.SYMBOL_CHANGED: self.on_symbol_change,
+            Signals.TIMEFRAME_CHANGED: self.on_timeframe_change,
+        }
+        for signal, handler in event_mappings.items():
+            self.emitter.register(signal, handler)
 
     def setup_exchange_menu(self):
         with dpg.menu(label="Markets"):
@@ -101,7 +115,7 @@ class Chart:
             # TODO: Add search box for symbols
             input_tag = dpg.add_input_text(label="Search")
             symbols_list = dpg.add_listbox(
-                items=self.data.exchange_list[self.exchange]["symbols"],
+                items=self.data.exchange_list[self.exchange].symbols,
                 default_value=self.active_symbol,
                 callback=lambda sender, symbol, user_data: self.emitter.emit(
                     Signals.SYMBOL_CHANGED,
@@ -116,13 +130,13 @@ class Chart:
                 callback=lambda: searcher(
                     input_tag,
                     symbols_list,
-                    self.data.exchange_list[self.exchange]["symbols"],
+                    self.data.exchange_list[self.exchange].symbols,
                 ),
             )
 
             dpg.add_text("Timeframe")
             dpg.add_listbox(
-                items=self.data.exchange_list[self.exchange]["timeframes"],
+                items=list(self.data.exchange_list[self.exchange].timeframes.keys()),
                 default_value=self.timeframe_str,
                 callback=lambda sender, timeframe, user_data: self.emitter.emit(
                     Signals.TIMEFRAME_CHANGED,
@@ -148,22 +162,24 @@ class Chart:
             )
 
     def setup_candlestick_chart(self):
-        with dpg.group(
-            horizontal=True
-        ):  # Use horizontal grouping to align elements side by side
+        # Horizontally align the Chart and Orderbook
+        with dpg.group(horizontal=True): 
+            # Chart group
             with dpg.group(
                 width=dpg.get_viewport_width() * 0.7,
                 height=-1,
                 tag=self.orderbook.charts_group,
             ):  # This group will contain the charts, filling the available space
+                
                 with dpg.subplots(
                     rows=2,
                     columns=1,
                     row_ratios=[0.7, 0.3],
                     link_all_x=True,
                     label=f"{self.active_symbol} | {self.timeframe_str}",
-                    height=-1,
-                ) as self.plots:
+                    width=-1,
+                ) as self.subplots:
+                    
                     # Candlestick Chart
                     with dpg.plot() as self.candlestick_plot:
                         dpg.add_plot_legend()
@@ -179,8 +195,7 @@ class Chart:
                         )
 
                         self.candle_series_xaxis = dpg.add_plot_axis(
-                            dpg.mvXAxis, time=True
-
+                            dpg.mvXAxis, time=True, no_tick_marks=True, no_tick_labels=True
                         )
                         
                         with dpg.plot_axis(
@@ -203,7 +218,7 @@ class Chart:
                             )
 
                     # Volume Chart
-                    with dpg.plot(label="Volume Chart", no_title=True, height=-1):
+                    with dpg.plot(label="Volume Chart", no_title=True):
                         dpg.add_plot_legend()
                         self.volume_series_xaxis = dpg.add_plot_axis(
                             dpg.mvXAxis, time=True
@@ -218,28 +233,19 @@ class Chart:
                                 weight=100,
                             )
 
+            # Order book group
             with dpg.group(width=-1, tag=self.orderbook.order_book_group):
                 self.orderbook.draw_orderbook_plot()
-
-    def register_event_listeners(self):
-        event_mappings = {
-            Signals.NEW_TRADE: self.on_new_trade,
-            Signals.NEW_CANDLES: self.on_new_candles,  # first callback emitted when application starts (requests last chart user had)
-            Signals.UPDATED_CANDLES: self.on_updated_candles,
-            Signals.VIEWPORT_RESIZED: self.on_viewport_resize,
-            Signals.TRADE_STAT_UPDATE: self.on_trade_stat_update,
-            Signals.SYMBOL_CHANGED: self.on_symbol_change,
-            Signals.TIMEFRAME_CHANGED: self.on_timeframe_change,
-        }
-        for signal, handler in event_mappings.items():
-            self.emitter.register(signal, handler)
+        
+        # Trading Panel Group
+        self.trading.build_trading_panel()
 
     def update_chart_settings_and_stream(
-        self, exchange, new_settings, tab, new_symbol, new_timeframe
+        self, exchange, settings, tab, symbol, timeframe
     ):
-        self.config_manager.update_setting(exchange, new_settings)
+        self.config_manager.update_setting(exchange, settings)
         self.task_manager.start_stream_for_chart(
-            tab, exchange, new_symbol, new_timeframe
+            tab, exchange, symbol, timeframe
         )
 
     def on_symbol_change(self, exchange, tab, new_symbol: str):
@@ -248,7 +254,7 @@ class Chart:
                 f"{exchange}: Symbol change - from {self.active_symbol} to {new_symbol}"
             )
 
-            dpg.configure_item(self.plots, label=f"{new_symbol} | {self.timeframe_str}")
+            dpg.configure_item(self.subplots, label=f"{new_symbol} | {self.timeframe_str}")
 
             new_settings = {
                 "last_symbol": new_symbol,
@@ -260,20 +266,24 @@ class Chart:
             self.active_symbol = new_symbol
 
     def on_timeframe_change(self, exchange, tab, new_timeframe: str):
-        logging.info(
-            f"{exchange}: Timeframe change - from {self.timeframe_str} to {new_timeframe}"
-        )
-
         if tab == self.tab_id:
+            logging.info(
+                f"{exchange}: Timeframe change - from {self.timeframe_str} to {new_timeframe}"
+            )
+            
+            # Set the subplot label to the new timeframe
             dpg.configure_item(
-                self.plots, label=f"{self.active_symbol} | {new_timeframe}"
+                self.subplots, label=f"{self.active_symbol} | {new_timeframe}"
             )
 
+            # Update settings
             new_settings = {
                 "last_symbol": self.active_symbol,
                 "last_timeframe": new_timeframe,
             }
+            
             candles = self.candle_factory.resample_candle(new_timeframe, self.exchange)
+            
             if candles is None:
                 self.update_chart_settings_and_stream(
                     exchange, new_settings, tab, self.active_symbol, new_timeframe
@@ -291,9 +301,9 @@ class Chart:
             dpg.fit_axis_data(self.volume_series_yaxis)
 
     def on_new_trade(self, tab, exchange, trade_data):
-        timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
+        timestamp = trade_data["timestamp"] // 1000  # Convert ms to seconds
         price = trade_data["price"]
-        volume = trade_data["amount"] * 2
+        volume = trade_data["amount"]
 
         dpg.draw_circle(
             center=[
@@ -307,7 +317,7 @@ class Chart:
         )
 
     def on_updated_candles(self, tab, exchange, candles):
-        if tab == self.tab_id:
+        if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
             self.ohlcv = candles
             self.update_candle_chart()
 
@@ -333,16 +343,15 @@ class Chart:
     def on_viewport_resize(self, width, height):
         # Calculate new width for the charts and order book based on viewport size (works for now)
         charts_width = width * 0.7
-        order_book_width = width - charts_width
 
         # Update the width of the groups
         dpg.configure_item(self.orderbook.charts_group, width=charts_width)
-        dpg.configure_item(self.orderbook.order_book_group, width=order_book_width)
+        dpg.configure_item(self.orderbook.order_book_group, width=-1)
 
     def get_default_timeframe(self):
         return (
             self.exchange_settings.get("last_timeframe")
-            or self.data.exchange_list[self.exchange]["timeframes"][1]
+            or list(self.data.exchange_list[self.exchange].timeframes.keys())[1]
         )
 
     def get_default_symbol(self):
@@ -352,7 +361,7 @@ class Chart:
         )
 
     def get_default_bitcoin_market(self):
-        symbols = self.data.exchange_list[self.exchange]["symbols"]
+        symbols = self.data.exchange_list[self.exchange].symbols
         return next(
             (symbol for symbol in symbols if symbol in ["BTC/USD", "BTC/USDT"]), None
         )

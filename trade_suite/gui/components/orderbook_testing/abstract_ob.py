@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 
 import dearpygui.dearpygui as dpg
-from trade_suite.config import ConfigManager
-from trade_suite.data.data_source import Data
-from trade_suite.gui.signals import SignalEmitter, Signals
+from config import ConfigManager
+from data.data_source import Data
+from gui.signals import SignalEmitter, Signals
 
 
 class BaseOrderbook(ABC):

@@ -3,7 +3,7 @@ testing
 
 config.json
 fetch_candles_main.py
-outline.drawio
+trade_suite\architecture.drawio
 
 .env
 .gitignore

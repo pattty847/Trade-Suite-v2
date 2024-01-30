@@ -4,8 +4,8 @@ import dearpygui.dearpygui as dpg
 import pandas as pd
 import pandas_ta
 
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.utils import center_window, timeframe_to_seconds
+from gui.signals import SignalEmitter, Signals
+from gui.utils import center_window, timeframe_to_seconds
 
 
 class Indicators:
@@ -96,10 +96,13 @@ class Indicators:
                     label="EMAs", default_value=self.show_ema, callback=self.toggle_ema
                 )
                 dpg.add_button(
-                    label="test", callback=lambda: logging.info(self.line_series_ids)
+                    label="test", callback=self.toggle_cvd
                 )
 
-            self.create_test_menu(menu)
+            # self.create_test_menu(menu)
+            
+    def toggle_cvd(self, sender, app_data, user_data):
+        pass
 
     # SIMPLE TEST INDICATOR
     def toggle_ema(self, sender, app_data, user_data):

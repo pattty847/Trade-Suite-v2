@@ -5,10 +5,10 @@ from typing import Dict, List
 import ccxt
 import pandas as pd
 
-from trade_suite.analysis.market_aggregator import MarketAggregator
-from trade_suite.data.ccxt_interface import CCXTInterface
-from trade_suite.data.influx import InfluxDB
-from trade_suite.gui.signals import SignalEmitter, Signals
+from analysis.market_aggregator import MarketAggregator
+from data.ccxt_interface import CCXTInterface
+from data.influx import InfluxDB
+from gui.signals import SignalEmitter, Signals
 
 
 # TODO: Make functions that watch one symbol at a time. Start/stop them with task manager
@@ -45,7 +45,7 @@ class Data(CCXTInterface):
 
         # For each exchange pass start watching for trades for the list of symbols passed
         for exchange_id in self.exchange_list.keys():
-            exchange_object = self.exchange_list[exchange_id]["ccxt"]
+            exchange_object = self.exchange_list[exchange_id]
 
             logging.info(f"Starting trade stream for {symbols} on {exchange_id}")
             # TODO: Add a condition to streaming
@@ -100,7 +100,7 @@ class Data(CCXTInterface):
         :return: The following:
         :doc-author: Trelent
         """
-        exchange_object = self.exchange_list[exchange]["ccxt"]
+        exchange_object = self.exchange_list[exchange]
         logging.info(f"Starting trade stream for {symbol} on {exchange} tab {tab}")
         # TODO: Add a condition to streaming
         while self.is_running:
@@ -143,7 +143,7 @@ class Data(CCXTInterface):
         """
 
         for exchange_id in self.exchange_list.keys():
-            exchange_object = self.exchange_list[exchange_id]["ccxt"]
+            exchange_object = self.exchange_list[exchange_id]
             logging.info(f"Starting orderbook stream for {symbols} on {exchange_id}")
             if exchange_object.has["watchOrderBookForSymbols"]:
                 while self.is_running:
@@ -179,7 +179,7 @@ class Data(CCXTInterface):
         :return: A dictionary with the following keys:
         :doc-author: Trelent
         """
-        exchange_object = self.exchange_list[exchange]["ccxt"]
+        exchange_object = self.exchange_list[exchange]
         logging.info(f"Starting orderbook stream for {symbol} on {exchange}")
         while self.is_running:
             try:
@@ -220,38 +220,36 @@ class Data(CCXTInterface):
         :return: A dictionary of dictionaries
         :doc-author: Trelent
         """
-        exchange_objects = {
-            exch: self.exchange_list[exch]["ccxt"] for exch in exchanges
-        }
         all_candles = {}
 
         tasks = []
-        for exchange_name, exchange in exchange_objects.items():
-            exchange_data = self.exchange_list[exchange_name]
-            all_candles.setdefault(exchange_name, {})
-            since_timestamp = exchange.parse8601(since)
+        for exchange in exchanges:
+            if exchange in self.exchange_list:
+                exchange_class = self.exchange_list[exchange]
+                all_candles.setdefault(exchange, {})
+                since_timestamp = exchange_class.parse8601(since)
 
-            for symbol in symbols:
-                if symbol not in exchange_data["symbols"]:
-                    logging.info(f"{symbol} not found on {exchange_name}.")
-                    continue
-
-                for timeframe in timeframes:
-                    if timeframe not in exchange_data["timeframes"]:
-                        logging.info(f"{timeframe} not found on {exchange_name}.")
+                for symbol in symbols:
+                    if symbol not in exchange_class.symbols:
+                        logging.info(f"{symbol} not found on {exchange}.")
                         continue
 
-                    task = asyncio.create_task(
-                        self.fetch_and_process_candles(
-                            exchange,
-                            symbol,
-                            timeframe,
-                            since_timestamp,
-                            exchange_name,
-                            all_candles,
+                    for timeframe in timeframes:
+                        if timeframe not in list(exchange_class.timeframes.keys()):
+                            logging.info(f"{timeframe} not found on {exchange}.")
+                            continue
+
+                        task = asyncio.create_task(
+                            self.fetch_and_process_candles(
+                                exchange_class,
+                                symbol,
+                                timeframe,
+                                since_timestamp,
+                                exchange,
+                                all_candles,
+                            )
                         )
-                    )
-                    tasks.append(task)
+                        tasks.append(task)
 
         await asyncio.gather(*tasks)
 
@@ -332,8 +330,8 @@ class Data(CCXTInterface):
             return None
 
     async def fetch_all_stats(self, exchange, currency: str = "USD"):
-        exchange = self.exchange_list[exchange]["ccxt"]
-        symbols = self.exchange_list[exchange]["symbols"]
+        exchange = self.exchange_list[exchange]
+        symbols = exchange.symbols
 
         tasks = [
             self.fetch_stats_for_symbol(exchange, symbol)

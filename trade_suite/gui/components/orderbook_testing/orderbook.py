@@ -3,10 +3,10 @@ import logging
 import dearpygui.dearpygui as dpg
 import pandas as pd
 
-from trade_suite.config import ConfigManager
-from trade_suite.data.data_source import Data
-from trade_suite.gui.components.orderbook_testing.abstract_ob import BaseOrderbook
-from trade_suite.gui.signals import SignalEmitter, Signals
+from config import ConfigManager
+from data.data_source import Data
+from gui.components.orderbook_testing.abstract_ob import BaseOrderbook
+from gui.signals import SignalEmitter, Signals
 
 
 class OrderBook(BaseOrderbook):
@@ -22,7 +22,7 @@ class OrderBook(BaseOrderbook):
         self.aggregated_order_book = True
         self.spread_percentage = 0.005
         self.tick_size = 0.01
-        self.market_info = self.data.exchange_list[self.exchange]["ccxt"].market(
+        self.market_info = self.data.exchange_list[self.exchange].market(
             self.symbol
         )
 
@@ -230,7 +230,7 @@ class OrderBook(BaseOrderbook):
         if self.is_active_tab_and_exchange(tab, exchange):
             self.symbol = new_symbol
 
-            self.market_info = self.data.exchange_list[self.exchange]["ccxt"].market(
+            self.market_info = self.data.exchange_list[self.exchange].market(
                 self.symbol
             )
 

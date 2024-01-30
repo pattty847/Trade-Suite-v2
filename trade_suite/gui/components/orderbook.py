@@ -3,9 +3,9 @@ import logging
 import dearpygui.dearpygui as dpg
 import pandas as pd
 
-from trade_suite.config import ConfigManager
-from trade_suite.data.data_source import Data
-from trade_suite.gui.signals import SignalEmitter, Signals
+from config import ConfigManager
+from data.data_source import Data
+from gui.signals import SignalEmitter, Signals
 
 
 class OrderBook:
@@ -33,7 +33,7 @@ class OrderBook:
         self.aggregated_order_book = True
         self.spread_percentage = 0.005
         self.tick_size = 0.01
-        self.market_info = self.data.exchange_list[self.exchange]["ccxt"].market(
+        self.market_info = self.data.exchange_list[self.exchange].market(
             self.symbol
         )
 
@@ -238,7 +238,7 @@ class OrderBook:
     def _on_symbol_change(self, exchange, tab, new_symbol):
         self.symbol = new_symbol
 
-        self.market_info = self.data.exchange_list[self.exchange]["ccxt"].market(
+        self.market_info = self.data.exchange_list[self.exchange].market(
             self.symbol
         )
 
@@ -251,4 +251,3 @@ class OrderBook:
     def _set_tick_size(self, sender, app_data: float, user_data):
         # Check if its within the precision limits
         self.tick_size = app_data
-        print(app_data)

@@ -2,11 +2,11 @@ import logging
 
 import dearpygui.dearpygui as dpg
 
-from trade_suite.config import ConfigManager
-from trade_suite.data.data_source import Data
-from trade_suite.gui.program import Program
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.task_manager import TaskManager
+from config import ConfigManager
+from data.data_source import Data
+from gui.program import Program
+from gui.signals import SignalEmitter, Signals
+from gui.task_manager import TaskManager
 
 
 class Viewport:
@@ -18,13 +18,22 @@ class Viewport:
         self.program = Program(self.data, self.task_manager, self.config_manager)
 
     def __enter__(self):
+        """
+        The __enter__ function is called when the with statement is executed. 
+        It returns an object that will be bound to the target of the with statement. 
+        The __exit__ function is called after all code in the block has been executed, or if an exception occurred while executing it.
+        
+        :param self: Reference the class itself
+        :return: Self, which is the data class
+        :doc-author: Trelent
+        """
         # Load the ccxt exchanges, symbols, and timeframes to the Data class
         # We need to wait for this to run and finish
         self.task_manager.run_task_until_complete(self.data.load_exchanges())
 
         # Setup dearpygui
         dpg.create_context()
-        # self.load_theme()
+        self.load_theme()
         return self
 
     def load_theme(self):
@@ -105,19 +114,19 @@ class Viewport:
 
         logging.info("Setup complete. Launching DPG.")
 
-        dpg.start_dearpygui()  # main dpg event loop
+        dpg.start_dearpygui()  # main dpg event loop start
 
     def initialize_program(self):
         """
-        The initialize_program function is responsible for setting up the main program class and all of its subclasses.
-        It also registers all signals that will be used in the program.
-
-        The async loop is started within a daemon thread to allow non-blocking UI updates while async streaming is going on.
-
-        :param self: Refer to the class itself
-        :return: A list of the below registering or emition
+        The initialize_program function is responsible for initializing the program classes and subclasses.
+            This function will initialize all UI components and register their callback.
+        
+        
+        :param self: Reference the class instance
+        :return: None
         :doc-author: Trelent
         """
+        
         # This will initialize all UI components and register their callback
         logging.info(f"Setting up the program classes and subclasses.")
 
@@ -135,25 +144,35 @@ class Viewport:
         )
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        The __exit__ function is called when the context manager exits.
+        The __exit__ function takes three arguments: exc_type, exc_value and traceback. 
+        If an exception occurred while executing the body of with statement, 
+        the arguments will be the exception type, value and traceback object as returned by sys.exc_info(). 
+        Otherwise all three arguments will be None.
+        
+        :param self: Represent the instance of the class
+        :param exc_type: Determine if an exception has occurred
+        :param exc_val: Get the exception value
+        :param exc_tb: Pass the traceback object
+        :return: None
+        :doc-author: Trelent
+        """
         logging.info("Trying to shutdown...")
 
-        logging.info("Updating settings...")
-
         self.config_manager.update_setting("last_exchange", self.program.last_exchange)
-
-        logging.info("Done.")
-        
-        self.task_manager.data.is_running = False
 
         self.task_manager.stop_all_tasks(),
         
         self.task_manager.run_task_with_loading_popup(
             self.data.close_all_exchanges(), "Closing CCXT exchanges."
         )
+        
         dpg.destroy_context()
-        logging.info("Destroyed DearPyGUI context.")
 
         if exc_type:
             logging.error(
                 "An exception occurred: ", exc_info=(exc_type, exc_val, exc_tb)
             )
+        else:
+            logging.info("Finished shutting down.")

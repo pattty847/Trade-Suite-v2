@@ -5,7 +5,7 @@ from typing import Callable
 
 class Signals(Enum):
     CREATE_EXCHANGE_TAB = auto()
-    LAUNCH_TPO = auto()
+    CREATE_TAB = auto()
     NEW_CANDLES = auto()
     NEW_TRADE = auto()
     ORDER_BOOK_UPDATE = auto()

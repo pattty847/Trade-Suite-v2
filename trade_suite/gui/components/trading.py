@@ -5,13 +5,19 @@ import logging
 import dearpygui.dearpygui as dpg
 import pandas as pd
 
-from trade_suite.config import ConfigManager
-from trade_suite.data.data_source import Data
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.task_manager import TaskManager
-from trade_suite.gui.utils import timeframe_to_seconds
+from config import ConfigManager
+from data.data_source import Data
+from gui.signals import SignalEmitter, Signals
+from gui.task_manager import TaskManager
+from gui.utils import timeframe_to_seconds
 
-# TODO: Lots in here
+"""
+Trading: interface
+Display: a child window placed below the chart which allows users to toggle between accounts (note, the user will be looking at tabs, so if they switch to a not visable tab, how should you handle this?).
+Accounts: a drop down list of various ccxt exchanges/accounts users can toggle between.
+
+
+"""
 
 
 class Trading:
@@ -98,8 +104,33 @@ class Trading:
             )
         else:
             dpg.configure_item(self.trade_mode_drag_line_tag, show=False)
-
+            
     def toggle_place_order_window(self):
+        pass
+    
+    def build_trading_panel(self):
+        with dpg.child_window(label="Order Entry", width=-1, height=200):
+            with dpg.tab_bar():
+                with dpg.tab(label="Manual"):
+                    with dpg.group(horizontal=True):
+                        dpg.add_radio_button(items=["Live", "Paper"], horizontal=True)
+
+                        dpg.add_text("Accounts")
+                        accounts = ["Account 1", "Account 2"]
+                        dpg.add_combo(items=accounts, width=100, default_value=accounts[0])
+                        
+                        dpg.add_text("Balance: ")
+                        dpg.add_text("$10000", color=(0, 255, 0))
+                        
+                        dpg.add_button(label="MKT LONG")
+                        dpg.add_button(label="MKT SHORT")
+                
+                with dpg.tab(label="Automation"):
+                    pass
+            
+            
+
+    def _toggle_place_order_window(self):
         price = dpg.get_value(self.trade_mode_drag_line_tag)
 
         def apply_percentage(profit_pct):
@@ -207,7 +238,7 @@ class Trading:
 
     def setup_orders(self):
         orders = self.task_manager.run_task_with_loading_popup(
-            self.data.exchange_list[self.exchange]["ccxt"].fetch_orders(),
+            self.data.exchange_list[self.exchange].fetch_orders(),
             "Loading orders...",
         )
 

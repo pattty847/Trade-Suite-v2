@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import ccxt
 import ccxt.pro as ccxtpro
@@ -13,60 +13,63 @@ class CCXTInterface:
 
     """
     This class manages connections to CCXT exchanges.
-        exchange_list[exchange][ccxt/symbols/timeframes]
+        exchange_list[exchange_id] = exchange_class (ccxt instance)
     """
 
     def __init__(self, exchanges: List[str]):
         self.exchanges = exchanges
         self.exchange_list: Dict[str, Dict[str, Any]] = {}
 
+    def get_credentials(self, exchange_id: str) -> Optional[Dict[str, str]]:
+        """
+        Retrieve API credentials for a given exchange from environment variables.
+        """
+        prefix = exchange_id.upper()
+        api_key = os.getenv(f"{prefix}_API_KEY")
+        secret = os.getenv(f"{prefix}_SECRET")
+        password = os.getenv(f"{prefix}_PASSWORD")
+
+        if api_key and secret:
+            return {"apiKey": api_key, "secret": secret, "password": password}
+        return None
+
     async def load_exchange(self, exchange_id: str):
         """
-        Initialize a single exchange and add it to the supported exchanges list.
+        Initialize a single exchange with credentials.
         """
         if exchange_id in self._instances:
             logging.info(f"Using existing instance for {exchange_id}.")
             return self._instances[exchange_id]
 
+        credentials = self.get_credentials(exchange_id)
+        if not credentials:
+            logging.error(f"Credentials not found for {exchange_id}")
+            return None
+
         try:
-            logging.info(f"Initializing {exchange_id}.")
-            exchange_class = getattr(ccxtpro, exchange_id)(
-                {
-                    "apiKey": os.getenv("COINBASE_KEY"),
-                    "secret": os.getenv("COINBASE_SECRET"),
-                    "password": os.getenv("COINBASE_PASS"),
-                    "newUpdates": True,
-                }
-                if exchange_id == "coinbasepro"
-                else {}
-            )  # type: ccxtpro.Exchange
+            logging.info(f"Initializing {exchange_id} with credentials.")
+            exchange_class = getattr(ccxtpro, exchange_id)(credentials)
 
             await exchange_class.load_markets()
-
-            if exchange_class.has["watchTrades"] and exchange_class.has["fetchOHLCV"]:
-                exchange_data = {
-                    "ccxt": exchange_class,
-                    "symbols": sorted(list(exchange_class.markets)),
-                    "timeframes": list(exchange_class.timeframes.keys()),
-                }
-                self._instances[exchange_id] = exchange_data
-                return exchange_data
+            
+            if all(feature in exchange_class.has for feature in 
+                   ["watchTrades", "watchOrderBook", "fetchOHLCV"]):
+                
+                # Store only the exchange_class instance
+                self._instances[exchange_id] = exchange_class
+                return exchange_class
             else:
                 logging.info(f"{exchange_id} does not support all required features.")
                 return None
-        except ccxt.NetworkError as e:
-            logging.error(f"Network error with {exchange_id}: {e}")
-        except ccxt.ExchangeError as e:
-            logging.error(f"Exchange error with {exchange_id}: {e}")
-        except Exception as e:
-            logging.error(f"Unexpected error with {exchange_id}: {e}")
+        except (ccxt.NetworkError, ccxt.ExchangeError, Exception) as e:
+            logging.error(f"Error with {exchange_id}: {e}")
         return None
 
-    async def load_exchanges(self, exchange: str = None):
+    async def load_exchanges(self, exchanges: List[str]=None):
         """
-        Initialize the exchanges that are supported by ccxt. Optionally initialize a single exchange if provided.
+        Initialize a list of exchanges passed to the function, or if nothing is passed, initialize all exchanges in self.exchangnes
         """
-        exchanges_to_load = [exchange] if exchange else self.exchanges
+        exchanges_to_load = exchanges if exchanges else self.exchanges
 
         for exchange_id in exchanges_to_load:
             exchange_data = await self.load_exchange(exchange_id)
@@ -86,7 +89,7 @@ class CCXTInterface:
         """
 
         async def close_exchange(exchange_id):
-            exchange = self.exchange_list[exchange_id]["ccxt"]
+            exchange = self.exchange_list[exchange_id]
             try:
                 await exchange.close()
                 logging.info(f"{exchange_id} closed successfully.")
@@ -97,6 +100,13 @@ class CCXTInterface:
             close_exchange(exchange_id) for exchange_id in self.exchange_list.keys()
         ]
         await asyncio.gather(*tasks)
+        
+    def _has_required_features(self, exchange_class):
+        return (
+            exchange_class.has["watchTrades"] and \
+            exchange_class.has["watchOrderBook"] and \
+            exchange_class.has["fetchOHLCV"]
+        )
 
     def get_market_info(self, exchange_id: str, symbol: str):
         """

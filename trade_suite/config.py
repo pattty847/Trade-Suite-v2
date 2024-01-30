@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 
@@ -31,6 +32,10 @@ class ConfigManager:
         return self._config.get(key, None)
 
     def update_setting(self, key, value):
+        logging.info("Updating settings...")
+
         self._config[key] = value
         with open(self._config_file, "w", encoding="utf-8") as file:
             json.dump(self._config, file)
+
+        logging.info("Done.")

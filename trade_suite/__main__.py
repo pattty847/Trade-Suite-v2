@@ -15,11 +15,11 @@ Dependencies:
     - argparse: Used for parsing command-line arguments.
     - logging: Used for configuring logging settings.
     - dotenv: Used for loading environment variables from a .env file.
-    - trade_suite.config.ConfigManager: Manages configuration settings.
-    - trade_suite.data.data_source.Data: Provides data from various sources.
-    - trade_suite.data.influx.InfluxDB: Handles data storage in InfluxDB.
-    - trade_suite.gui.signals.SignalEmitter: Emits trading signals.
-    - trade_suite.gui.viewport.Viewport: GUI interface for the trading program.
+    - config.ConfigManager: Manages configuration settings.
+    - data.data_source.Data: Provides data from various sources.
+    - data.influx.InfluxDB: Handles data storage in InfluxDB.
+    - gui.signals.SignalEmitter: Emits trading signals.
+    - gui.viewport.Viewport: GUI interface for the trading program.
 
 Instructions:
     1. Make sure to set up the required environment variables in a .env file.
@@ -30,24 +30,27 @@ Note:
     - This script requires a proper configuration setup and access to the specified exchanges.
     - Make sure to customize the description in the argparse.ArgumentParser according to your program's needs.
 """
+
+
 import argparse
 import logging
 import dotenv
 
-from trade_suite.config import ConfigManager
-from trade_suite.data.data_source import Data
-from trade_suite.data.influx import InfluxDB
-from trade_suite.gui.signals import SignalEmitter
-from trade_suite.gui.viewport import Viewport
+from config import ConfigManager
+from data.data_source import Data
+from data.influx import InfluxDB
+from gui.signals import SignalEmitter
+from gui.viewport import Viewport
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s:%(filename)s:%(funcName)s: %(message)s",
 )
+
 dotenv.load_dotenv()
 logging.info(f"Environment variables loaded and logging setup.")
 
-if __name__ == "__main__":
+def _get_args():
     # Setup program dependencies
     # Create argparser to start the program from the command line
     parser = argparse.ArgumentParser(description="Your program description here")
@@ -60,7 +63,10 @@ if __name__ == "__main__":
         help="List of exchanges to use",
     )
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+if __name__ == "__main__":
+    args = _get_args()
 
     config_manager = ConfigManager()
     exchanges = (

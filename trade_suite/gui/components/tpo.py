@@ -1,12 +1,12 @@
 import logging
 import dearpygui.dearpygui as dpg
 import pandas as pd
-from trade_suite.config import ConfigManager
-from trade_suite.data.data_source import Data
+from config import ConfigManager
+from data.data_source import Data
 
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.task_manager import TaskManager
-from trade_suite.gui.utils import searcher
+from gui.signals import SignalEmitter, Signals
+from gui.task_manager import TaskManager
+from gui.utils import searcher
 
 class TPO():
     def __init__(self, parent, exchange, emitter, data, task_manager, config_manager):
@@ -32,14 +32,18 @@ class TPO():
         self.ohlcv = pd.DataFrame(
             columns=["dates", "opens", "highs", "lows", "closes", "volumes"]
         )
+        
         self.timeframe_str = self.get_default_timeframe()
         self.active_symbol = self.get_default_symbol()
+        
         
     def initialize_components(self):
         pass
         
+        
     def start_data_stream(self):
         pass
+        
         
     def setup_ui_elements(self):
         with dpg.tab(label=f"TPO: {self.exchange.upper()}", tag=self.tab_id, parent=self.parent):
@@ -58,7 +62,7 @@ class TPO():
             # TODO: Add search box for symbols
             input_tag = dpg.add_input_text(label="Search")
             symbols_list = dpg.add_listbox(
-                items=self.data.exchange_list[self.exchange]["symbols"],
+                items=self.data.exchange_list[self.exchange].symbols,
                 default_value=self.active_symbol,
                 callback=lambda sender, symbol, user_data: self.emitter.emit(
                     Signals.SYMBOL_CHANGED,
@@ -73,13 +77,13 @@ class TPO():
                 callback=lambda: searcher(
                     input_tag,
                     symbols_list,
-                    self.data.exchange_list[self.exchange]["symbols"],
+                    self.data.exchange_list[self.exchange].symbols,
                 ),
             )
 
             dpg.add_text("Timeframe")
             dpg.add_listbox(
-                items=self.data.exchange_list[self.exchange]["timeframes"],
+                items=list(self.data.exchange_list[self.exchange].timeframes.keys()),
                 default_value=self.timeframe_str,
                 callback=lambda sender, timeframe, user_data: self.emitter.emit(
                     Signals.TIMEFRAME_CHANGED,
@@ -92,46 +96,56 @@ class TPO():
                 
                 
     def setup_display(self):
-        dpg.add_text("The TPO Chart will go here")
+        with dpg.plot(label="", no_title=True, height=-1):
+            dpg.add_plot_legend()
+            self.series_xaxis = dpg.add_plot_axis(
+                dpg.mvXAxis, time=True
+            )
+            with dpg.plot_axis(
+                dpg.mvYAxis, label="Volume"
+            ) as self.series_yaxis:
+                # Ensure data is populated before adding series
+                self.series = dpg.add_line_series([], [])
     
         
     def register_event_listeners(self):
         event_mappings = {
             Signals.NEW_TRADE: self.on_new_trade,
             Signals.NEW_CANDLES: self.on_new_candles,  # first callback emitted when application starts (requests last chart user had)
-            # TPO FACTORY?
+            Signals.UPDATED_CANDLES: self.on_updated_candles,
             Signals.VIEWPORT_RESIZED: self.on_viewport_resize,
         }
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
-            
+           
+
     def on_new_trade(self, tab, exchange, trade_data):
         if tab == self.tab_id:
             timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
             price = trade_data["price"]
             volume = trade_data["amount"] * 2
-            
-            logging.info(timestamp, price, volume)
         
         
     def on_new_candles(self, tab, exchange, candles):
-        if tab == self.tab_id:
-            if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
-                self.ohlcv = candles
+        if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
+            self.ohlcv = candles
+            
+            self.series_ = {"dates": self.ohlcv['dates'].tolist(), "closes": self.ohlcv['closes'].tolist()}
+            dpg.configure_item(self.series, self.series_['dates'], self.series_['closes'])
+    
+    
+    def on_updated_candles(self, tab, exchange, candles):
+        if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
+            self.ohlcv = candles
+    
                 
     def on_viewport_resize(self, width, height):
-        # Calculate new width for the charts and order book based on viewport size (works for now)
-        charts_width = width * 0.7
-        order_book_width = width - charts_width
-
-        # Update the width of the groups
-        dpg.configure_item(self.orderbook.charts_group, width=charts_width)
-        dpg.configure_item(self.orderbook.order_book_group, width=order_book_width)
+        pass
 
     def get_default_timeframe(self):
         return (
             self.exchange_settings.get("last_timeframe")
-            or self.data.exchange_list[self.exchange]["timeframes"][1]
+            or list(self.data.exchange_list[self.exchange].timeframes.keys())[1]
         )
 
     def get_default_symbol(self):
@@ -141,7 +155,7 @@ class TPO():
         )
 
     def get_default_bitcoin_market(self):
-        symbols = self.data.exchange_list[self.exchange]["symbols"]
+        symbols = self.data.exchange_list[self.exchange].symbols
         return next(
             (symbol for symbol in symbols if symbol in ["BTC/USD", "BTC/USDT"]), None
         )
