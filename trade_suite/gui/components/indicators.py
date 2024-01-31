@@ -75,14 +75,17 @@ class Indicators:
     def _on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
+            
+            if self.show_ema:
+                self._recalculate_ema()
 
     # Always listening for the updated candle stick chart
     def _on_updated_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
 
-        if self.show_ema:
-            self._recalculate_ema()
+            if self.show_ema:
+                self._recalculate_ema()
 
     def _on_new_trade(self, tab, exchange, trade_data):
         timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
@@ -97,7 +100,6 @@ class Indicators:
                 )
                 dpg.add_button(label="test", callback=self._toggle_cvd)
 
-            # self.create_test_menu(menu)
 
     def _toggle_cvd(self, sender, app_data, user_data):
         pass
@@ -152,90 +154,3 @@ class Indicators:
         # Ensure that the visibility matches the current toggle state
         for line_series_id in self.line_series_ids.values():
             dpg.configure_item(line_series_id, show=self.show_ema)
-
-    def _create_test_menu(self, menu):
-        indicators = pandas_ta.Category
-        with dpg.menu(label="Indicators (Testing)"):
-            for category, indicators in indicators.items():
-                with dpg.menu(label=category.capitalize()):
-                    for indicator in indicators:
-                        dpg.add_checkbox(
-                            label=indicator,
-                            callback=lambda s: self.handle_indicator_selection(s, menu),
-                        )
-
-    def handle_indicator_selection(self, sender, menu):
-        dpg.configure_item(menu, show=False)
-        indicator_name = dpg.get_item_configuration(sender)["label"]
-        if self.get_required_args(getattr(pandas_ta, indicator_name)):
-            # If the indicator requires additional arguments
-            self.create_argument_popup(indicator_name)
-        else:
-            # If no additional arguments required, add the indicator directly
-            self.add_indicator_to_chart(indicator_name)
-
-    def add_indicator_to_chart(self, indicator_name, **kwargs):
-        # Retrieve the indicator function from pandas_ta
-        indicator_function = getattr(pandas_ta, indicator_name, None)
-
-        if indicator_function is None:
-            logging.info(f"No indicator found with name: {indicator_name}")
-            return
-
-        # Calculate the indicator values. You may need to pass additional parameters depending on the indicator.
-        indicator_values = indicator_function(self.ohlcv, **kwargs)
-
-        # Convert the result to a format suitable for the chart if necessary
-        # Some indicators return a DataFrame, others might return a Series
-        if isinstance(indicator_values, pd.DataFrame):
-            for column in indicator_values.columns:
-                self.plot_indicator_series(
-                    indicator_values[column], label=f"{indicator_name} {column}"
-                )
-        elif isinstance(indicator_values, pd.Series):
-            self.plot_indicator_series(indicator_values, label=indicator_name)
-        else:
-            logging.info(f"Unhandled indicator result type: {type(indicator_values)}")
-
-    def plot_indicator_series(self, values, label):
-        # Assuming 'values' is a pandas Series with the indicator results
-        # This function should add the line series to the chart using the DearPyGUI API
-        line_series_id = dpg.add_line_series(
-            list(self.ohlcv.index),
-            list(values),
-            label=label,
-            parent=self.candle_series_yaxis,
-        )
-        self.line_series_ids[label] = (
-            line_series_id  # Store the line series ID for future reference
-        )
-
-    def get_required_args(self, func):
-        sig = inspect.signature(func)
-        return [
-            param.name
-            for param in sig.parameters.values()
-            if param.default == param.empty and param.name != "self"
-        ]
-
-    def create_argument_popup(self, indicator_name):
-        required_args = self.get_required_args(getattr(pandas_ta, indicator_name))
-        with dpg.window(label=f"Configure {indicator_name}", autosize=True) as popup:
-            for arg in required_args:
-                dpg.add_input_text(label=arg, tag=f"{self.tab}_{indicator_name}_{arg}")
-            dpg.add_button(
-                label="Apply",
-                callback=lambda: self.apply_indicator_settings(indicator_name),
-            )
-
-        # make sure the window's centered
-        dpg.render_dearpygui_frame()
-        center_window(popup)
-
-    def apply_indicator_settings(self, indicator_name):
-        args = {}
-        required_args = self.get_required_args(getattr(pandas_ta, indicator_name))
-        for arg in required_args:
-            args[arg] = dpg.get_value(f"{self.tab}_{indicator_name}_{arg}")
-        self.add_indicator_to_chart(indicator_name, **args)
-        # Save args to config file

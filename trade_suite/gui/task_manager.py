@@ -77,17 +77,19 @@ class TaskManager:
         :return: A list of tasks
         :doc-author: Trelent
         """
-        trades_task = f"trades_{exchange}_{symbol}_{tab}"
-        orderbook_task = f"orderbook_{exchange}_{symbol}_{tab}"
 
-        # We want to stop the old symbol's tasks for the tab when requesting a new stream
+        # We want to stop the old tab's tasks when requesting a new stream
         if tab in self.tabs:
             for task in self.tabs[tab]:
                 self.stop_task(task)
 
+        # This will emit the candles to listeners
         self._get_candles_for_market(
             tab, exchange, symbol, timeframe
-        )  # This will emit the candles to listeners
+        ) 
+        
+        trades_task = f"trades_{exchange}_{symbol}_{tab}"
+        orderbook_task = f"orderbook_{exchange}_{symbol}_{tab}"
 
         self.start_task(
             trades_task,
@@ -124,7 +126,7 @@ class TaskManager:
             self.data.exchange_list[exchange], timeframe, num_candles=365
         )
 
-        self.run_task_until_complete(
+        self.run_task_with_loading_popup(
             self.data.fetch_candles(
                 tab=tab,
                 exchanges=[exchange],
@@ -158,6 +160,8 @@ class TaskManager:
     def run_task_with_loading_popup(self, coro, message="Please wait..."):
         """
         The run_task_with_loading_popup function is a wrapper for asyncio.run_coroutine_threadsafe that displays a loading modal while the coroutine runs.
+        
+        Used when you need to run an async function call to the exchange and it requires loading and waiting. 
 
         :param self: Access the class instance
         :param coro: Pass in the coroutine to run

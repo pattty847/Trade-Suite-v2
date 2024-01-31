@@ -4,6 +4,17 @@ import dearpygui.dearpygui as dpg
 
 
 def timeframe_to_seconds(timeframe_str):
+    """
+    The timeframe_to_seconds function takes a timeframe string and converts it to seconds.
+    
+    Example: 
+        '1m' == 60
+        '5m' == 60 * 5
+    
+    :param timeframe_str: Determine the time frame of the data
+    :return: The number of seconds in the timeframe
+    :doc-author: Trelent
+    """
     # Extracts the numerical value and unit from the timeframe string
     numeric_part = int(timeframe_str[:-1])
     unit = timeframe_str[-1]
@@ -19,6 +30,18 @@ def timeframe_to_seconds(timeframe_str):
 
 
 def calculate_since(exchange, timeframe_str, num_candles):
+    """
+    The calculate_since function takes the following arguments:
+        exchange (ccxt.Exchange): The ccxt Exchange object to use for fetching data.
+        timeframe_str (str): A string representing the time frame of each candle, e.g., '5m' or '15m'.
+        num_candles (int): The number of candles to fetch from the exchange's API endpoint.
+    
+    :param exchange: Convert the timeframe string to a timedelta object
+    :param timeframe_str: Specify the timeframe
+    :param num_candles: Calculate the total duration of the candles
+    :return: A string in iso 8601 format:
+    :doc-author: Trelent
+    """
     # Convert the timeframe string to timedelta
     timeframe_duration_in_seconds = exchange.parse_timeframe(timeframe_str)
     timeframe_duration = timedelta(seconds=timeframe_duration_in_seconds)
@@ -38,6 +61,18 @@ def calculate_since(exchange, timeframe_str, num_candles):
 
 
 def center_window(tag):
+    """
+    The center_window function takes a tag as an argument and centers the window
+    with that tag in the viewport. It does this by first getting the width and height
+    of both the viewport (the visible area of your screen) and then gets those same
+    dimensions for your window after it has been rendered. Then, it calculates where to 
+    position your window so that it is centered in relation to its parent container, 
+    which is always going to be the viewport.
+    
+    :param tag: Identify the window to be centered
+    :return: The window's position
+    :doc-author: Trelent
+    """
     # Get the viewport's width and height
     viewport_width, viewport_height = (
         dpg.get_viewport_client_width(),
@@ -55,7 +90,7 @@ def center_window(tag):
     dpg.set_item_pos(tag, [pos_x, pos_y])
 
 
-def create_loading_modal(message):
+def create_loading_modal(message="Loading..."):
     """
     The create_loading_modal function creates a modal window with the given message and a loading indicator.
 
@@ -63,7 +98,7 @@ def create_loading_modal(message):
     :return: A window object, which we can use to close the modal later
     :doc-author: Trelent
     """
-    with dpg.window(label="Loading", autosize=True, tag="loading_modal"):
+    with dpg.window(label="Loading...", autosize=True, tag="loading_modal"):
         dpg.add_text(message)
         dpg.add_loading_indicator()
 

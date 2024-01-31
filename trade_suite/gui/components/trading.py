@@ -47,22 +47,23 @@ class Trading:
         self.candlestick_plot = None  # tag to candle stick plot
 
         self.order_table_id = None  # Keep track of the order table ID
+        self.order_window_price_input_tag = None
 
-        self.register_event_listeners()
+        self._register_event_listeners()
 
-    def register_event_listeners(self):
+    def _register_event_listeners(self):
         event_mappings = {
-            Signals.NEW_TRADE: self.on_new_trade,
-            Signals.NEW_CANDLES: self.on_new_candles,
-            Signals.UPDATED_CANDLES: self.on_updated_candles,
-            Signals.TIMEFRAME_CHANGED: self.on_timeframe_change,
+            Signals.NEW_TRADE: self._on_new_trade,
+            Signals.NEW_CANDLES: self._on_new_candles,
+            Signals.UPDATED_CANDLES: self._on_updated_candles,
+            Signals.TIMEFRAME_CHANGED: self._on_timeframe_change,
         }
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
 
     def setup_trading_menu(self):
         with dpg.menu(label="Trading"):
-            dpg.add_checkbox(label="Order Line", callback=self.toggle_drag_line)
+            dpg.add_checkbox(label="Order Line", callback=self._toggle_drag_line)
             dpg.add_menu_item(label="Trade", callback=self.toggle_place_order_window)
 
             # Adding a tooltip to the menu to give users more information
@@ -73,28 +74,28 @@ class Trading:
                     "'Trade' will open the trade window at the line's price."
                 )
 
-    def on_timeframe_change(self, tab, exchange: str, new_timeframe: str):
+    def _on_timeframe_change(self, tab, exchange: str, new_timeframe: str):
         if tab == self.tab:
             timeframe_in_minutes = timeframe_to_seconds(new_timeframe)
             self.timeframe_str = new_timeframe
             self.timeframe_seconds = timeframe_in_minutes
 
-    # Listens for initial candle emissions
-    def on_new_candles(self, tab, exchange, candles):
+    # Listens for initial candle emissions or anytime the symbol/timeframe 
+    def _on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
 
     # Always listening for the updated candle stick chart
-    def on_updated_candles(self, tab, exchange, candles):
+    def _on_updated_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
 
-    def on_new_trade(self, tab, exchange, trade_data):
+    def _on_new_trade(self, tab, exchange, trade_data):
         timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
         price = trade_data["price"]
         volume = trade_data["amount"]
 
-    def toggle_drag_line(self):
+    def _toggle_drag_line(self):
         self.in_trade_mode = not self.in_trade_mode
         if self.in_trade_mode:
             dpg.configure_item(
@@ -127,11 +128,22 @@ class Trading:
 
                     dpg.add_button(label="MKT LONG")
                     dpg.add_button(label="MKT SHORT")
-                
-                self.setup_orders()
+                    
+                    # Add input for quantity
+                    dpg.add_text("LIMIT")
+                    self.limit_order_input = dpg.add_input_float(default_value=0.0, width=100)
+                    
+                    dpg.add_text("QTY")
+                    dpg.add_input_float(default_value=0.0, width=100)
+                    
+                    dpg.add_button(label="BUY", width=100)
+                    dpg.add_button(label="SELL", width=100)
+
+                # self.setup_orders()
 
             with dpg.tab(label="Automation"):
                 pass
+            
 
     def _toggle_place_order_window(self):
         price = dpg.get_value(self.trade_mode_drag_line_tag)
@@ -240,6 +252,7 @@ class Trading:
         dpg.set_value(self.trade_mode_drag_line_tag, self.ohlcv["closes"].iloc[-1])
 
     def setup_orders(self):
+        # TODO: Implement caching 
         orders = self.task_manager.run_task_with_loading_popup(
             self.data.exchange_list[self.exchange].fetch_orders(),
             "Loading orders...",
@@ -294,6 +307,7 @@ class Trading:
         price = dpg.get_value(sender)
         self.drag_line_price = price
 
+        dpg.configure_item(self.limit_order_input, default_value=price)
         # If the order window is open, update the price to the user's drag line
         if dpg.does_item_exist(self.order_window_price_input_tag):
             dpg.set_value(self.order_window_price_input_tag, price)

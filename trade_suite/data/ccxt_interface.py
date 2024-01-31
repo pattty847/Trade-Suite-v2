@@ -22,19 +22,20 @@ class CCXTInterface:
 
     async def load_exchange(self, exchange_id: str):
         """
-        Initialize a single exchange with credentials.
+        Initialize a single exchange with or without credentials.
         """
         if exchange_id in self._instances:
             logging.info(f"Using existing instance for {exchange_id}.")
             return self._instances[exchange_id]
 
         credentials = self._get_credentials(exchange_id)
-        if not credentials:
-            logging.error(f"Credentials not found for {exchange_id}")
-            return None
 
         try:
-            logging.info(f"Initializing {exchange_id} with credentials.")
+            if not credentials:
+                logging.error(f"Credentials not found for {exchange_id}")
+            else:
+                logging.info(f"Initializing {exchange_id} with credentials.")
+                
             exchange_class: ccxt.Exchange = getattr(ccxtpro, exchange_id)(credentials)
 
             await exchange_class.load_markets()
@@ -108,4 +109,4 @@ class CCXTInterface:
 
         if api_key and secret:
             return {"apiKey": api_key, "secret": secret, "password": password}
-        return None
+        return {}

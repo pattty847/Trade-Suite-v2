@@ -13,13 +13,15 @@ from gui.components.trading import Trading
 from gui.signals import SignalEmitter, Signals
 from gui.task_manager import TaskManager
 from gui.utils import create_timed_popup, searcher
+from data.state import StateManager
 
 
 class Chart:
-    def __init__(self, parent, exchange, emitter, data, task_manager, config_manager):
-        create_timed_popup(message="Testing", time=1, additional_ui_callback=self._notes_to_user)
+    def __init__(self, parent, exchange, emitter, data, task_manager, config_manager, state_manager):
+        # create_timed_popup(message="Testing", time=1, additional_ui_callback=self._notes_to_user)
+        
         self._initialize_attributes(
-            parent, exchange, emitter, data, task_manager, config_manager
+            parent, exchange, emitter, data, task_manager, config_manager, state_manager
         )
         self._initialize_components()
         self._setup_ui_elements()
@@ -35,7 +37,7 @@ class Chart:
             )
 
     def _initialize_attributes(
-        self, parent, exchange, emitter, data, task_manager, config_manager
+        self, parent, exchange, emitter, data, task_manager, config_manager, state_manager
     ):
         self.tab_id = dpg.generate_uuid()
         self.parent: str = parent
@@ -43,13 +45,14 @@ class Chart:
         self.data: Data = data
         self.task_manager: TaskManager = task_manager
         self.config_manager: ConfigManager = config_manager
+        self.state_manager: StateManager = state_manager # TESTING
         self.exchange: str = exchange
         self.exchange_settings = self.config_manager.get_setting(exchange) or {}
         self.ohlcv = pd.DataFrame(
             columns=["dates", "opens", "highs", "lows", "closes", "volumes"]
         )
-        self.timeframe_str = self._get_default_timeframe()
-        self.active_symbol = self._get_default_symbol()
+        self.timeframe = self._get_default_timeframe()
+        self.symbol = self._get_default_symbol()
 
     def _initialize_components(self):
         self.candle_factory = CandleFactory(
@@ -59,8 +62,7 @@ class Chart:
             self.task_manager,
             self.data,
             self.exchange_settings,
-            self.timeframe_str,
-            self.ohlcv,
+            self.timeframe,
         )
         
         # All of these classes need listeners for the updated candles
@@ -81,7 +83,7 @@ class Chart:
         self.orderbook = OrderBook(
             self.tab_id,
             self.exchange,
-            self.active_symbol,
+            self.symbol,
             self.emitter,
             self.data,
             self.config_manager,
@@ -92,8 +94,8 @@ class Chart:
             self.task_manager.start_stream_for_chart(
                 self.tab_id,
                 exchange=self.exchange,
-                symbol=self.active_symbol,
-                timeframe=self.timeframe_str,
+                symbol=self.symbol,
+                timeframe=self.timeframe,
             )
 
     def _setup_ui_elements(self):
@@ -150,7 +152,7 @@ class Chart:
             input_tag = dpg.add_input_text(label="Search")
             symbols_list = dpg.add_listbox(
                 items=self.data.exchange_list[self.exchange].symbols,
-                default_value=self.active_symbol,
+                default_value=self.symbol,
                 callback=lambda sender, symbol, user_data: self.emitter.emit(
                     Signals.SYMBOL_CHANGED,
                     exchange=self.exchange,
@@ -171,7 +173,7 @@ class Chart:
             dpg.add_text("Timeframe")
             dpg.add_listbox(
                 items=list(self.data.exchange_list[self.exchange].timeframes.keys()),
-                default_value=self.timeframe_str,
+                default_value=self.timeframe,
                 callback=lambda sender, timeframe, user_data: self.emitter.emit(
                     Signals.TIMEFRAME_CHANGED,
                     exchange=self.exchange,
@@ -208,7 +210,7 @@ class Chart:
             columns=1,
             row_ratios=[0.7, 0.3],
             link_all_x=True,
-            label=f"{self.active_symbol} | {self.timeframe_str}",
+            label=f"{self.symbol} | {self.timeframe}",
             width=-1,
         ) as self.subplots:
 
@@ -244,7 +246,7 @@ class Chart:
                         list(self.ohlcv["lows"]),
                         list(self.ohlcv["highs"]),
                         time_unit=dpg.mvTimeUnit_Min,
-                        label=f"{self.active_symbol}",
+                        label=f"{self.symbol}",
                     )
 
                     self.trading.candlestick_plot = self.candlestick_plot
@@ -282,46 +284,50 @@ class Chart:
     def _on_symbol_change(self, exchange, tab, new_symbol: str):
         if tab == self.tab_id:
             logging.info(
-                f"{exchange}: Symbol change - from {self.active_symbol} to {new_symbol}"
+                f"{exchange}: Symbol change - from {self.symbol} to {new_symbol}"
             )
 
             new_settings = {
                 "last_symbol": new_symbol,
-                "last_timeframe": self.timeframe_str,
+                "last_timeframe": self.timeframe,
             }
             self._update_chart_settings_and_stream(
-                exchange, new_settings, tab, new_symbol, self.timeframe_str
+                exchange, new_settings, tab, new_symbol, self.timeframe
             )
-            self.active_symbol = new_symbol
+            self.symbol = new_symbol
 
 
     def _on_timeframe_change(self, exchange, tab, new_timeframe: str):
         if tab == self.tab_id:
             logging.info(
-                f"{exchange}: Timeframe change - from {self.timeframe_str} to {new_timeframe}"
+                f"{exchange}: Timeframe change - from {self.timeframe} to {new_timeframe}"
             )
 
             # Update settings
             new_settings = {
-                "last_symbol": self.active_symbol,
+                "last_symbol": self.symbol,
                 "last_timeframe": new_timeframe,
             }
+            
+            # Try to resample the candle data
+            can_resample = self.candle_factory.try_resample(new_timeframe, self.exchange)
 
-            candles = self.candle_factory.resample_candle(new_timeframe, self.exchange)
-
-            if candles is None:
+            # If resampling couldn't be performed, update the chart settings and start a new data stream
+            if not can_resample:
                 self._update_chart_settings_and_stream(
-                    exchange, new_settings, tab, self.active_symbol, new_timeframe
+                    exchange, new_settings, tab, self.symbol, new_timeframe
                 )
             else:
-                # Set the subplot label to the new timeframe
+                # If resampling was successful, update the subplot label to the new timeframe
                 dpg.configure_item(
-                    self.subplots, label=f"{self.active_symbol} | {new_timeframe}"
+                    self.subplots, label=f"{self.symbol} | {new_timeframe}"
                 )
                 
-            self.timeframe_str = new_timeframe
+            # Update the timeframe_str attribute
+            self.timeframe = new_timeframe
 
-    # Only called once after Charts initialization and start_data_stream fetches new candles
+    # Called anytime this class calls fetch_candles
+    # Side effect for changing symbols
     def _on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
             self.ohlcv = candles

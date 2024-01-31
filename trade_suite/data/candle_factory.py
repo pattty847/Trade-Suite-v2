@@ -18,7 +18,6 @@ class CandleFactory:
         data: Data,
         exchange_settings,
         timeframe_str,
-        ohlcv,
     ) -> None:
         self.exchange = exchange
         self.tab = tab
@@ -30,25 +29,33 @@ class CandleFactory:
         self.timeframe_seconds = timeframe_to_seconds(self.timeframe_str)
         self.last_candle_timestamp = None
 
-        self.ohlcv: pd.DataFrame = ohlcv
+        self.ohlcv = pd.DataFrame(
+            columns=["dates", "opens", "highs", "lows", "closes", "volumes"]
+        )
         self._trade_queue = deque()
         self.max_trades_per_candle_update = 5
 
-        self.register_event_listeners()
+        self._register_event_listeners()
 
-    def register_event_listeners(self):
+    def _register_event_listeners(self):
         event_mappings = {
-            Signals.NEW_TRADE: self.batch_trades_for_candles,
-            Signals.NEW_CANDLES: self.on_new_candles,
+            Signals.NEW_TRADE: self._on_new_trade,
+            Signals.NEW_CANDLES: self._on_new_candles,
+            Signals.TIMEFRAME_CHANGED: self._on_new_timeframe,
         }
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
 
-    def on_new_candles(self, tab, exchange, candles):
+    def _on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab:
             self.ohlcv = candles
+    
+    def _on_new_timeframe(self, tab, exchange, new_timeframe):
+        if tab == self.tab:
+            self.timeframe_str = new_timeframe
+            self.timeframe_str = timeframe_to_seconds(timeframe_str=new_timeframe)
 
-    def batch_trades_for_candles(self, tab, exchange, trade_data):
+    def _on_new_trade(self, tab, exchange, trade_data):
         if tab == self.tab:
             self._trade_queue.append(trade_data)
             current_time = time.time()
@@ -58,9 +65,9 @@ class CandleFactory:
                 self.last_candle_timestamp is not None
                 and current_time - self.last_candle_timestamp >= self.timeframe_seconds
             ):
-                self.build_candle_from_batch(tab, exchange)
+                self._build_candle_from_batch(tab, exchange)
 
-    def build_candle_from_batch(self, tab, exchange):
+    def _build_candle_from_batch(self, tab, exchange):
         if self._trade_queue:
             # Assuming trade_data has 'timestamp', 'price', 'amount'
             batch_trades = list(self._trade_queue)
@@ -70,7 +77,7 @@ class CandleFactory:
             # Logic to compute OHLC and volume for the batch
             # Update self.ohlcv with the new candle
             for trade in batch_trades:
-                self._build_candle_from_batch(tab, exchange, trade)
+                self._build_candles(tab, exchange, trade)
 
             # Emit the updated candles
             self.emitter.emit(
@@ -80,7 +87,7 @@ class CandleFactory:
                 candles=self.ohlcv,
             )
 
-    def _build_candle_from_batch(self, tab, exchange, trade_data):
+    def _build_candles(self, tab, exchange, trade_data):
         if tab == self.tab:
             timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
             price = trade_data["price"]
@@ -120,29 +127,36 @@ class CandleFactory:
                 self.ohlcv.at[self.ohlcv.index[-1], "closes"] = price
                 self.ohlcv.at[self.ohlcv.index[-1], "volumes"] += volume
 
-            self.emitter.emit(
-                Signals.UPDATED_CANDLES,
-                tab=self.tab,
-                exchange=exchange,
-                candles=self.ohlcv,
-            )
 
-    def resample_candle(self, new_timeframe: str, active_exchange):
+    def try_resample(self, new_timeframe: str, active_exchange):
         new_timeframe_in_seconds = timeframe_to_seconds(new_timeframe)
-        # if new timeframe > old timeframe, we can just aggregate the dataset ourselves
+        
+        # If the new timeframe is larger than the old one, we can aggregate the dataset ourselves
         if new_timeframe_in_seconds > self.timeframe_seconds:
             ohlcv = self.data.agg.resample_data(self.ohlcv, new_timeframe)
+            
+            # Emit an event to update the candles
             self.emitter.emit(
                 Signals.UPDATED_CANDLES,
                 tab=self.tab,
                 exchange=active_exchange,
                 candles=ohlcv,
             )
+            
+            # Update the ohlcv and timeframe_seconds attributes
             self.ohlcv = ohlcv
+            self.timeframe_seconds = new_timeframe_in_seconds
+            
+            # Return True to indicate successful resampling
+            return True
         else:
-            return None
+            # If the new timeframe is smaller or equal to the old one, we can't resample
+            # Update the timeframe_seconds attribute
+            self.timeframe_seconds = new_timeframe_in_seconds
+            
+            # Return False to indicate unsuccessful resampling
+            return False
 
-        self.timeframe_seconds = new_timeframe_in_seconds
 
     def set_trade_batch(self, sender, app_data, user_data):
         self.max_trades_per_candle_update = app_data

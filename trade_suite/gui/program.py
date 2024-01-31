@@ -6,20 +6,21 @@ import ccxt.pro as ccxt
 from config import ConfigManager
 from data.data_source import Data
 from gui.components.chart import Chart
-from gui.components.tpo import TPO
+from gui.components.tpo import TAB
 from gui.signals import SignalEmitter, Signals
 from gui.task_manager import TaskManager
 from gui.utils import searcher
+from data.state import StateManager
 
 
 class MenuBar:
     def __init__(
-        self, emitter: SignalEmitter, data: Data, task_manger: TaskManager
+        self, emitter: SignalEmitter, data: Data, task_manager: TaskManager
     ) -> None:
         self.tag = dpg.generate_uuid()
         self.emitter = emitter
         self.data = data
-        self.task_manger = task_manger
+        self.task_manager = task_manager
         with dpg.menu_bar(tag=self.tag):
             with dpg.menu(label="DPG"):
                 with dpg.menu(label="Tools"):
@@ -69,9 +70,9 @@ class MenuBar:
                     ),
                 )
 
-            with dpg.menu(label="TPO Testing"):
-                new_tpo_search = dpg.add_input_text(label="Search")
-                new_tpo_exchange_list = dpg.add_listbox(
+            with dpg.menu(label="Tab Testing"):
+                new_tab_search = dpg.add_input_text(label="Search")
+                new_tab_exchange_list = dpg.add_listbox(
                     list(ccxt.exchanges),
                     callback=lambda s, a, u: self.emitter.emit(
                         Signals.CREATE_TAB, exchange=a
@@ -79,9 +80,9 @@ class MenuBar:
                     num_items=10,
                 )
                 dpg.set_item_callback(
-                    new_tpo_search,
+                    new_tab_search,
                     callback=lambda: searcher(
-                        new_tpo_search, new_tpo_exchange_list, list(ccxt.exchanges)
+                        new_tab_search, new_tab_exchange_list, list(ccxt.exchanges)
                     ),
                 )
 
@@ -99,6 +100,7 @@ class Program:
         self.data = data
         self.task_manager = task_manager
         self.config_manager = config_manager
+        self.state_manager: StateManager = StateManager()
 
         self.last_exchange = self.config_manager.get_setting("last_exchange")
         self.exchange_settings = self.config_manager.get_setting(self.last_exchange)
@@ -170,6 +172,7 @@ class Program:
                 data=self.data,
                 task_manager=self.task_manager,
                 config_manager=self.config_manager,
+                state_manager=self.state_manager,
             )
         else:
             chart: Chart = Chart(
@@ -179,11 +182,12 @@ class Program:
                 data=self.data,
                 task_manager=self.task_manager,
                 config_manager=self.config_manager,
+                state_manager=self.state_manager,
             )
         self.charts["Chart", chart.tab_id]: Chart = chart
 
     def create_tab(self, exchange):
-        tpo = TPO(
+        tab = TAB(
             parent=self.tab_bar,
             exchange=exchange,
             emitter=self.emitter,
@@ -191,4 +195,4 @@ class Program:
             task_manager=self.task_manager,
             config_manager=self.config_manager,
         )
-        self.charts["TPO", tpo.tab_id]: TPO = tpo
+        self.charts["TPO", tab.tab_id]: TAB = tab

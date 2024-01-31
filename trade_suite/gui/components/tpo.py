@@ -9,7 +9,7 @@ from gui.task_manager import TaskManager
 from gui.utils import searcher
 
 
-class TPO:
+class TAB:
     def __init__(self, parent, exchange, emitter, data, task_manager, config_manager):
         self.initialize_attributes(
             parent, exchange, emitter, data, task_manager, config_manager
