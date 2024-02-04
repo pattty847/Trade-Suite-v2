@@ -6,6 +6,7 @@ import pandas as pd
 from config import ConfigManager
 from data.data_source import Data
 from gui.signals import SignalEmitter, Signals
+from gui.components.test_ob import TestOB
 
 
 class OrderBook:
@@ -104,10 +105,9 @@ class OrderBook:
 
     # Listens for order book emissions
     def _on_order_book_update(self, tab, exchange, orderbook):
-        if exchange == self.exchange and tab == self.tab:
+        if tab == self.tab:
             # Pass the 'self.aggregated_order_book' to determine if aggregation is needed
             bids_df, asks_df, price_column = self._aggregate_and_group_order_book(
-                exchange,
                 orderbook,
                 self.tick_size,
                 self.aggregated_order_book,
@@ -117,7 +117,7 @@ class OrderBook:
             self._update_order_book(bids_df, asks_df, price_column)
 
     def _aggregate_and_group_order_book(
-        self, exchange, orderbook, tick_size, aggregate
+        self, orderbook, tick_size, aggregate
     ):
         # Extract bids and asks
         bids = orderbook["bids"]
@@ -146,10 +146,12 @@ class OrderBook:
         # Update the series data
         return bids_df, asks_df, price_column
 
+
     def _group_and_aggregate(self, orders, tick_size):
         df = pd.DataFrame(orders, columns=["price", "quantity"])
         df["price_group"] = (df["price"] // tick_size) * tick_size
         return df.groupby("price_group").agg({"quantity": "sum"}).reset_index()
+
 
     def _update_order_book(self, bids_df, asks_df, price_column):
         bid_prices = bids_df[price_column].tolist()

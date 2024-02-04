@@ -64,19 +64,19 @@ class MarketAggregator:
                 symbol = trade["symbol"]
                 # Check if necessary fields are in the trade data
                 if not all(key in trade for key in ("price", "amount", "side")):
-                    logging.info(f"Trade data is missing necessary fields: {trade}")
+                    logging.error(f"Trade data is missing necessary fields: {trade}")
                     return
 
                 # Convert amount to float once and store the result
                 try:
                     amount = float(trade["amount"])  # base currency
                 except ValueError:
-                    logging.info(f"Amount is not a number: {trade['amount']}")
+                    logging.error(f"Amount is not a number: {trade['amount']}")
                     return
 
                 # Check if side is either "buy" or "sell"
                 if trade["side"] not in ("buy", "sell"):
-                    logging.info(f"Invalid trade side: {trade['side']}")
+                    logging.error(f"Invalid trade side: {trade['side']}")
                     return
 
                 order_cost = float(trade["price"]) * amount  # quote currency
@@ -111,7 +111,7 @@ class MarketAggregator:
                 return symbol, self.trade_stats[(exchange, symbol)]
 
         except Exception as e:
-            logging.info(f"Error processing trade data: {e}")
+            logging.error(f"Error processing trade data: {e}")
 
     def get_order_size_category_(self, order_cost):
         if order_cost < 1e4:

@@ -25,7 +25,7 @@ class CCXTInterface:
         Initialize a single exchange with or without credentials.
         """
         if exchange_id in self._instances:
-            logging.info(f"Using existing instance for {exchange_id}.")
+            logging.warning(f"Using existing instance for {exchange_id}.")
             return self._instances[exchange_id]
 
         credentials = self._get_credentials(exchange_id)
@@ -49,7 +49,7 @@ class CCXTInterface:
                 self._instances[exchange_id] = exchange_class
                 return exchange_class
             else:
-                logging.info(f"{exchange_id} does not support all required features.")
+                logging.error(f"{exchange_id} does not support all required features.")
                 return None
         except (ccxt.NetworkError, ccxt.ExchangeError, Exception) as e:
             logging.error(f"Error with {exchange_id}: {e}")

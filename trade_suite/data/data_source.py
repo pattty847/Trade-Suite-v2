@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from typing import Dict, List
 
 import ccxt
@@ -21,6 +22,10 @@ class Data(CCXTInterface):
         super().__init__(exchanges)
         self.agg = MarketAggregator(influx, emitter)
         self.emitter = emitter
+        
+        self.cache_dir = 'data/cache'
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
 
         self.is_running = True
 
@@ -252,6 +257,8 @@ class Data(CCXTInterface):
                         tasks.append(task)
 
         await asyncio.gather(*tasks)
+        
+        logging.info(all_candles)
 
         if write_to_db:
             try:
@@ -259,7 +266,7 @@ class Data(CCXTInterface):
             except Exception as e:
                 logging.error(f"Error writing to DB: {e}")
 
-        # If we're just requesting one exchange: symbol/timeframe pair we'll just that one
+        # If we're just requesting one exchange: symbol/timeframe pair we'll just emit that one
         if len(exchanges) == len(symbols) == len(timeframes) == 1 and self.emitter:
             first_exchange = next(iter(all_candles))
             first_symbol_timeframe_key = next(iter(all_candles[first_exchange]))
@@ -277,41 +284,84 @@ class Data(CCXTInterface):
 
         return all_candles
 
-    async def fetch_and_process_candles(
-        self, exchange, symbol, timeframe, since_timestamp, exchange_name, all_candles
-    ):
+    async def fetch_and_process_candles(self, exchange, symbol, timeframe, since_timestamp, exchange_name, all_candles):
+        key = self._generate_cache_key(exchange.id, symbol, timeframe)
+        path = f"{self.cache_dir}/{key}.csv"
+        logging.debug(f"Path: {path}")
+        timeframe_duration_in_seconds = exchange.parse_timeframe(timeframe)
+        timeframe_duration_in_ms = timeframe_duration_in_seconds * 1000
+        now = exchange.milliseconds()
+        
         try:
-            timeframe_duration_in_seconds = exchange.parse_timeframe(timeframe)
-            timeframe_duration_in_ms = timeframe_duration_in_seconds * 1000
-            now = exchange.milliseconds()
-            fetch_since = since_timestamp
-            all_ohlcv = []
+            existing_df = None
+            if os.path.exists(path):
+                logging.debug(f"Cache found: {path}")
+                existing_df = pd.read_csv(path)
+                first_cached_timestamp = existing_df['dates'].iloc[0]
+                last_cached_timestamp = existing_df['dates'].iloc[-1]
+                logging.debug(f"Last timestamp: {last_cached_timestamp} - First timestamp: {first_cached_timestamp}")
+                
+                # Determine if we need to prepend
+                if since_timestamp < first_cached_timestamp:
+                    prepend_since = since_timestamp
+                    logging.debug(f"Prepend since: {prepend_since}")
+                    while prepend_since < first_cached_timestamp:
+                        prepend_ohlcv = await self.retry_fetch_ohlcv(exchange, symbol, timeframe, prepend_since)
+                        if prepend_ohlcv:
+                            prepend_since = prepend_ohlcv[-1][0] + (timeframe_duration_in_ms)  # Adjust for next batch
+                            # Prepend this data
+                            prepend_df = pd.DataFrame(prepend_ohlcv, columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+                            if not prepend_df.empty:
+                                existing_df = pd.concat([prepend_df, existing_df]).drop_duplicates().reset_index(drop=True)
+                        else:
+                            break  # No more data to prepend
 
+                fetch_since = last_cached_timestamp  # Start timestamp for appending
+            else:
+                fetch_since = since_timestamp
+                existing_df = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+            
+            # Fetch and append new data
             while fetch_since < now:
-                ohlcv = await self.retry_fetch_ohlcv(
-                    exchange, 3, symbol, timeframe, fetch_since
-                )
-                if not ohlcv:
-                    break
-                fetch_since = ohlcv[-1][0] + timeframe_duration_in_ms
-                all_ohlcv += ohlcv
+                logging.debug(f"Now: {now} - Fetch since: {fetch_since}")
+                append_ohlcv = await self.retry_fetch_ohlcv(exchange, symbol, timeframe, fetch_since)
+                if append_ohlcv:
+                    fetch_since = append_ohlcv[-1][0] + (timeframe_duration_in_ms)  # Adjust for next batch
+                    append_df = pd.DataFrame(append_ohlcv, columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+                    # Ensure append_df is not empty before attempting concatenation
+                    if not append_df.empty:
+                        # Optionally, filter out columns that are entirely NA if necessary
+                        # append_df = append_df.dropna(axis=1, how='all')
+                        
+                        # Concatenate DataFrames while ensuring no entirely empty or all-NA columns are causing issues
+                        existing_df = pd.concat([existing_df, append_df]).drop_duplicates().reset_index(drop=True)
+                else:
+                    break  # No more data to append
+                
+            directory = os.path.dirname(path)
+            if not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
+                
+            existing_df = existing_df.drop_duplicates(subset=['dates'], keep='last').reset_index(drop=True)
 
-            df = pd.DataFrame(
-                all_ohlcv,
-                columns=["dates", "opens", "highs", "lows", "closes", "volumes"],
-            )
-            df["dates"] /= 1000
-            key = f"{symbol}-{timeframe}"
-            all_candles[exchange_name][key] = df
+            # Save the updated DataFrame to CSV
+            existing_df.to_csv(path, index=False)
+
+            # Update in-memory cache
+            all_candles[exchange_name][key] = existing_df
 
         except (ccxt.NetworkError, ccxt.ExchangeError, Exception) as e:
             logging.error(f"{type(e).__name__} occurred: {e}")
 
-    async def retry_fetch_ohlcv(self, exchange, max_retries, symbol, timeframe, since):
+
+
+    async def retry_fetch_ohlcv(self, exchange, symbol, timeframe, since):
+        max_retries = 3
         num_retries = 0
         while num_retries < max_retries:
             try:
-                ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, since)
+                ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, int(since))
+                logging.info(f"Fetched {len(ohlcv)} candles.")
                 return ohlcv
             except Exception as e:
                 num_retries += 1
@@ -320,6 +370,12 @@ class Data(CCXTInterface):
                     raise Exception(
                         f"Failed to fetch {timeframe} {symbol} OHLCV in {max_retries} attempts"
                     )
+                    
+    def _generate_cache_key(self, exchange: str, symbol: str, timeframe: str):
+        symbol = symbol.replace("/", "-")
+        cache = f"{exchange}_{symbol}_{timeframe}"
+        logging.info(f"cache: {cache}")
+        return cache
 
     async def fetch_stats_for_symbol(self, exchange, symbol):
         try:

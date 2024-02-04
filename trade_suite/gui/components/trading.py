@@ -11,14 +11,6 @@ from gui.signals import SignalEmitter, Signals
 from gui.task_manager import TaskManager
 from gui.utils import timeframe_to_seconds
 
-"""
-Trading: interface
-Display: a child window placed below the chart which allows users to toggle between accounts (note, the user will be looking at tabs, so if they switch to a not visable tab, how should you handle this?).
-Accounts: a drop down list of various ccxt exchanges/accounts users can toggle between.
-
-
-"""
-
 
 class Trading:
     def __init__(

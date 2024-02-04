@@ -62,12 +62,29 @@ def _get_args():
         default=["coinbasepro"],
         help="List of exchanges to use",
     )
+    
+    parser.add_argument(
+        "--level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Set the logging level (default: %(default)s)",
+    )
 
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = _get_args()
+    
+    # Set the logging level based on command line argument
+    numeric_level = getattr(logging, args.level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f"Invalid log level: {args.level}")
+    
+    logging.basicConfig(
+        level=numeric_level,
+        format="%(asctime)s %(levelname)s:%(filename)s:%(funcName)s: %(message)s",
+    )
 
     config_manager = ConfigManager()
     exchanges = (

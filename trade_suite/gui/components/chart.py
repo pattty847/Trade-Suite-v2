@@ -14,6 +14,7 @@ from gui.signals import SignalEmitter, Signals
 from gui.task_manager import TaskManager
 from gui.utils import create_timed_popup, searcher
 from data.state import StateManager
+from gui.components.test_ob import TestOB
 
 
 class Chart:
@@ -51,6 +52,7 @@ class Chart:
         self.ohlcv = pd.DataFrame(
             columns=["dates", "opens", "highs", "lows", "closes", "volumes"]
         )
+        self.auto_fit_enabled = True
         self.timeframe = self._get_default_timeframe()
         self.symbol = self._get_default_symbol()
 
@@ -88,6 +90,11 @@ class Chart:
             self.data,
             self.config_manager,
         )
+        self.test_ob = TestOB(
+            self.tab_id, 
+            self.data, 
+            self.emitter
+        )
 
     def _start_data_stream(self):
         if self.exchange:
@@ -118,6 +125,7 @@ class Chart:
                     # Order book group
                     with dpg.group(width=-1, tag=self.orderbook.order_book_group):
                         self.orderbook.draw_orderbook_plot()
+                        self.test_ob.launch()
                     
                 
             with dpg.child_window(width=-1, height=200) as self.trading_window_id: 
@@ -129,6 +137,7 @@ class Chart:
             self.trading.setup_trading_menu()
             self.indicators.create_indicators_menu()
             self.orderbook.setup_orderbook_menu()
+            dpg.add_menu_item(label="Test Orderbook", callback=self.test_ob.launch)
             self._setup_settings_menu()
 
     def _register_event_listeners(self):
@@ -185,30 +194,32 @@ class Chart:
 
     def _setup_settings_menu(self):
         with dpg.menu(label="Settings"):
-            dpg.add_text("Candle Width")
             dpg.add_slider_float(
+                label="Candle Width",
                 min_value=0.1,
                 max_value=1,
                 callback=lambda s, a, u: dpg.configure_item(
                     self.candle_series, weight=a
                 ),
             )
-            dpg.add_menu_item(
-                label="Stop All Streaming", callback=self.task_manager.stop_all_tasks
-            )
-            dpg.add_text("Trades/Candle Update")
+            
             dpg.add_slider_int(
+                label="Trades/Candle Update",
                 default_value=5,
                 min_value=1,
                 max_value=50,
                 callback=self.candle_factory.set_trade_batch
+            )
+            
+            dpg.add_menu_item(
+                label="Stop All Streaming", callback=self.task_manager.stop_all_tasks
             )
 
     def _setup_candlestick_chart(self):
         with dpg.subplots(
             rows=2,
             columns=1,
-            row_ratios=[0.7, 0.3],
+            row_ratios=[0.8, 0.2],
             link_all_x=True,
             label=f"{self.symbol} | {self.timeframe}",
             width=-1,
@@ -269,6 +280,7 @@ class Chart:
                         list(self.ohlcv["volumes"]),
                         weight=100,
                     )
+
                     
 
     def _update_chart_settings_and_stream(
@@ -276,6 +288,9 @@ class Chart:
     ):
         dpg.configure_item(
             self.subplots, label=f"{symbol} | {timeframe}"
+        )
+        dpg.configure_item(
+            self.candle_series, label=f"{symbol} | {timeframe}"
         )
         self.config_manager.update_setting(exchange, settings)
         self.task_manager.start_stream_for_chart(tab, exchange, symbol, timeframe)
@@ -330,6 +345,7 @@ class Chart:
     # Side effect for changing symbols
     def _on_new_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
+            candles['dates'] /= 1000
             self.ohlcv = candles
             self._update_candle_chart()
             dpg.fit_axis_data(self.candle_series_xaxis)
@@ -341,17 +357,24 @@ class Chart:
         timestamp = trade_data["timestamp"] // 1000  # Convert ms to seconds
         price = trade_data["price"]
         volume = trade_data["amount"]
-
+        
+        half_interval = (5 * 60) * 0.25 / 2  # Assuming 5 minutes interval for candles
+    
+        # Adjust the timestamp to the center of the candlestick
+        adjusted_timestamp = timestamp - half_interval
+        
+        # Align the circle's center with the center of the wick
         dpg.draw_circle(
             center=[
-                timestamp,
-                price,
+                adjusted_timestamp,  # x-coordinate is the center of the candle
+                price,          # y-coordinate is the trade price
             ],
-            radius=volume * 5,
+            radius=volume * 10,
             color=[255, 255, 255, 255],
             thickness=1,
             parent=self.candlestick_plot,
         )
+
 
     def _on_updated_candles(self, tab, exchange, candles):
         if isinstance(candles, pd.DataFrame) and tab == self.tab_id:
@@ -374,6 +397,10 @@ class Chart:
             y=self.ohlcv["volumes"].tolist(),
         )
 
+    def _calculate_price_level(self, bin_index, min_price, max_price, n_bins):
+        bin_width = (max_price - min_price) / n_bins
+        return min_price + bin_width * (bin_index + 0.5)
+
     def _on_trade_stat_update(self, symbol, stats):
         pass
 
@@ -384,6 +411,24 @@ class Chart:
         # Update the width of the groups
         dpg.configure_item(self.orderbook.charts_group, width=charts_width)
         dpg.configure_item(self.orderbook.order_book_group, width=-1)
+        
+    def _toggle_auto_fit(self):
+        self.auto_fit_enabled = not self.auto_fit_enabled
+        if self.auto_fit_enabled:
+            self._fit_chart()
+        else:
+            self._free_chart()
+            
+    def _fit_chart(self):
+        # Fit the axes as you've done before
+        dpg.fit_axis_data(self.candle_series_xaxis)
+        dpg.fit_axis_data(self.candle_series_yaxis)
+        # ... fit other axes as needed
+
+    def _free_chart(self):
+        # Implement the logic to allow free movement
+        # This could involve setting the axis limits to a wider range
+        pass
 
     def _get_default_timeframe(self):
         return (

@@ -123,7 +123,7 @@ class TaskManager:
         """
         # TODO: Make number of candles variable
         since = calculate_since(
-            self.data.exchange_list[exchange], timeframe, num_candles=365
+            self.data.exchange_list[exchange], timeframe, num_candles=500
         )
 
         self.run_task_with_loading_popup(
