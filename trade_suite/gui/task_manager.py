@@ -1,11 +1,15 @@
 import asyncio
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List, Any, Callable
+import time
+
 import dearpygui.dearpygui as dpg
 
-from data.data_source import Data
-from gui.signals import Signals
-from gui.utils import calculate_since, create_loading_modal
+from trade_suite.data.data_source import Data
+from trade_suite.gui.signals import Signals
+from trade_suite.gui.utils import calculate_since, create_loading_modal, create_timed_popup
 
 """
 Mechanism:
@@ -24,67 +28,161 @@ Blocking Operations: For operations that need to wait for a result (like the ini
 
 class TaskManager:
     def __init__(self, data: Data):
-        self.loop = asyncio.new_event_loop()
+        self.data = data
+        self.tasks = {}
+        self.tabs = {}
+        self.visible_tab = None
+        self.loop = None
+        self.thread = None
+        self.running = True
+        
+        # Add a queue for thread-safe communication
+        self.data_queue = asyncio.Queue()
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        
+        # Lock for thread synchronization
+        self.lock = threading.Lock()
+        
+        # Start the event loop in a separate thread
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()
-        self.tasks = {}
-        self.data = data
-        self.active_symbol = None
-        self.visable_tab = None
-        self.tabs = {}
+        
+        # Wait for the loop to be initialized
+        while self.loop is None:
+            time.sleep(0.01)
 
     def set_visable_tab(self, sender, app_data, user_data):
         """
-        The set_visable_tab function is called when the user clicks on a tab.
-        It sets the visable_tab variable to be equal to the id of the tab, which is passed in from the callback
-        function in the 'app_data' parameter. The visable_tab variable will then be used by other functions.
+        The set_visable_tab function is used to set the currently visible tab.
+        This is used to determine which tab's data should be displayed.
 
-        :param self: Represent the instance of the class
-        :param sender: Identify the widget that called the function
-        :param app_data: Set the visable_tab variable to the value of app_data
-        :param user_data: Pass data to the callback function
-        :return: The value of the visable_tab variable
+        :param self: Access the class instance
+        :param sender: Identify the sender of the signal
+        :param app_data: Pass data from the application
+        :param user_data: Pass user-specific data
+        :return: None
         :doc-author: Trelent
         """
-        self.visable_tab = app_data
+        self.visible_tab = app_data
 
     def run_loop(self):
         """
-        The run_loop function is the main function that starts the asyncio event loop.
-            It sets up a new event loop and runs it forever.
+        The run_loop function is the main event loop for the task manager.
+        It runs in a separate thread and handles all async operations.
 
-        :param self: Represent the instance of a class
-        :return: Nothing
+        :param self: Access the class instance
+        :return: None
         :doc-author: Trelent
         """
-        logging.info(f"Starting async thread.")
+        self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
+        
+        # Start the data processing task
+        self.loop.create_task(self._process_data_queue())
+        
+        # Run the event loop
         self.loop.run_forever()
+
+    async def _process_data_queue(self):
+        """
+        Process data from the queue in a thread-safe manner.
+        This ensures that data is properly synchronized between threads.
+        """
+        while self.running:
+            try:
+                # Get data from the queue with a timeout
+                data = await asyncio.wait_for(self.data_queue.get(), timeout=0.1)
+                
+                # Process the data based on its type
+                if data.get('type') == 'candles':
+                    # Use the executor to safely update the UI
+                    await self.loop.run_in_executor(
+                        self.executor, 
+                        self._update_ui_with_candles, 
+                        data.get('tab'), 
+                        data.get('exchange'), 
+                        data.get('candles')
+                    )
+                elif data.get('type') == 'trades':
+                    await self.loop.run_in_executor(
+                        self.executor, 
+                        self._update_ui_with_trades, 
+                        data.get('tab'), 
+                        data.get('exchange'), 
+                        data.get('trades')
+                    )
+                elif data.get('type') == 'orderbook':
+                    await self.loop.run_in_executor(
+                        self.executor, 
+                        self._update_ui_with_orderbook, 
+                        data.get('tab'), 
+                        data.get('exchange'), 
+                        data.get('orderbook')
+                    )
+                
+                # Mark the task as done
+                self.data_queue.task_done()
+            except asyncio.TimeoutError:
+                # No data in the queue, continue
+                continue
+            except Exception as e:
+                logging.error(f"Error processing data queue: {e}")
+
+    def _update_ui_with_candles(self, tab, exchange, candles):
+        """Thread-safe method to update UI with candles data"""
+        with self.lock:
+            # Emit the signal to update the UI
+            self.data.emitter.emit(Signals.NEW_CANDLES, tab, exchange, candles)
+
+    def _update_ui_with_trades(self, tab, exchange, trades):
+        """Thread-safe method to update UI with trades data"""
+        with self.lock:
+            # Emit the signal to update the UI
+            self.data.emitter.emit(Signals.NEW_TRADE, tab, exchange, trades)
+
+    def _update_ui_with_orderbook(self, tab, exchange, orderbook):
+        """Thread-safe method to update UI with orderbook data"""
+        with self.lock:
+            # Emit the signal to update the UI
+            self.data.emitter.emit(Signals.NEW_ORDERBOOK, tab, exchange, orderbook)
 
     def start_task(self, name: str, coro):
         """
-        The start_task function is a wrapper around asyncio.run_coroutine_threadsafe,
-        which allows us to run coroutines in the main thread's event loop from other threads.
-        It also adds the task to a dictionary of tasks so that we can cancel them later.
+        The start_task function is used to start a new task in the event loop.
+        It creates a task and stores it in the tasks dictionary.
 
-        :param self: Access the class variables and methods
-        :param name: str: Identify the task
-        :param coro:
-        :return: A task object
+        :param self: Access the class instance
+        :param name: Identify the task
+        :param coro: Specify the coroutine to run
+        :return: None
         :doc-author: Trelent
         """
-        task = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        if name in self.tasks:
+            self.stop_task(name)
+
+        task = self.create_task(name, coro)
         self.tasks[name] = task
-        task.add_done_callback(lambda t: self.tasks.pop(name, None))
 
     def create_task(self, name: str, coro):
-        """Alias for start_task with parameters in different order for better readability."""
-        return self.start_task(name, coro)
+        """
+        The create_task function creates a new task in the event loop.
+        It also sets up a callback to handle task completion.
+
+        :param self: Access the class instance
+        :param name: Identify the task
+        :param coro: Specify the coroutine to run
+        :return: The task object
+        :doc-author: Trelent
+        """
+        task = self.loop.create_task(coro)
+        task.add_done_callback(lambda t: self._on_task_complete(name, t))
+        return task
 
     def start_stream_for_chart(self, tab, exchange, symbol, timeframe):
         """
-        The start_stream_for_chart function is called when a user clicks on a market in the UI.
-        It will stop any existing tasks for that tab, and start new ones to stream data from the exchange.
+        The start_stream_for_chart function starts the data streams for a chart.
+        It starts the trades and orderbook streams for the specified exchange and symbol.
+
         The function also calls get_candles_for_market which emits candles to listeners.
 
         :param self: Bind the method to an object
@@ -109,20 +207,35 @@ class TaskManager:
         trades_task = f"trades_{exchange}_{symbol}_{tab}"
         orderbook_task = f"orderbook_{exchange}_{symbol}_{tab}"
 
+        # Create wrapped coroutines that use the queue for thread-safe communication
+        async def wrapped_watch_trades():
+            try:
+                # The watch_trades method already has its own while loop
+                await self.data.watch_trades(
+                    tab=tab, exchange=exchange, symbol=symbol, track_stats=True
+                )
+            except Exception as e:
+                logging.error(f"Error in trades stream: {e}")
+
+        async def wrapped_watch_orderbook():
+            try:
+                # The watch_orderbook method already has its own while loop
+                await self.data.watch_orderbook(
+                    tab=tab,
+                    exchange=exchange,
+                    symbol=symbol,
+                )
+            except Exception as e:
+                logging.error(f"Error in orderbook stream: {e}")
+
         self.start_task(
             trades_task,
-            coro=self.data.watch_trades(
-                tab=tab, exchange=exchange, symbol=symbol, track_stats=True
-            ),
+            coro=wrapped_watch_trades(),
         )
 
         self.start_task(
             orderbook_task,
-            coro=self.data.watch_orderbook(
-                tab=tab,
-                exchange=exchange,
-                symbol=symbol,
-            ),
+            coro=wrapped_watch_orderbook(),
         )
 
         self.tabs[tab] = [trades_task, orderbook_task]
@@ -144,128 +257,188 @@ class TaskManager:
             self.data.exchange_list[exchange], timeframe, num_candles=500
         )
 
-        self.run_task_with_loading_popup(
-            self.data.fetch_candles(
+        # Use a simpler approach that doesn't cause GIL issues
+        print(f"Fetching candles for {exchange} {symbol} {timeframe}...")
+        
+        # Create a future to run the coroutine
+        future = asyncio.run_coroutine_threadsafe(
+            self._fetch_candles_with_queue(
                 tab=tab,
                 exchanges=[exchange],
                 symbols=[symbol],
                 timeframes=[timeframe],
                 since=since,
                 write_to_db=False,
-            )
+            ),
+            self.loop
         )
+        
+        # Add a callback to handle task completion
+        def on_task_complete(fut):
+            try:
+                # Get the result of the future
+                result = fut.result()
+                print(f"Candles fetched for {exchange} {symbol} {timeframe}")
+                return result
+            except Exception as e:
+                # Log the error
+                logging.error(f"Error fetching candles: {e}")
+                print(f"Error fetching candles: {e}")
+                # Re-raise the exception
+                raise
+        
+        # Add a callback to handle task completion
+        future.add_done_callback(on_task_complete)
+        
+        # Return the future
+        return future
+
+    async def _fetch_candles_with_queue(self, tab, exchanges, symbols, timeframes, since, write_to_db=False):
+        """
+        Fetch candles and put them in the queue for thread-safe processing
+        """
+        candles = await self.data.fetch_candles(
+            tab=tab,
+            exchanges=exchanges,
+            symbols=symbols,
+            timeframes=timeframes,
+            since=since,
+            write_to_db=write_to_db,
+        )
+        
+        # Put the candles data in the queue
+        await self.data_queue.put({
+            'type': 'candles',
+            'tab': tab,
+            'exchange': exchanges[0],
+            'candles': candles
+        })
+        
+        return candles
 
     def run_task_until_complete(self, coro):
         """
-        The run_task_until_complete function is a wrapper around asyncio.run_coroutine_threadsafe that
-            handles exceptions and cancellation, and returns the result of the coroutine.
+        The run_task_until_complete function runs a coroutine until it completes.
+        It creates a future and runs it in the event loop.
 
-        :param self: Represent the instance of the class
-        :param coro: Pass the coroutine to be run in a thread
+        :param self: Access the class instance
+        :param coro: Specify the coroutine to run
         :return: The result of the coroutine
         :doc-author: Trelent
         """
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        try:
-            return future.result()
-        except asyncio.CancelledError:
-            logging.error("Task was cancelled.")
-            # Handle task cancellation, if needed
-        except Exception as e:
-            logging.error(f"An unexpected error occurred: {e}")
-            # Handle other exceptions
+        return future.result()
 
     def run_task_with_loading_popup(self, coro, message="Please wait..."):
         """
-        The run_task_with_loading_popup function is a wrapper for asyncio.run_coroutine_threadsafe that displays a loading modal while the coroutine runs.
-        
-        Used when you need to run an async function call to the exchange and it requires loading and waiting. 
+        The run_task_with_loading_popup function runs a coroutine with a loading popup.
+        It creates a future and runs it in the event loop, showing a loading popup while it runs.
 
         :param self: Access the class instance
-        :param coro: Pass in the coroutine to run
-        :param message: Display a message in the loading modal
-        :return: A future
+        :param coro: Specify the coroutine to run
+        :param message: Display a message in the loading popup
+        :return: The result of the coroutine
         :doc-author: Trelent
         """
+        # Create a future to run the coroutine
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        # Display the loading modal
-        create_loading_modal(message)
-
+        
+        # Use a simple approach to show a loading message without creating a modal
+        # This avoids GIL issues by not using DearPyGUI in a non-main thread
+        print(f"Loading: {message}")
+        
         def on_task_complete(fut):
             # This function will be called when the future completes
-            dpg.delete_item("loading_modal")
             try:
-                return fut.result()
-            except asyncio.CancelledError:
-                logging.error("Task was cancelled.")
-                # Handle task cancellation, if needed
+                # Get the result of the future
+                result = fut.result()
+                print(f"Loading complete: {message}")
+                return result
             except Exception as e:
-                logging.error(f"An unexpected error occurred: {e}")
-                # Handle other exceptions
-
-        # Add the completion callback to the future
+                # Log the error
+                logging.error(f"Error in task: {e}")
+                print(f"Error: {e}")
+                # Re-raise the exception
+                raise
+        
+        # Add a callback to handle task completion
         future.add_done_callback(on_task_complete)
-        return future.result()
+        
+        # Return the future
+        return future
 
     def stop_task(self, name: str):
         """
         The stop_task function stops a task by name.
+        It cancels the task and removes it from the tasks dictionary.
 
-
-        :param self: Represent the instance of the class
-        :param name: str: Specify the name of the task to be stopped
-        :return: A boolean value
+        :param self: Access the class instance
+        :param name: Identify the task to stop
+        :return: None
         :doc-author: Trelent
         """
         if name in self.tasks:
-            logging.info(f"Stopping task: {name}")
             self.tasks[name].cancel()
+            del self.tasks[name]
 
     def stop_all_tasks(self):
         """
-        The stop_all_tasks function is called when the user clicks on the close button.
-        It sets a flag to indicate that all tasks should stop running, and then it cancels
-        all of the asyncio tasks in self.tasks.
+        The stop_all_tasks function stops all tasks.
+        It cancels all tasks and clears the tasks dictionary.
 
-        :param self: Access the instance of the class
-        :return: Nothing
+        :param self: Access the class instance
+        :return: None
         :doc-author: Trelent
         """
-        if self.data.is_running:
-            self.data.is_running = False
-
-        if not self.tasks:
-            return
-
-        logging.info(f"Stopping all async tasks: {list(self.tasks.keys())}")
-        tasks_copy = dict(self.tasks)  # Create a copy of the dictionary
-        for task in tasks_copy.values():
-            task.cancel()
-        self.tasks.clear()
+        for name in list(self.tasks.keys()):
+            self.stop_task(name)
 
     def is_task_running(self, task_id):
-        """Check if a specific task is currently running.
-        
-        Args:
-            task_id (str): The ID of the task to check
-            
-        Returns:
-            bool: True if the task is running, False otherwise
         """
-        return task_id in self.tasks
-        
-    def stop_task(self, task_id):
-        """Stop a specific task by its ID.
-        
-        Args:
-            task_id (str): The ID of the task to stop
-            
-        Returns:
-            bool: True if the task was stopped, False if it wasn't found
+        The is_task_running function checks if a task is running.
+        It returns True if the task is running, False otherwise.
+
+        :param self: Access the class instance
+        :param task_id: Identify the task to check
+        :return: True if the task is running, False otherwise
+        :doc-author: Trelent
         """
-        if task_id in self.tasks:
-            logging.info(f"Stopping task: {task_id}")
-            self.tasks[task_id].cancel()
-            del self.tasks[task_id]
-            return True
-        return False
+        return task_id in self.tasks and not self.tasks[task_id].done()
+
+    def _on_task_complete(self, name, task):
+        """
+        The _on_task_complete function is called when a task completes.
+        It removes the task from the tasks dictionary.
+
+        :param self: Access the class instance
+        :param name: Identify the task
+        :param task: The task object
+        :return: None
+        :doc-author: Trelent
+        """
+        if name in self.tasks:
+            del self.tasks[name]
+
+    def cleanup(self):
+        """
+        Clean up resources when the application is closing.
+        This method should be called when the application is shutting down.
+        """
+        # Stop all tasks
+        self.stop_all_tasks()
+        
+        # Set running to False to stop the data queue processing
+        self.running = False
+        
+        # Shutdown the executor
+        self.executor.shutdown(wait=True)
+        
+        # Stop the event loop
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        
+        # Wait for the thread to finish
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+            
+        logging.info("TaskManager cleanup completed")

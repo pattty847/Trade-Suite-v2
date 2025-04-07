@@ -31,10 +31,10 @@ class CCXTInterface:
         credentials = self._get_credentials(exchange_id)
 
         try:
-            if not credentials:
-                logging.error(f"Credentials not found for {exchange_id}")
-            else:
+            if credentials:
                 logging.info(f"Initializing {exchange_id} with credentials.")
+            else:
+                logging.info(f"Initializing {exchange_id} without credentials for public data access.")
                 
             exchange_class: ccxt.Exchange = getattr(ccxtpro, exchange_id)(credentials)
 
@@ -106,9 +106,10 @@ class CCXTInterface:
         api_key = os.getenv(f"{prefix}_API_KEY")
         secret = os.getenv(f"{prefix}_SECRET")
         
-        logging.info(f"API Key: {api_key}")
-        logging.info(f"Secret: {secret}")
-
-        if api_key and secret:
+        # Don't log the actual credentials for security reasons
+        if api_key and secret and api_key != "your_coinbase_api_key_here" and secret != "your_coinbase_secret_here":
+            logging.info(f"Credentials found for {exchange_id}")
             return {"apiKey": api_key, "secret": secret}
+        
+        logging.info(f"No valid credentials found for {exchange_id}, initializing without authentication")
         return {}

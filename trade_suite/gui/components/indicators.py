@@ -1,10 +1,12 @@
-import inspect
+import asyncio
 import logging
+from typing import Dict, List
+
 import dearpygui.dearpygui as dpg
 import pandas as pd
 
-from gui.signals import SignalEmitter, Signals
-from gui.utils import center_window, timeframe_to_seconds
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.utils import center_window, timeframe_to_seconds
 
 
 class Indicators:

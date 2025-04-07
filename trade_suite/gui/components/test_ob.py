@@ -1,12 +1,14 @@
-import json
+import asyncio
 import logging
+from typing import Dict, List
+
 import dearpygui.dearpygui as dpg
 import pandas as pd
 import numpy as np
 import time
 
-from gui.signals import SignalEmitter, Signals
-from data.data_source import Data
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.data.data_source import Data
 
 class TestOB:
     def __init__(self, tab, data: Data, emitter: SignalEmitter) -> None:

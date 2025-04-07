@@ -1,15 +1,17 @@
+import asyncio
 import datetime
 import json
 import logging
+from typing import Dict, List
 
 import dearpygui.dearpygui as dpg
 import pandas as pd
 
-from config import ConfigManager
-from data.data_source import Data
-from gui.signals import SignalEmitter, Signals
-from gui.task_manager import TaskManager
-from gui.utils import timeframe_to_seconds
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.utils import timeframe_to_seconds
 
 
 class Trading:

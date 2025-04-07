@@ -6,10 +6,10 @@ from typing import Dict, List
 import ccxt
 import pandas as pd
 
-from analysis.market_aggregator import MarketAggregator
-from data.ccxt_interface import CCXTInterface
-from data.influx import InfluxDB
-from gui.signals import SignalEmitter, Signals
+from trade_suite.analysis.market_aggregator import MarketAggregator
+from trade_suite.data.ccxt_interface import CCXTInterface
+from trade_suite.data.influx import InfluxDB
+from trade_suite.gui.signals import SignalEmitter, Signals
 
 
 # TODO: Make functions that watch one symbol at a time. Start/stop them with task manager

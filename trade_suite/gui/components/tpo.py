@@ -1,12 +1,14 @@
+import asyncio
 import logging
-import dearpygui.dearpygui as dpg
-import pandas as pd
-from config import ConfigManager
-from data.data_source import Data
+from trade_suite.data.data_source import Data
+from typing import Dict, List
 
-from gui.signals import SignalEmitter, Signals
-from gui.task_manager import TaskManager
-from gui.utils import searcher
+import dearpygui.dearpygui as dpg
+from trade_suite.config import ConfigManager
+
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.utils import searcher
 
 
 class TAB:

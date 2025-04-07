@@ -35,15 +35,50 @@ TradeSuite is a multi-exchange cryptocurrency trading platform built using DearP
 
 ### Installation
 
-1. Clone the repository:
+The easiest way to install TradeSuite is using our automated installation script. Choose the appropriate method for your operating system:
 
+#### macOS / Linux
+```bash
+# Clone the repository
+git clone https://github.com/pattty847/Trade-Suite-v2.git
+cd Trade-Suite-v2
+
+# Make the installation script executable
+chmod +x scripts/install.sh
+
+# Run the installation script
+./scripts/install.sh
+```
+
+#### Windows
+```batch
+# Clone the repository
+git clone https://github.com/pattty847/Trade-Suite-v2.git
+cd Trade-Suite-v2
+
+# Run the installation script
+scripts\install.bat
+```
+
+The installation script will:
+- Check your Python version
+- Create and activate a virtual environment
+- Install dependencies using UV (recommended) or pip
+- Set up your environment file
+
+> **Note**: The script will prompt you to choose between UV (recommended) or pip for package installation. UV is significantly faster and more reliable, especially for packages that require compilation.
+
+#### Manual Installation (Alternative)
+
+If you prefer to install manually, follow these steps:
+
+1. Clone the repository:
    ```bash
    git clone https://github.com/pattty847/Trade-Suite-v2.git
    cd Trade-Suite-v2
    ```
 
 2. Set up a virtual environment:
-
    ```bash
    # Using venv (standard)
    python -m venv .venv
@@ -56,23 +91,14 @@ TradeSuite is a multi-exchange cryptocurrency trading platform built using DearP
    ```
 
 3. Install dependencies:
-
-   **Option 1: Using pip (traditional)**
    ```bash
-   pip install -r requirements.txt
-   ```
-
-   **Option 2: Using uv (faster alternative)**
-   ```bash
-   # Install uv first if you don't have it
+   # Install uv (recommended for faster installation)
    pip install uv
    
-   # Then use uv to install dependencies
+   # Install dependencies using uv
    uv pip install -r requirements.txt
    ```
 
-   > **Note about uv**: `uv` is a new, much faster alternative to pip that's built in Rust. It provides faster dependency resolution and installation while remaining compatible with pip.
-   
 4. **Important**: TA-Lib requires C++ libraries:
    - **Windows**: Download and install the wheel from [here](https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib)
    - **macOS**: `brew install ta-lib`
@@ -101,17 +127,25 @@ TradeSuite is a multi-exchange cryptocurrency trading platform built using DearP
 
 ### Running the Application
 
-Start the application:
+You can run the application in two ways:
 
+1. Using the main script (recommended, works on all platforms):
+   ```bash
+   python main.py
+   ```
+
+2. As a module (alternative method):
+   ```bash
+   python -m trade_suite
+   ```
+
+Both methods support the following command-line arguments:
 ```bash
-# Basic start
-python -m trade_suite
-
 # With specific exchanges
-python -m trade_suite --exchanges coinbase binance
+python main.py --exchanges coinbase binance
 
 # With debug logging
-python -m trade_suite --level DEBUG
+python main.py --level DEBUG
 ```
 
 ## Implemented Features

@@ -1,13 +1,15 @@
-import json
+import asyncio
 import logging
+from typing import Dict, List
+
 import dearpygui.dearpygui as dpg
 import pandas as pd
 import time
 
-from config import ConfigManager
-from data.data_source import Data
-from gui.signals import SignalEmitter, Signals
-from gui.components.test_ob import TestOB
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.components.test_ob import TestOB
 
 
 class OrderBook:

@@ -1,11 +1,14 @@
 from collections import deque
 import time
 import pandas as pd
-from data.data_source import Data
+import asyncio
+import logging
+from trade_suite.data.data_source import Data
+from typing import Dict, List
 
-from gui.signals import SignalEmitter, Signals
-from gui.task_manager import TaskManager
-from gui.utils import timeframe_to_seconds
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.utils import timeframe_to_seconds
 
 
 class CandleFactory:

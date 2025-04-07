@@ -39,11 +39,11 @@ import sys
 import os
 from datetime import datetime
 
-from config import ConfigManager
-from data.data_source import Data
-from data.influx import InfluxDB
-from gui.signals import SignalEmitter
-from gui.viewport import Viewport
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.data.influx import InfluxDB
+from trade_suite.gui.signals import SignalEmitter
+from trade_suite.gui.viewport import Viewport
 
 load_dotenv(override=True)
 
@@ -107,7 +107,8 @@ def _get_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the application."""
     args = _get_args()
     
     # Set the logging level based on command line argument
@@ -131,3 +132,7 @@ if __name__ == "__main__":
     # EZ START LET'S GO
     with Viewport(data=data, config_manager=config_manager) as viewport:
         viewport.start_program()
+
+
+if __name__ == "__main__":
+    main()

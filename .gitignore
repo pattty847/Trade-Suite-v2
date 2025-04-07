@@ -1,0 +1,15 @@
+.venv
+testing
+
+fetch_candles_main.py
+trade_suite/architecture.drawio
+project_to_text.py
+docs/TODO.md
+docs/UI_IMPROVEMENTS.md
+
+.env
+
+# cache
+**/__pycache__/
+data/
+logs/

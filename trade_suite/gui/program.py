@@ -1,16 +1,19 @@
+import asyncio
 import logging
+from typing import Dict, List
+
 import dearpygui.dearpygui as dpg
 import dearpygui.demo as demo
 import ccxt.pro as ccxt
 
-from config import ConfigManager
-from data.data_source import Data
-from gui.components.chart import Chart
-from gui.components.tpo import TAB
-from gui.signals import SignalEmitter, Signals
-from gui.task_manager import TaskManager
-from gui.utils import searcher
-from data.state import StateManager
+from trade_suite.config import ConfigManager
+from trade_suite.data.data_source import Data
+from trade_suite.gui.components.chart import Chart
+from trade_suite.gui.components.tpo import TAB
+from trade_suite.gui.signals import SignalEmitter, Signals
+from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.utils import searcher
+from trade_suite.data.state import StateManager
 
 
 class MenuBar:
