@@ -14,6 +14,11 @@
 - [Planned Features](#planned-features)
 - [Contributing](#contributing)
 - [License](#license)
+- [For Developers](#for-developers)
+  - [Packaging the Application](#packaging-the-application)
+    - [Option 1: Creating a Standalone Executable](#option-1-creating-a-standalone-executable)
+    - [Option 2: Using UV for Package Management](#option-2-using-uv-for-package-management)
+- [For End Users](#for-end-users)
 
 ## Introduction
 
@@ -127,19 +132,33 @@ If you prefer to install manually, follow these steps:
 
 ### Running the Application
 
-You can run the application in two ways:
+#### Option 1: One-Click Startup (Recommended for New Users)
 
-1. Using the main script (recommended, works on all platforms):
+Simply double-click the appropriate script for your operating system:
+
+- **Windows**: Double-click `run.bat`
+- **macOS/Linux**: Double-click `run.sh` (or run `./run.sh` in terminal)
+
+These scripts will automatically:
+- Check if your setup is complete
+- Run the installation script if needed
+- Start the application with default settings
+
+#### Option 2: Command Line (Advanced Users)
+
+You can run the application manually in several ways:
+
+1. As the main script:
    ```bash
    python main.py
    ```
 
-2. As a module (alternative method):
+2. As a module:
    ```bash
    python -m trade_suite
    ```
 
-Both methods support the following command-line arguments:
+Command-line arguments are supported with both methods:
 ```bash
 # With specific exchanges
 python main.py --exchanges coinbase binance
@@ -187,3 +206,74 @@ Please make sure to follow our [contribution guidelines](CONTRIBUTING.md).
 ## License
 
 TradeSuite is released under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+## For Developers
+
+### Packaging the Application
+
+#### Option 1: Creating a Standalone Executable
+
+The easiest way for end users to run the application is with a standalone executable:
+
+1. Install PyInstaller:
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. Run the build script:
+   ```bash
+   # On Windows
+   python build_executable.py
+   
+   # On macOS/Linux
+   python3 build_executable.py
+   ```
+
+3. The executable will be created in the `dist` folder, ready to distribute to users.
+
+#### Option 2: Using UV for Package Management
+
+UV is a modern Python packaging tool that offers significant performance improvements over pip:
+
+1. Install UV:
+   ```bash
+   pip install uv
+   ```
+
+2. Use UV for dependency management:
+   ```bash
+   # Install dependencies
+   uv pip install -r requirements.txt
+   
+   # Create a lockfile for reproducible builds
+   uv pip compile --output-file requirements.lock requirements.txt
+   
+   # Install from lockfile
+   uv pip install -r requirements.lock
+   ```
+
+3. UV Virtual Environments:
+   ```bash
+   # Create and activate a virtual environment
+   uv venv
+   source .venv/bin/activate  # Linux/macOS
+   .venv\Scripts\activate     # Windows
+   ```
+
+4. Export consolidated dependencies:
+   ```bash
+   uv pip freeze > requirements-frozen.txt
+   ```
+
+UV offers faster installation times, better dependency resolution, and is 100% compatible with pip. For more information, visit the [UV documentation](https://github.com/astral-sh/uv).
+
+## For End Users
+
+If you're not familiar with Python or command-line tools, we provide pre-built executables for Windows and macOS:
+
+1. Download the latest release from the [Releases page](https://github.com/pattty847/Trade-Suite-v2/releases)
+2. Extract the zip file to a folder of your choice
+3. Double-click the TradeSuite executable to run the application
+4. No installation or configuration is required for basic usage
+
+The application works with public cryptocurrency data by default, no API keys required!

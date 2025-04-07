@@ -1,15 +1,43 @@
+# Virtual environments
 .venv
-testing
+venv/
 
+# Project-specific files to ignore
+testing
 fetch_candles_main.py
 trade_suite/architecture.drawio
 project_to_text.py
 docs/TODO.md
 docs/UI_IMPROVEMENTS.md
 
+# Environment variables (never commit these)
 .env
 
-# cache
+# Python cache
 **/__pycache__/
+*.py[cod]
+*$py.class
+
+# Data and logs
 data/
 logs/
+
+# PyInstaller build files
+build/
+dist/
+*.spec
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
