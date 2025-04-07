@@ -6,6 +6,10 @@
 - [Introduction](#introduction)
 - [Features](#features)
 - [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Environment Setup](#environment-setup)
+  - [Running the Application](#running-the-application)
 - [Implemented Features](#implemented-features)
 - [Planned Features](#planned-features)
 - [Contributing](#contributing)
@@ -23,29 +27,92 @@ TradeSuite is a multi-exchange cryptocurrency trading platform built using DearP
 
 ## Getting Started
 
-To get started with TradeSuite, follow these steps:
+### Prerequisites
+
+- Python 3.10+ 
+- InfluxDB (local or cloud instance)
+- CCXT Pro license (for professional use)
+
+### Installation
 
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/trade-suite.git
-   cd trade-suite
+   git clone https://github.com/pattty847/Trade-Suite-v2.git
+   cd Trade-Suite-v2
    ```
 
-2. Install the required dependencies:
+2. Set up a virtual environment:
 
+   ```bash
+   # Using venv (standard)
+   python -m venv .venv
+   
+   # On Windows
+   .venv\Scripts\activate
+   
+   # On macOS/Linux
+   source .venv/bin/activate
+   ```
+
+3. Install dependencies:
+
+   **Option 1: Using pip (traditional)**
    ```bash
    pip install -r requirements.txt
    ```
 
-_To do_
-3. Add .env file with exchange credentials
+   **Option 2: Using uv (faster alternative)**
+   ```bash
+   # Install uv first if you don't have it
+   pip install uv
+   
+   # Then use uv to install dependencies
+   uv pip install -r requirements.txt
+   ```
 
-3. Run the program:
+   > **Note about uv**: `uv` is a new, much faster alternative to pip that's built in Rust. It provides faster dependency resolution and installation while remaining compatible with pip.
+   
+4. **Important**: TA-Lib requires C++ libraries:
+   - **Windows**: Download and install the wheel from [here](https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib)
+   - **macOS**: `brew install ta-lib`
+   - **Linux**: `apt-get install ta-lib`
+
+### Environment Setup
+
+1. Configure your environment variables:
 
    ```bash
-   python main.py
+   # Copy the template file
+   cp .env.template .env
+   
+   # Edit the .env file with your API keys and credentials
    ```
+
+2. Required API services:
+   - InfluxDB (for data storage)
+   - Exchange API keys (Coinbase, etc.)
+   - Any additional services used
+
+3. Configure InfluxDB:
+   - Make sure InfluxDB is running locally (or you have cloud access)
+   - Create buckets: "trades", "market_data", "candles", "orderbook"
+   - Update your .env file with the correct tokens and organization
+
+### Running the Application
+
+Start the application:
+
+```bash
+# Basic start
+python -m trade_suite
+
+# With specific exchanges
+python -m trade_suite --exchanges coinbase binance
+
+# With debug logging
+python -m trade_suite --level DEBUG
+```
 
 ## Implemented Features
 
