@@ -1,4 +1,3 @@
-
 # Trade-Suite-v2: Technical Overview & Recent Improvements
 
 ## Project Overview
@@ -18,6 +17,71 @@ Trade-Suite-v2 is a cryptocurrency trading dashboard built with Python, featurin
 2. These tasks fetch real-time data from exchange websockets via `ccxt.pro`.
 3. When data arrives, `Data` methods emit signals with the new information.
 4. GUI components (Chart, OrderBook) subscribe to these signals and update themselves.
+
+## Program Boot Process
+
+The application follows a specific sequence during startup:
+
+### 1. Entry Point (`main.py` → `__main__.py`)
+- The program starts at `main.py`, which simply imports and calls the `main()` function from `__main__.py`.
+- In `__main__.py`, the following initialization steps occur:
+  1. Parse command-line arguments (exchanges, logging level)
+  2. Set up logging to both console and file
+  3. Load environment variables from `.env` file
+  4. Initialize core components:
+     - `ConfigManager`: Manages application settings
+     - `SignalEmitter`: Handles event communication
+     - `InfluxDB`: Database connection (if configured)
+     - `Data`: Main data source that connects to exchanges
+  5. Create and start the `Viewport` context manager
+
+### 2. Viewport Initialization (`viewport.py`)
+- The `Viewport` class is the main container for the application:
+  1. In `__init__`, it creates:
+     - `TaskManager`: Manages async operations
+     - `Program`: Main UI container
+  2. In `__enter__`:
+     - Loads exchange data via `TaskManager.run_task_until_complete(self.data.load_exchanges())`
+     - Sets up DearPyGUI context and theme
+  3. In `start_program`:
+     - Creates the viewport and primary window
+     - Sets up a frame callback to initialize the program
+     - Starts a custom render loop that:
+       - Processes the signal queue before each frame
+       - Renders the DearPyGUI frame
+  4. In `initialize_program`:
+     - Initializes the main program UI components
+
+### 3. Program Initialization (`program.py`)
+- The `Program` class initializes the main UI:
+  1. Creates the primary window with menu bar
+  2. Sets up tab bar for different exchanges
+  3. Creates exchange tabs for each configured exchange
+  4. Registers signal handlers for UI events
+
+### 4. Exchange Connection (`ccxt_interface.py` → `data_source.py`)
+- The `CCXTInterface` class manages exchange connections:
+  1. `load_exchange`: Initializes a single exchange with or without credentials
+  2. `load_exchanges`: Initializes all configured exchanges
+  3. `_get_credentials`: Retrieves API credentials from environment variables
+- The `Data` class extends `CCXTInterface` and adds:
+  1. Market data processing
+  2. Signal emission for UI updates
+  3. Caching of historical data
+
+### 5. Task Management (`task_manager.py`)
+- The `TaskManager` runs async operations in a dedicated thread:
+  1. Creates a separate thread with its own asyncio event loop
+  2. Provides methods to start, stop, and manage async tasks
+  3. Handles thread-safe communication between async tasks and UI
+  4. Manages data streams for trades, orderbook, and candles
+
+### 6. Signal Processing (`signals.py`)
+- The `SignalEmitter` class provides thread-safe event communication:
+  1. `register`: Registers callbacks for specific signals
+  2. `emit`: Emits signals from any thread
+  3. `process_signal_queue`: Processes signals queued from background threads
+  4. Ensures UI updates happen on the main thread
 
 ## Recent Improvements: Thread-Safety & Signal Handling
 
