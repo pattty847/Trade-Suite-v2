@@ -1,9 +1,10 @@
 import asyncio
 import logging
 from typing import Dict, List
+import math
+from collections import defaultdict
 
 import dearpygui.dearpygui as dpg
-import pandas as pd
 import time
 
 from trade_suite.config import ConfigManager
@@ -35,7 +36,7 @@ class OrderBook:
 
         self.show_orderbook = True
         self.aggregated_order_book = True
-        self.spread_percentage = 0.005
+        self.spread_percentage = 0.05 # 5%
         self.tick_size = 0.01
         self.market_info = self.data.exchange_list[self.exchange].market(self.symbol)
         
@@ -132,122 +133,135 @@ class OrderBook:
 
     # Listens for order book emissions
     def _on_order_book_update(self, tab, exchange, orderbook):
-        logging.debug(f"[_on_order_book_update] Entered for tab {tab}")
+        # logging.debug(f"[_on_order_book_update] Entered for tab {tab}") # Can be noisy
         if tab == self.tab:
-            # Apply rate limiting - only process updates at most once every 0.05 seconds (20 fps)
-            current_time = time.time()
-            time_since_last_update = current_time - self.last_update_time
-            
-            if time_since_last_update < 0.05:  # 50ms between updates (20fps)
-                # Too soon since last update, skip this one
-                return
-                
-            # Update the timestamp for rate limiting
-            self.last_update_time = current_time
-        
-            # Store a copy of the latest orderbook for refreshing when settings change
+            # No manual rate limiting needed here - CCXT/WebSocket handles update frequency
+            # current_time = time.time()
+            # time_since_last_update = current_time - self.last_update_time
+            # if time_since_last_update < 0.05:
+            #     return
+            # self.last_update_time = current_time
+
+            # Store a copy of the latest raw orderbook lists
+            # Ensure bids/asks exist and are lists
+            raw_bids = orderbook.get('bids', [])
+            raw_asks = orderbook.get('asks', [])
+
+            # Validate data format (optional but recommended)
+            if not isinstance(raw_bids, list) or not isinstance(raw_asks, list):
+                 logging.warning(f"Invalid orderbook data received for {self.symbol}: bids or asks not lists.")
+                 return
+                 
+            # Store raw lists (avoid deep copy if not strictly needed elsewhere)
             self.last_orderbook = {
-                "bids": [list(bid) for bid in orderbook["bids"]],
-                "asks": [list(ask) for ask in orderbook["asks"]],
+                "bids": raw_bids, #[list(bid) for bid in raw_bids],
+                "asks": raw_asks, #[list(ask) for ask in raw_asks],
             }
-            
-            # Only process limited number of levels for better performance
-            # For large orderbooks, limiting to 100 levels per side is usually sufficient
-            max_levels = 100
-            limited_orderbook = {
-                "bids": orderbook["bids"][:max_levels] if len(orderbook["bids"]) > max_levels else orderbook["bids"],
-                "asks": orderbook["asks"][:max_levels] if len(orderbook["asks"]) > max_levels else orderbook["asks"]
-            }
-            
-            # Pass the 'self.aggregated_order_book' to determine if aggregation is needed
-            bids_df, asks_df, price_column = self._aggregate_and_group_order_book(
-                limited_orderbook,
+
+            # Limit number of levels for performance
+            max_levels = 100 # Consider making this configurable
+            limited_bids = raw_bids[:max_levels]
+            limited_asks = raw_asks[:max_levels]
+
+            # Process the raw lists directly
+            bids_processed, asks_processed = self._aggregate_and_group_order_book(
+                limited_bids,
+                limited_asks,
                 self.tick_size,
                 self.aggregated_order_book,
             )
 
-            # Whether aggregated or not, update the order book display
-            self._update_order_book(bids_df, asks_df, price_column)
+            # Update the plot with processed lists
+            self._update_order_book(bids_processed, asks_processed)
 
     def _aggregate_and_group_order_book(
-        self, orderbook, tick_size, aggregate
+        self, bids_raw: list, asks_raw: list, tick_size: float, aggregate: bool
     ):
-        # Extract bids and asks
-        bids = orderbook["bids"]
-        asks = orderbook["asks"]
-
-        if aggregate:
-            # Process for aggregated view
-            bids_df = self._group_and_aggregate(bids, tick_size)
-            asks_df = self._group_and_aggregate(asks, tick_size)
-            price_column = "price_group"
-        else:
-            # Process for non-aggregated view
-            bids_df = pd.DataFrame(bids, columns=["price", "quantity"])
-            asks_df = pd.DataFrame(asks, columns=["price", "quantity"])
-            price_column = "price"
-
-        # Sorting
-        bids_df = bids_df.sort_values(by=price_column, ascending=False)
-        asks_df = asks_df.sort_values(by=price_column, ascending=True)
-
-        # Calculate cumulative quantities only if aggregated
-        if aggregate:
-            bids_df["cumulative_quantity"] = bids_df["quantity"].cumsum()
-            asks_df["cumulative_quantity"] = asks_df["quantity"].cumsum()
-
-        # Update the series data
-        return bids_df, asks_df, price_column
-
-
-    def _group_and_aggregate(self, orders, tick_size):
-        # Make a defensive copy of the orders to prevent race conditions
-        try:
-            # Check if there are any orders
-            if not orders:
-                return pd.DataFrame(columns=["price_group", "quantity"])
-                
-            # Make a copy of the orders list to avoid race conditions
-            orders_copy = list(orders)
-            
-            # Verify that each order has exactly 2 elements [price, quantity]
-            valid_orders = [order for order in orders_copy if len(order) == 2]
-            
-            # Create DataFrame from the valid orders
-            df = pd.DataFrame(valid_orders, columns=["price", "quantity"])
-            
-            # Calculate the price group
-            df["price_group"] = (df["price"] // tick_size) * tick_size
-            
-            # Group and aggregate
-            return df.groupby("price_group").agg({"quantity": "sum"}).reset_index()
-        except Exception as e:
-            logging.error(f"Error in _group_and_aggregate: {e}")
-            # Return empty DataFrame with correct structure if there's an error
-            return pd.DataFrame(columns=["price_group", "quantity"])
-
-
-    def _update_order_book(self, bids_df, asks_df, price_column):
-        # Get price and quantity data based on the chosen view
-        bid_prices = bids_df[price_column].tolist()
-        ask_prices = asks_df[price_column].tolist()
+        """Processes raw bid/ask lists, aggregates if requested, and calculates cumulative sums."""
         
-        # Get quantities based on view mode
-        if self.aggregated_order_book and "cumulative_quantity" in bids_df:
-            bid_quantities = bids_df["cumulative_quantity"].tolist()
-            ask_quantities = asks_df["cumulative_quantity"].tolist()
+        if aggregate:
+            # Aggregate bids
+            bids_grouped = defaultdict(float)
+            for price, quantity in bids_raw:
+                if tick_size > 0:
+                    group = math.floor(price / tick_size) * tick_size
+                    bids_grouped[group] += quantity
+                else: # Avoid division by zero if tick_size is invalid
+                    bids_grouped[price] += quantity
+            # Sort descending by price, calculate cumulative
+            bids_sorted = sorted(bids_grouped.items(), key=lambda item: item[0], reverse=True)
+            bids_processed = []
+            cumulative_qty = 0
+            for price, quantity in bids_sorted:
+                cumulative_qty += quantity
+                bids_processed.append([price, quantity, cumulative_qty]) # [price, individual_qty, cumulative_qty]
+
+            # Aggregate asks
+            asks_grouped = defaultdict(float)
+            for price, quantity in asks_raw:
+                 if tick_size > 0:
+                     group = math.floor(price / tick_size) * tick_size
+                     asks_grouped[group] += quantity
+                 else:
+                     asks_grouped[price] += quantity
+            # Sort ascending by price, calculate cumulative
+            asks_sorted = sorted(asks_grouped.items(), key=lambda item: item[0])
+            asks_processed = []
+            cumulative_qty = 0
+            for price, quantity in asks_sorted:
+                cumulative_qty += quantity
+                asks_processed.append([price, quantity, cumulative_qty]) # [price, individual_qty, cumulative_qty]
+
         else:
-            bid_quantities = bids_df["quantity"].tolist()
-            ask_quantities = asks_df["quantity"].tolist()
+            # Non-aggregated: just sort
+            # Sort bids descending by price
+            bids_processed = sorted(bids_raw, key=lambda item: item[0], reverse=True)
+             # Ensure format consistency: [price, quantity] (no cumulative here)
+            bids_processed = [[p, q] for p, q in bids_processed]
+
+            # Sort asks ascending by price
+            asks_processed = sorted(asks_raw, key=lambda item: item[0])
+             # Ensure format consistency: [price, quantity]
+            asks_processed = [[p, q] for p, q in asks_processed]
+
+        return bids_processed, asks_processed
+
+
+    def _update_order_book(self, bids_processed: list, asks_processed: list):
+        # Check if processed lists are empty
+        if not bids_processed or not asks_processed:
+            logging.debug(f"Order book empty or processing failed for {self.symbol}. Skipping update.")
+            # Optionally clear the series if they are empty
+            # dpg.set_value(self.bids_stair_tag, [[], []])
+            # dpg.set_value(self.asks_stair_tag, [[], []])
+            # dpg.set_value(self.bids_bar_tag, [[], []])
+            # dpg.set_value(self.asks_bar_tag, [[], []])
+            return
+
+        # Extract data for plotting based on aggregation mode
+        if self.aggregated_order_book:
+            bid_prices = [item[0] for item in bids_processed]
+            bid_quantities = [item[2] for item in bids_processed] # Use cumulative quantity (index 2)
+            ask_prices = [item[0] for item in asks_processed]
+            ask_quantities = [item[2] for item in asks_processed] # Use cumulative quantity (index 2)
+        else:
+            bid_prices = [item[0] for item in bids_processed]
+            bid_quantities = [item[1] for item in bids_processed] # Use individual quantity (index 1)
+            ask_prices = [item[0] for item in asks_processed]
+            ask_quantities = [item[1] for item in asks_processed] # Use individual quantity (index 1)
+
+        # Check for empty lists after extraction (can happen if processing results in empty lists)
+        if not bid_prices or not ask_prices:
+             logging.debug(f"Empty price/quantity lists after processing for {self.symbol}. Skipping DPG update.")
+             return
 
         # Use container stack to batch all updates
         dpg.push_container_stack(self.orderbook_tag)
 
         # Update the appropriate series based on aggregation mode
         if self.aggregated_order_book:
-            # Only update visibility if needed - minimize configuration changes
-            if self.bids_stair_tag_visible != True or self.asks_stair_tag_visible != True:
-                # Configure visibility once
+            # Configure visibility if needed
+            if not self.bids_stair_tag_visible or not self.asks_stair_tag_visible:
                 dpg.configure_item(self.bids_stair_tag, show=True)
                 dpg.configure_item(self.asks_stair_tag, show=True)
                 dpg.configure_item(self.bids_bar_tag, show=False)
@@ -257,12 +271,12 @@ class OrderBook:
                 self.bids_bar_tag_visible = False
                 self.asks_bar_tag_visible = False
             
-            # Use set_value for faster updates
+            # Update plot data
             dpg.set_value(self.bids_stair_tag, [bid_prices, bid_quantities])
             dpg.set_value(self.asks_stair_tag, [ask_prices, ask_quantities])
         else:
-            # Only update visibility if needed
-            if self.bids_bar_tag_visible != True or self.asks_bar_tag_visible != True:
+            # Configure visibility if needed
+            if not self.bids_bar_tag_visible or not self.asks_bar_tag_visible:
                 dpg.configure_item(self.bids_stair_tag, show=False)
                 dpg.configure_item(self.asks_stair_tag, show=False)
                 dpg.configure_item(self.bids_bar_tag, show=True)
@@ -271,76 +285,77 @@ class OrderBook:
                 self.asks_stair_tag_visible = False
                 self.bids_bar_tag_visible = True
                 self.asks_bar_tag_visible = True
-            
-            # Use set_value for faster updates
+
+            # Update plot data
             dpg.set_value(self.bids_bar_tag, [bid_prices, bid_quantities])
             dpg.set_value(self.asks_bar_tag, [ask_prices, ask_quantities])
 
-        # Calculate the midpoint between the best bid and best ask
-        best_bid = bids_df[price_column].max() if not bids_df.empty else 0
-        best_ask = asks_df[price_column].min() if not asks_df.empty else 0
-        
-        # Safety check to prevent division issues when orderbook is empty
-        if best_bid == 0 or best_ask == 0:
+        # Calculate midpoint, axis limits, and bid/ask ratio
+
+        # Best bid is the highest price in bids_processed (first item after sorting desc)
+        # Best ask is the lowest price in asks_processed (first item after sorting asc)
+        best_bid = bids_processed[0][0] if bids_processed else 0
+        best_ask = asks_processed[0][0] if asks_processed else 0
+
+        if best_bid <= 0 or best_ask <= 0 or best_ask <= best_bid: # Added check for crossed book
+            logging.warning(f"Invalid best bid/ask ({best_bid}/{best_ask}) for {self.symbol}. Skipping axis update.")
             dpg.pop_container_stack()
             return
-            
+
         midpoint = (best_bid + best_ask) / 2
         price_range = midpoint * self.spread_percentage
 
-        # Update the x-axis limits based on the midpoint and calculated range
-        # Only update x-axis if values changed significantly
+        # Update x-axis limits
         new_xmin = midpoint - price_range
         new_xmax = midpoint + price_range
-        
+
+        # Optimize axis updates slightly - check for significant change
         if not hasattr(self, 'last_x_limits') or \
-           abs(self.last_x_limits[0] - new_xmin) > 0.001 * midpoint or \
-           abs(self.last_x_limits[1] - new_xmax) > 0.001 * midpoint:
+           abs(self.last_x_limits[0] - new_xmin) > 0.0005 * midpoint or \
+           abs(self.last_x_limits[1] - new_xmax) > 0.0005 * midpoint: # Tighter threshold
             dpg.set_axis_limits(axis=self.ob_xaxis, ymin=new_xmin, ymax=new_xmax)
             self.last_x_limits = (new_xmin, new_xmax)
 
-        # Calculate the y-axis limits
-        visible_bids = bids_df[bids_df[price_column] >= midpoint - price_range]
-        visible_asks = asks_df[asks_df[price_column] <= midpoint + price_range]
-
-        # Calculate max height based on view mode and available data
-        if self.aggregated_order_book and "cumulative_quantity" in bids_df and "cumulative_quantity" in asks_df and \
-           not visible_bids.empty and not visible_asks.empty:
-            max_bid_quantity = visible_bids["cumulative_quantity"].max()
-            max_ask_quantity = visible_asks["cumulative_quantity"].max()
-        elif not visible_bids.empty and not visible_asks.empty:
-            max_bid_quantity = visible_bids["quantity"].max()
-            max_ask_quantity = visible_asks["quantity"].max()
+        # Calculate y-axis limits based on *visible* data within the price range
+        if self.aggregated_order_book:
+            # Use cumulative quantities for y-limit in aggregated view
+            visible_bids_qty = [item[2] for item in bids_processed if item[0] >= new_xmin]
+            visible_asks_qty = [item[2] for item in asks_processed if item[0] <= new_xmax]
+            # Sum of individual quantities for bid/ask ratio
+            visible_bids_indiv_qty_sum = sum(item[1] for item in bids_processed if item[0] >= new_xmin)
+            visible_asks_indiv_qty_sum = sum(item[1] for item in asks_processed if item[0] <= new_xmax)
         else:
-            # Default if no data available
-            max_bid_quantity = max_ask_quantity = 0
+            # Use individual quantities for y-limit in non-aggregated view
+            visible_bids_qty = [item[1] for item in bids_processed if item[0] >= new_xmin]
+            visible_asks_qty = [item[1] for item in asks_processed if item[0] <= new_xmax]
+            visible_bids_indiv_qty_sum = sum(visible_bids_qty) # Sum is the same here
+            visible_asks_indiv_qty_sum = sum(visible_asks_qty) # Sum is the same here
 
-        max_y_value = max(max_bid_quantity, max_ask_quantity, 0.1)  # Ensure positive value
+        max_bid_y = max(visible_bids_qty) if visible_bids_qty else 0
+        max_ask_y = max(visible_asks_qty) if visible_asks_qty else 0
+        max_y_value = max(max_bid_y, max_ask_y, 0.1) # Ensure positive value, use 0.1 as minimum floor
 
-        # Use a small buffer above the max_y_value for better visual spacing
-        buffer = max_y_value * 0.1  # 10% buffer
-        dpg.set_axis_limits(axis=self.ob_yaxis, ymin=0, ymax=max_y_value + buffer)
+        # Use a small buffer above the max_y_value
+        buffer = max_y_value * 0.1 # 10% buffer
+        # Optimize axis update - check if limits changed significantly
+        current_y_limits = dpg.get_axis_limits(self.ob_yaxis)
+        new_ymax = max_y_value + buffer
+        # Check relative change to avoid jitter
+        if abs(current_y_limits[1] - new_ymax) / new_ymax > 0.05: # Only update if > 5% change
+             dpg.set_axis_limits(axis=self.ob_yaxis, ymin=0, ymax=new_ymax)
 
-        # Calculate the visible bid and ask quantities
-        if not visible_bids.empty and not visible_asks.empty:
-            visible_bid_quantities = visible_bids[
-                "cumulative_quantity" if self.aggregated_order_book and "cumulative_quantity" in visible_bids else "quantity"
-            ].sum()
-            visible_ask_quantities = visible_asks[
-                "cumulative_quantity" if self.aggregated_order_book and "cumulative_quantity" in visible_asks else "quantity"
-            ].sum()
 
-            # Calculate bid-ask ratio for visible quantities
-            if visible_ask_quantities > 0:  # Prevent division by zero
-                bid_ask_ratio = visible_bid_quantities / visible_ask_quantities
-            else:
-                bid_ask_ratio = float("inf")
+        # Calculate bid-ask ratio based on *sum* of individual quantities in the visible range
+        if visible_asks_indiv_qty_sum > 0:
+            bid_ask_ratio = visible_bids_indiv_qty_sum / visible_asks_indiv_qty_sum
+        elif visible_bids_indiv_qty_sum > 0:
+             bid_ask_ratio = float('inf') # Lots of bids, no asks visible
         else:
-            bid_ask_ratio = 1.0  # Default value when no data
+            bid_ask_ratio = 1.0 # Default or indicates no volume visible
 
-        # Set the bid-ask ratio value in the UI
+        # Set the bid-ask ratio value
         dpg.set_value(self.bid_ask_ratio, f"{bid_ask_ratio:.2f}")
-        
+
         # Finish batched updates
         dpg.pop_container_stack()
 
@@ -375,22 +390,19 @@ class OrderBook:
     # Rest of the methods related to order book (update_order_book, set_ob_levels, etc.)
 
     def _toggle_aggregated_order_book(self):
-        # Toggle the aggregation flag
         self.aggregated_order_book = not self.aggregated_order_book
-        
-        # Show/hide the tick size slider based on aggregation mode
         dpg.configure_item(self.tick_size_slider_id, show=self.aggregated_order_book)
-        
-        # Request a refresh of the order book with the current data
-        # This will apply the new aggregation setting to the current data
+
+        # Refresh using the last raw data
         if hasattr(self, 'last_orderbook') and self.last_orderbook:
-            bids_df, asks_df, price_column = self._aggregate_and_group_order_book(
-                self.last_orderbook,
+            bids_processed, asks_processed = self._aggregate_and_group_order_book(
+                self.last_orderbook.get('bids', []), # Use .get for safety
+                self.last_orderbook.get('asks', []),
                 self.tick_size,
                 self.aggregated_order_book,
             )
-            self._update_order_book(bids_df, asks_df, price_column)
-            
+            self._update_order_book(bids_processed, asks_processed)
+
     def _set_ob_levels(self, sender, app_data, user_data):
         self.spread_percentage = app_data
 
@@ -406,14 +418,21 @@ class OrderBook:
         self._set_tick_size(None, price_precision, None)
 
     def _set_tick_size(self, sender, app_data: float, user_data):
-        # Update the tick size
+        # Ensure tick_size is positive
+        if app_data <= 0:
+             logging.warning(f"Attempted to set invalid tick size: {app_data}. Using previous value: {self.tick_size}")
+             # Optionally reset slider value if possible or just don't update
+             # dpg.set_value(self.tick_size_slider_id, self.tick_size) # Reset slider if needed
+             return
+
         self.tick_size = app_data
-        
-        # Refresh the order book with the new tick size
+
+        # Refresh the order book with the new tick size using last raw data
         if hasattr(self, 'last_orderbook') and self.last_orderbook:
-            bids_df, asks_df, price_column = self._aggregate_and_group_order_book(
-                self.last_orderbook, 
+            bids_processed, asks_processed = self._aggregate_and_group_order_book(
+                self.last_orderbook.get('bids', []), # Use .get for safety
+                self.last_orderbook.get('asks', []),
                 self.tick_size,
                 self.aggregated_order_book
             )
-            self._update_order_book(bids_df, asks_df, price_column)
+            self._update_order_book(bids_processed, asks_processed)
