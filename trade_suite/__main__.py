@@ -1,36 +1,3 @@
-"""
-This script is used to run a trading program with user-defined settings.
-
-Usage:
-    python script.py [--exchanges EXCHANGE1 EXCHANGE2 ...]
-
-Parameters:
-    --exchanges: A list of exchanges to use in the trading program. By default, it uses 'coinbasepro'.
-                 You can provide multiple exchanges by separating them with spaces.
-
-Example:
-    python script.py --exchanges coinbasepro binance kraken
-
-Dependencies:
-    - argparse: Used for parsing command-line arguments.
-    - logging: Used for configuring logging settings.
-    - dotenv: Used for loading environment variables from a .env file.
-    - config.ConfigManager: Manages configuration settings.
-    - data.data_source.Data: Provides data from various sources.
-    - data.influx.InfluxDB: Handles data storage in InfluxDB.
-    - gui.signals.SignalEmitter: Emits trading signals.
-    - gui.viewport.Viewport: GUI interface for the trading program.
-
-Instructions:
-    1. Make sure to set up the required environment variables in a .env file.
-    2. Run the script with optional command-line arguments to specify exchanges to use.
-    3. The script initializes the trading program with the specified settings and starts the trading viewport.
-
-Note:
-    - This script requires a proper configuration setup and access to the specified exchanges.
-    - Make sure to customize the description in the argparse.ArgumentParser according to your program's needs.
-"""
-
 import argparse
 import logging
 from dotenv import load_dotenv

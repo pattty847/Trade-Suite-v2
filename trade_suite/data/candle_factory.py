@@ -119,7 +119,7 @@ class CandleFactory:
                 new_candle_df = pd.DataFrame([new_candle])
                 self.ohlcv = pd.concat([self.ohlcv, new_candle_df], ignore_index=True)
                 self.last_candle_timestamp += self.timeframe_seconds
-            else:
+            elif not self.ohlcv.empty:  # Check if the dataframe is not empty before accessing
                 # Update the current candle
                 self.ohlcv.at[self.ohlcv.index[-1], "highs"] = max(
                     self.ohlcv.at[self.ohlcv.index[-1], "highs"], price
@@ -129,6 +129,20 @@ class CandleFactory:
                 )
                 self.ohlcv.at[self.ohlcv.index[-1], "closes"] = price
                 self.ohlcv.at[self.ohlcv.index[-1], "volumes"] += volume
+            else:
+                # Handle the case where ohlcv is empty by creating a new candle
+                new_candle = {
+                    "dates": adjusted_timestamp,
+                    "opens": price,
+                    "highs": price,
+                    "lows": price,
+                    "closes": price,
+                    "volumes": volume,
+                }
+                # Convert the new candle dictionary to a DataFrame
+                new_candle_df = pd.DataFrame([new_candle])
+                self.ohlcv = new_candle_df
+                self.last_candle_timestamp = adjusted_timestamp
 
 
     def try_resample(self, new_timeframe: str, active_exchange):

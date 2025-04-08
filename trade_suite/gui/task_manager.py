@@ -199,8 +199,8 @@ class TaskManager:
             for task in self.tabs[tab]:
                 self.stop_task(task)
 
-        # This will emit the candles to listeners
-        self._get_candles_for_market(
+        # This will emit the candles to listeners and return a future
+        candles_future = self._get_candles_for_market(
             tab, exchange, symbol, timeframe
         ) 
         
@@ -227,18 +227,31 @@ class TaskManager:
                 )
             except Exception as e:
                 logging.error(f"Error in orderbook stream: {e}")
+        
+        # Modified: Only start trade and orderbook streams after candles are fetched
+        def start_streams_after_candles(fut):
+            try:
+                # Get the result of the future to ensure candles have been fetched
+                fut.result()
+                logging.info(f"Candles loaded. Starting trade and orderbook streams for {symbol} on {exchange}.")
+                
+                # Now start the trade and orderbook streams
+                self.start_task(
+                    trades_task,
+                    coro=wrapped_watch_trades(),
+                )
 
-        self.start_task(
-            trades_task,
-            coro=wrapped_watch_trades(),
-        )
-
-        self.start_task(
-            orderbook_task,
-            coro=wrapped_watch_orderbook(),
-        )
-
-        self.tabs[tab] = [trades_task, orderbook_task]
+                self.start_task(
+                    orderbook_task,
+                    coro=wrapped_watch_orderbook(),
+                )
+                
+                self.tabs[tab] = [trades_task, orderbook_task]
+            except Exception as e:
+                logging.error(f"Error starting streams after candles: {e}")
+        
+        # Add the callback to start streams only after candles are fetched
+        candles_future.add_done_callback(start_streams_after_candles)
 
     def _get_candles_for_market(self, tab, exchange, symbol, timeframe):
         """
