@@ -1,14 +1,17 @@
 import asyncio
 import logging
+import os
 from typing import Dict, List
 
 import dearpygui.dearpygui as dpg
 
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
-from trade_suite.gui.program import Program
+from trade_suite.gui.dashboard_program import DashboardProgram
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
+from trade_suite.gui.widgets import DashboardManager
+from trade_suite.gui.utils import searcher
 
 
 class Viewport:
@@ -17,7 +20,12 @@ class Viewport:
         self.config_manager = config_manager
 
         self.task_manager = TaskManager(self.data)
-        self.program = Program(self.data, self.task_manager, self.config_manager)
+        
+        # Dashboard manager will be created in initialize_program
+        self.dashboard_manager = None
+        
+        # Program will be created in initialize_program
+        self.program = None
 
     def __enter__(self):
         """
@@ -35,6 +43,18 @@ class Viewport:
 
         # Setup dearpygui
         dpg.create_context()
+        
+        # Configure docking
+        default_layout = "config/factory_layout.ini"
+        user_layout = "config/user_layout.ini"
+        
+        # If the user layout does not exist yet, prime it with the factory layout
+        if not os.path.exists(user_layout) and os.path.exists(default_layout):
+            dpg.load_init_file(default_layout)
+        
+        # Configure app with docking enabled and layout persistence
+        dpg.configure_app(docking=True, docking_space=True, init_file=user_layout)
+        
         self.load_theme()
         return self
 
@@ -107,7 +127,31 @@ class Viewport:
         """
         logging.info("Setting up DearPyGUI loop, viewport, and primary window...")
 
-        dpg.create_viewport(title="Crpnto Dahsbrod", width=1200, height=720)
+        dpg.create_viewport(title="Trading Suite v2", width=1200, height=720)
+        
+        # Add viewport menu bar (attached to viewport, not to any window)
+        with dpg.viewport_menu_bar():
+            with dpg.menu(label="File"):
+                dpg.add_menu_item(label="New Chart", callback=lambda: self.data.emitter.emit(Signals.NEW_CHART_REQUESTED))
+                dpg.add_menu_item(label="New Orderbook", callback=lambda: self.data.emitter.emit(Signals.NEW_ORDERBOOK_REQUESTED))
+                dpg.add_menu_item(label="New Trading Panel", callback=lambda: self.data.emitter.emit(Signals.NEW_TRADING_PANEL_REQUESTED))
+                dpg.add_separator()
+                dpg.add_menu_item(label="Save Layout", callback=lambda: self.dashboard_manager.save_layout() if self.dashboard_manager else None)
+                dpg.add_menu_item(label="Reset Layout", callback=lambda: self.dashboard_manager.reset_to_default() if self.dashboard_manager else None)
+                dpg.add_separator()
+                dpg.add_menu_item(label="Exit", callback=lambda: dpg.stop_dearpygui())
+            
+            with dpg.menu(label="View"):
+                dpg.add_menu_item(label="Layout Tools", callback=lambda: self.dashboard_manager.create_layout_tools() if self.dashboard_manager else None)
+                dpg.add_menu_item(label="Debug Tools", callback=lambda: self.program._create_debug_window() if self.program else None)
+            
+            # Placeholder for Exchange menu - will be populated after exchanges are loaded
+            # Use a consistent tag for easier reference later
+            self.exchange_menu_tag = dpg.generate_uuid()
+            with dpg.menu(label="Exchange", tag=self.exchange_menu_tag):
+                # We'll fill this dynamically after the program is initialized
+                pass
+        
         dpg.setup_dearpygui()
         dpg.show_viewport()
         dpg.set_frame_callback(
@@ -133,6 +177,46 @@ class Viewport:
         except Exception as e:
             logging.error(f"Error in main render loop: {e}", exc_info=True)
 
+    def populate_exchange_menu(self):
+        """Populate the Exchange menu with available exchanges."""
+        if not self.data.exchanges:
+            logging.warning("No exchanges available to populate menu")
+            return
+            
+        # Now we can directly access the Exchange menu using the tag we stored
+        if not hasattr(self, 'exchange_menu_tag') or not dpg.does_item_exist(self.exchange_menu_tag):
+            logging.warning("Exchange menu tag not found or menu doesn't exist")
+            return
+            
+        exchange_menu = self.exchange_menu_tag
+        
+        # Clear existing items
+        try:
+            existing_items = dpg.get_item_children(exchange_menu)[1]
+            for item in existing_items:
+                dpg.delete_item(item)
+        except:
+            logging.warning("Error clearing Exchange menu items", exc_info=True)
+            
+        # Add search functionality
+        input_tag = dpg.add_input_text(label="Search", parent=exchange_menu)
+        
+        # Add exchange listbox
+        exchange_list_tag = dpg.add_listbox(
+            items=list(self.data.exchanges),
+            parent=exchange_menu,
+            callback=lambda s, a, u: self.data.emitter.emit(Signals.CREATE_EXCHANGE_TAB, exchange=a),
+            num_items=10,
+        )
+        
+        # Setup search callback
+        dpg.set_item_callback(
+            input_tag,
+            callback=lambda: searcher(
+                input_tag, exchange_list_tag, list(self.data.exchanges)
+            ),
+        )
+
     def initialize_program(self):
         """
         The initialize_program function is responsible for initializing the program classes and subclasses.
@@ -147,13 +231,33 @@ class Viewport:
         # This will initialize all UI components and register their callback
         logging.info(f"Setting up the program classes and subclasses.")
 
-        # MAIN PROGRAM/WINDOW CLASS INITIALIZATION
-        # Adds the primary window to the viewport
-        self.program.initialize()
-        dpg.set_primary_window(self.program.primary_window_tag, True)
-
-        # The signal queue is now processed in the manual render loop in start_program()
+        # Create dashboard manager 
+        self.dashboard_manager = DashboardManager(
+            emitter=self.data.emitter,
+            default_layout_file="config/factory_layout.ini",
+            user_layout_file="config/user_layout.ini",
+        )
         
+        # Initialize the dashboard layout
+        self.dashboard_manager.initialize_layout()
+            
+        # Create and initialize the program with the dashboard manager
+        self.program = DashboardProgram(
+            parent=None,  # No parent window anymore as we're not using a primary window
+            data=self.data,
+            task_manager=self.task_manager,
+            config_manager=self.config_manager,
+            dashboard_manager=self.dashboard_manager
+        )
+        self.program.initialize()
+        
+        # We no longer set a primary window - all windows are equal and dockable
+        # dpg.set_primary_window(self.primary_window_tag, True)
+        
+        # Populate the Exchange menu with available exchanges
+        self.populate_exchange_menu()
+        
+        # Setup viewport resize handler
         dpg.set_viewport_resize_callback(
             lambda: self.data.emitter.emit(
                 Signals.VIEWPORT_RESIZED,
@@ -179,14 +283,24 @@ class Viewport:
         """
         logging.info("Trying to shutdown...")
 
-        self.config_manager.update_setting("default_exchange", self.program.default_exchange)
+        # Save dashboard layout if it exists
+        if self.dashboard_manager:
+            self.dashboard_manager.save_layout()
 
-        self.task_manager.stop_all_tasks(),
+        if self.program:
+            # Save default exchange
+            if hasattr(self.program, 'default_exchange'):
+                self.config_manager.update_setting("default_exchange", self.program.default_exchange)
 
+        # Stop all tasks
+        self.task_manager.stop_all_tasks()
+
+        # Gracefully close exchange connections
         self.task_manager.run_task_with_loading_popup(
             self.data.close_all_exchanges(), "Closing CCXT exchanges."
         )
 
+        # Destroy DPG context
         dpg.destroy_context()
 
         if exc_type:
