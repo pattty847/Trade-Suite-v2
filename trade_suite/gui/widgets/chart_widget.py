@@ -1,8 +1,10 @@
 import logging
+import time
 import dearpygui.dearpygui as dpg
 import pandas as pd
 import numpy as np
 from typing import Optional, List, Dict, Any
+from datetime import datetime # Added for status bar update
 
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.widgets.base_widget import DockableWidget
@@ -11,6 +13,7 @@ from trade_suite.gui.widgets.base_widget import DockableWidget
 class ChartWidget(DockableWidget):
     """
     Widget for displaying candlestick charts for cryptocurrency trading.
+    Includes basic indicator support (EMA).
     """
     
     def __init__(
@@ -37,6 +40,7 @@ class ChartWidget(DockableWidget):
         """
         # Create a unique ID if not provided
         if instance_id is None:
+            # Append timeframe to instance ID for uniqueness if multiple timeframes allowed
             instance_id = f"{exchange}_{symbol}_{timeframe}".lower().replace("/", "")
             
         super().__init__(
@@ -66,24 +70,41 @@ class ChartWidget(DockableWidget):
         self.x_axis_tag = f"{self.window_tag}_xaxis"
         self.y_axis_tag = f"{self.window_tag}_yaxis"
         self.volume_y_axis_tag = f"{self.window_tag}_volume_yaxis"
+        # Status bar tags
+        self.last_update_tag = f"{self.window_tag}_last_update"
+        self.open_tag = f"{self.window_tag}_open"
+        self.high_tag = f"{self.window_tag}_high"
+        self.low_tag = f"{self.window_tag}_low"
+        self.close_tag = f"{self.window_tag}_close"
+        self.price_tag = f"{self.window_tag}_price" # Tag for price display in top controls
         
         # Internal state
         self.auto_fit_enabled = True
+        
+        # Indicator State
+        self.show_ema = False
+        self.ema_spans = [10, 25, 50, 100, 200]
+        self.ema_series_tags: Dict[int, int] = {} # {span: series_tag}
     
     def build_menu(self) -> None:
         """Build the chart widget's menu bar."""
         with dpg.menu(label="Timeframes"):
+            # TODO: Potentially make timeframes dynamic based on exchange capabilities
             for tf in ["1m", "5m", "15m", "1h", "4h", "1d"]:
-                dpg.add_menu_item(
+                # Use radio buttons for single selection feel
+                dpg.add_radio_button(
+                    items=[tf], # Hacky way to use radio for single item selection visual
                     label=tf,
-                    callback=lambda sender, data, tf=tf: self._on_timeframe_change(tf)
+                    default_value=tf if tf == self.timeframe else "",
+                    callback=lambda s, a, u: self._on_timeframe_change(u),
+                    user_data=tf
                 )
         
         with dpg.menu(label="View"):
             dpg.add_menu_item(
                 label="Auto-fit",
                 check=True,
-                default_value=True,
+                default_value=self.auto_fit_enabled,
                 callback=self._toggle_auto_fit
             )
             
@@ -91,24 +112,24 @@ class ChartWidget(DockableWidget):
                 label="Fit Now",
                 callback=self._fit_chart
             )
+        
+        # Indicators Menu
+        with dpg.menu(label="Indicators"):
+            with dpg.menu(label="Moving Averages"):
+                dpg.add_checkbox(
+                    label="Show EMAs",
+                    default_value=self.show_ema,
+                    callback=self._toggle_ema_visibility
+                )
+                # TODO: Add options for configuring EMA spans
     
     def build_content(self) -> None:
         """Build the chart widget's content."""
-        # Top controls
+        # Top controls (Consider moving timeframe selector to menu/toolbar)
         with dpg.group(horizontal=True):
-            # Symbol display
-            dpg.add_text(f"{self.symbol}")
-            
-            # Timeframe selector
-            dpg.add_combo(
-                items=["1m", "5m", "15m", "1h", "4h", "1d"],
-                default_value=self.timeframe,
-                callback=lambda s, a: self._on_timeframe_change(a),
-                width=80
-            )
-            
-            # Placeholder for price
-            self.price_tag = dpg.add_text("0.00")
+            dpg.add_text(f"{self.symbol}") # Display symbol
+            # Placeholder for current price
+            dpg.add_text(" | Price:", tag=self.price_tag)
         
         # Chart with subplots
         with dpg.subplots(
@@ -117,70 +138,75 @@ class ChartWidget(DockableWidget):
             row_ratios=[0.8, 0.2],
             link_all_x=True,
             tag=f"{self.window_tag}_subplots",
-            height=-1,
+            height=-1, # Fill available space
             width=-1
         ):
-            # Candlestick chart
-            with dpg.plot(label=f"{self.symbol} | {self.timeframe}", tag=self.chart_plot_tag):
+            # Candlestick chart plot
+            with dpg.plot(label=f"Price Action", tag=self.chart_plot_tag, no_title=True):
                 dpg.add_plot_legend()
                 
+                # X Axis (hidden ticks/labels, linked)
                 self.x_axis_tag = dpg.add_plot_axis(
                     dpg.mvXAxis,
-                    scale=dpg.mvPlotScale_Time,
+                    time=True, # Use time scale
                     no_tick_marks=True,
                     no_tick_labels=True,
+                    tag=f"{self.window_tag}_xaxis_price" # Unique tag
                 )
                 
-                with dpg.plot_axis(dpg.mvYAxis, label="Price", tag=self.y_axis_tag):
+                # Y Axis (Price)
+                with dpg.plot_axis(dpg.mvYAxis, label="Price", tag=self.y_axis_tag) as y_axis:
                     self.candle_series_tag = dpg.add_candle_series(
-                        dates=[],
-                        opens=[],
-                        closes=[],
-                        lows=[],
-                        highs=[],
-                        time_unit=dpg.mvTimeUnit_Min,
-                        label=self.symbol
+                        dates=[], opens=[], closes=[], lows=[], highs=[],
+                        label=self.symbol,
+                        # time_unit=dpg.mvTimeUnit_Min # Infer from data usually better
                     )
-                    
-            # Volume chart
+                    # Indicator series will be added here dynamically
+            
+            # Volume chart plot
             with dpg.plot(label="Volume", tag=self.volume_plot_tag, no_title=True):
                 dpg.add_plot_legend()
                 
+                # X Axis (visible ticks/labels, linked)
                 dpg.add_plot_axis(
                     dpg.mvXAxis,
-                    scale=dpg.mvPlotScale_Time
+                    time=True,
+                    tag=f"{self.window_tag}_xaxis_volume" # Unique tag
                 )
                 
+                # Y Axis (Volume)
                 with dpg.plot_axis(dpg.mvYAxis, label="Volume", tag=self.volume_y_axis_tag):
                     self.volume_series_tag = dpg.add_bar_series(
-                        x=[],
-                        y=[],
-                        weight=0.7,
-                        label="Volume"
+                        x=[], y=[], weight=0.7, label="Volume"
                     )
     
     def build_status_bar(self) -> None:
         """Build the chart widget's status bar."""
         dpg.add_text("Last Update: ")
-        self.last_update_tag = dpg.add_text("Never")
+        dpg.add_text("Never", tag=self.last_update_tag)
         dpg.add_spacer(width=20)
         dpg.add_text("O: ")
-        self.open_tag = dpg.add_text("0.00")
+        dpg.add_text("0.00", tag=self.open_tag)
         dpg.add_spacer(width=10)
         dpg.add_text("H: ")
-        self.high_tag = dpg.add_text("0.00")
+        dpg.add_text("0.00", tag=self.high_tag)
         dpg.add_spacer(width=10)
         dpg.add_text("L: ")
-        self.low_tag = dpg.add_text("0.00")
+        dpg.add_text("0.00", tag=self.low_tag)
         dpg.add_spacer(width=10)
         dpg.add_text("C: ")
-        self.close_tag = dpg.add_text("0.00")
+        dpg.add_text("0.00", tag=self.close_tag)
     
     def register_handlers(self) -> None:
         """Register event handlers for chart-related signals."""
+        # Listen for initial candle data
         self.emitter.register(Signals.NEW_CANDLES, self._on_new_candles)
+        # Listen for updates to candles (e.g., from real-time trades)
         self.emitter.register(Signals.UPDATED_CANDLES, self._on_updated_candles)
-        self.emitter.register(Signals.NEW_TRADE, self._on_new_trade)
+        # Listen for symbol changes originating elsewhere
+        self.emitter.register(Signals.SYMBOL_CHANGED, self._on_symbol_change)
+        # Note: Timeframe changes are handled by the menu callback (_on_timeframe_change)
+        # Note: NEW_TRADE is handled by CandleFactory/ChartProcessor upstream
     
     def update(self, data: pd.DataFrame) -> None:
         """
@@ -190,118 +216,239 @@ class ChartWidget(DockableWidget):
             data: DataFrame with OHLCV data
         """
         if isinstance(data, pd.DataFrame) and not data.empty:
-            self.ohlcv = data
+            # Ensure timestamps are numeric (seconds since epoch)
+            if not pd.api.types.is_numeric_dtype(data['dates']):
+                 # Attempt conversion if datetime-like
+                try:
+                    data['dates'] = data['dates'].astype(np.int64) // 10**9
+                except Exception as e:
+                    logging.error(f"Failed to convert dates to numeric for chart {self.window_tag}: {e}")
+                    return # Cannot plot non-numeric dates
+
+            # Handle potential milliseconds
+            if data['dates'].max() > time.time() * 2: # Heuristic: if max date is > 2x current time, likely ms
+                 data['dates'] = data['dates'] / 1000
+
+            self.ohlcv = data.copy() # Work with a copy
             self._update_chart()
+        elif data is not None: # Handle case where empty dataframe is sent
+             self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+             self._update_chart() # Update to clear the chart
     
     def _update_chart(self) -> None:
-        """Update the chart display with current OHLCV data."""
-        if self.ohlcv.empty:
-            return
-            
-        # Ensure timestamps are in seconds (not milliseconds)
-        if "dates" in self.ohlcv.columns and self.ohlcv["dates"].max() > 1e12:
-            self.ohlcv['dates'] = self.ohlcv['dates'] / 1000
-        
+        """Update the chart display with current OHLCV data and indicators."""
+        if not self.is_created:
+             logging.warning(f"Attempted to update chart {self.window_tag} before creation.")
+             return
+
+        dates_list = self.ohlcv["dates"].tolist() if not self.ohlcv.empty else []
+
+        # --- Update Core Series ---
         # Update candle series
-        dpg.configure_item(
-            self.candle_series_tag,
-            dates=self.ohlcv["dates"].tolist(),
-            opens=self.ohlcv["opens"].tolist(),
-            highs=self.ohlcv["highs"].tolist(),
-            lows=self.ohlcv["lows"].tolist(),
-            closes=self.ohlcv["closes"].tolist(),
-        )
-        
+        if dpg.does_item_exist(self.candle_series_tag):
+             dpg.configure_item(
+                 self.candle_series_tag,
+                 dates=dates_list,
+                 opens=self.ohlcv["opens"].tolist() if not self.ohlcv.empty else [],
+                 highs=self.ohlcv["highs"].tolist() if not self.ohlcv.empty else [],
+                 lows=self.ohlcv["lows"].tolist() if not self.ohlcv.empty else [],
+                 closes=self.ohlcv["closes"].tolist() if not self.ohlcv.empty else [],
+             )
+        else:
+            logging.warning(f"Candle series {self.candle_series_tag} not found for update.")
+
+
         # Update volume series
-        dpg.configure_item(
-            self.volume_series_tag,
-            x=self.ohlcv["dates"].tolist(),
-            y=self.ohlcv["volumes"].tolist(),
-        )
-        
-        # Update status bar with latest candle
+        if dpg.does_item_exist(self.volume_series_tag):
+             dpg.configure_item(
+                 self.volume_series_tag,
+                 x=dates_list,
+                 y=self.ohlcv["volumes"].tolist() if not self.ohlcv.empty else [],
+             )
+        else:
+             logging.warning(f"Volume series {self.volume_series_tag} not found for update.")
+
+        # --- Update Indicators ---
+        self._update_indicator_series() # Update EMA lines based on current data and state
+
+        # --- Update Status Bar & Price Display ---
         if not self.ohlcv.empty:
             last_candle = self.ohlcv.iloc[-1]
-            dpg.set_value(self.open_tag, f"{last_candle['opens']:.2f}")
-            dpg.set_value(self.high_tag, f"{last_candle['highs']:.2f}")
-            dpg.set_value(self.low_tag, f"{last_candle['lows']:.2f}")
-            dpg.set_value(self.close_tag, f"{last_candle['closes']:.2f}")
-            dpg.set_value(self.price_tag, f"${last_candle['closes']:.2f}")
-            
-            # Update last update timestamp
-            from datetime import datetime
-            timestamp = datetime.fromtimestamp(last_candle['dates'])
-            dpg.set_value(self.last_update_tag, timestamp.strftime("%Y-%m-%d %H:%M:%S"))
-        
-        # Auto-fit if enabled
+            # Use try-except for safety as items might not exist briefly during setup/teardown
+            try:
+                if dpg.does_item_exist(self.open_tag): dpg.set_value(self.open_tag, f"{last_candle['opens']:.4f}")
+                if dpg.does_item_exist(self.high_tag): dpg.set_value(self.high_tag, f"{last_candle['highs']:.4f}")
+                if dpg.does_item_exist(self.low_tag): dpg.set_value(self.low_tag, f"{last_candle['lows']:.4f}")
+                if dpg.does_item_exist(self.close_tag): dpg.set_value(self.close_tag, f"{last_candle['closes']:.4f}")
+                if dpg.does_item_exist(self.price_tag): dpg.set_value(self.price_tag, f" | Price: ${last_candle['closes']:.2f}") # Update top price display
+                if dpg.does_item_exist(self.last_update_tag):
+                     timestamp = datetime.fromtimestamp(last_candle['dates'])
+                     dpg.set_value(self.last_update_tag, timestamp.strftime("%Y-%m-%d %H:%M:%S"))
+            except Exception as e:
+                 logging.warning(f"Error updating status bar for {self.window_tag}: {e}")
+        else:
+             # Clear status bar if no data
+             try:
+                 if dpg.does_item_exist(self.open_tag): dpg.set_value(self.open_tag, "N/A")
+                 if dpg.does_item_exist(self.high_tag): dpg.set_value(self.high_tag, "N/A")
+                 if dpg.does_item_exist(self.low_tag): dpg.set_value(self.low_tag, "N/A")
+                 if dpg.does_item_exist(self.close_tag): dpg.set_value(self.close_tag, "N/A")
+                 if dpg.does_item_exist(self.price_tag): dpg.set_value(self.price_tag, " | Price: N/A")
+                 if dpg.does_item_exist(self.last_update_tag): dpg.set_value(self.last_update_tag, "Never")
+             except Exception as e:
+                 logging.warning(f"Error clearing status bar for {self.window_tag}: {e}")
+
+
+        # --- Auto-fit Axes ---
         if self.auto_fit_enabled:
             self._fit_chart()
     
     def _on_new_candles(self, tab, exchange, candles):
-        """Handler for NEW_CANDLES signal."""
-        # Filter events for this chart
+        """Handler for NEW_CANDLES signal (initial load)."""
+        # Filter events specific to this widget instance based on its unique tag
         if tab == self.window_tag and exchange == self.exchange:
-            self.update(candles)
+             logging.info(f"Chart {self.window_tag} received NEW_CANDLES")
+             self.update(candles)
     
     def _on_updated_candles(self, tab, exchange, candles):
-        """Handler for UPDATED_CANDLES signal."""
-        # Filter events for this chart
+        """Handler for UPDATED_CANDLES signal (real-time updates)."""
+        # Filter events specific to this widget instance
         if tab == self.window_tag and exchange == self.exchange:
-            self.update(candles)
+             # logging.debug(f"Chart {self.window_tag} received UPDATED_CANDLES") # Too noisy for info
+             self.update(candles)
     
-    def _on_new_trade(self, tab, exchange, trade_data):
-        """Handler for NEW_TRADE signal."""
-        # Filter events for this chart
-        if tab == self.window_tag and exchange == self.exchange:
-            # Update price display with latest trade
-            price = trade_data.get("price", 0)
-            dpg.set_value(self.price_tag, f"${price:.2f}")
-            
-            # Draw a circle for the trade (optional visualization)
-            timestamp = trade_data.get("timestamp", 0) / 1000  # Convert to seconds
-            volume = trade_data.get("amount", 0)
-            
-            # Only draw if we have meaningful data
-            if timestamp > 0 and price > 0:
-                dpg.draw_circle(
-                    parent=self.chart_plot_tag,
-                    center=[timestamp, price],
-                    radius=max(1, volume * 5),  # Scale radius by volume
-                    color=[255, 255, 255, 100],  # White with transparency
-                    fill=[255, 255, 255, 50],    # Filled with more transparency
-                    thickness=1
-                )
+    # --- Indicator Methods ---
+    
+    def _toggle_ema_visibility(self, sender, app_data, user_data):
+        """Callback for the EMA checkbox in the menu."""
+        self.show_ema = app_data # Checkbox passes its state directly
+        logging.info(f"EMA visibility toggled to {self.show_ema} for {self.window_tag}")
+        self._update_indicator_series()
+    
+    def _update_indicator_series(self):
+        """Calculates and updates/creates/hides EMA line series."""
+        if not self.is_created or not dpg.does_item_exist(self.y_axis_tag):
+            # Don't attempt updates if widget or axis isn't ready
+            return
+
+        if self.show_ema and not self.ohlcv.empty and 'closes' in self.ohlcv.columns:
+            dates = self.ohlcv["dates"].tolist()
+            close_prices = self.ohlcv["closes"]
+
+            for span in self.ema_spans:
+                try:
+                     # Calculate EMA
+                     ema_values = close_prices.ewm(span=span, adjust=False).mean().tolist()
+                     series_tag = self.ema_series_tags.get(span)
+
+                     if series_tag and dpg.does_item_exist(series_tag):
+                         # Update existing series
+                         dpg.set_value(series_tag, [dates, ema_values])
+                         dpg.configure_item(series_tag, show=True) # Ensure visible
+                     elif not series_tag:
+                         # Create new series
+                         new_tag = dpg.add_line_series(
+                             dates,
+                             ema_values,
+                             label=f"EMA {span}",
+                             parent=self.y_axis_tag, # Attach to price axis
+                             show=True
+                         )
+                         self.ema_series_tags[span] = new_tag
+                         logging.debug(f"Created EMA {span} series (tag {new_tag}) for {self.window_tag}")
+
+                except Exception as e:
+                     logging.error(f"Failed to calculate or plot EMA {span} for {self.window_tag}: {e}")
+
+        else:
+            # Hide all existing EMA series if show_ema is False or ohlcv is empty
+            for span, series_tag in self.ema_series_tags.items():
+                if dpg.does_item_exist(series_tag):
+                    dpg.configure_item(series_tag, show=False)
+    
+    # --- Event Handlers & Callbacks ---
+    
+    def _on_symbol_change(self, exchange, tab, new_symbol):
+        """Handles symbol changes initiated from signals (e.g., another widget)."""
+        if exchange == self.exchange and tab == self.window_tag:
+            logging.info(f"Symbol change detected for {self.window_tag} to {new_symbol}")
+            self.symbol = new_symbol
+            self.timeframe = self._get_default_timeframe() # Reset timeframe? Or keep? Let's keep for now.
+
+            # Update window title
+            new_title = f"Chart - {self.exchange.upper()} {self.symbol} ({self.timeframe})"
+            if dpg.does_item_exist(self.window_tag):
+                dpg.set_item_label(self.window_tag, new_title)
+
+            # Clear existing data and series
+            self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+            self._clear_indicator_series() # Clear EMA lines
+            self._update_chart() # Update chart to show empty state
+
+            # TODO: IMPORTANT - Need to signal upstream (e.g., DashboardProgram)
+            # to stop the old data stream and start one for the new symbol/timeframe.
+            # This widget should not manage data streams directly.
+            # Emitting a specific signal might be appropriate here, or relying on
+            # the upstream controller that initiated the SYMBOL_CHANGED signal.
+            logging.warning(f"Symbol changed for {self.window_tag}. Upstream needs to handle data stream restart.")
     
     def _on_timeframe_change(self, new_timeframe: str) -> None:
-        """Change the chart timeframe."""
-        if new_timeframe == self.timeframe:
-            return
-            
-        logging.info(f"Changing timeframe from {self.timeframe} to {new_timeframe}")
-        self.timeframe = new_timeframe
-        
-        # Update chart title
-        dpg.configure_item(
-            self.chart_plot_tag, 
-            label=f"{self.symbol} | {self.timeframe}"
-        )
-        
-        # Emit signal to request data for new timeframe
-        self.emitter.emit(
-            Signals.TIMEFRAME_CHANGED,
-            exchange=self.exchange,
-            tab=self.window_tag,
-            new_timeframe=new_timeframe,
-        )
+        """Handles timeframe changes from the menu."""
+        if new_timeframe != self.timeframe:
+            logging.info(f"Timeframe changing for {self.window_tag} from {self.timeframe} to {new_timeframe}")
+            self.timeframe = new_timeframe
+
+            # Update window title
+            new_title = f"Chart - {self.exchange.upper()} {self.symbol} ({self.timeframe})"
+            if dpg.does_item_exist(self.window_tag):
+                dpg.set_item_label(self.window_tag, new_title)
+
+            # Clear existing data and series
+            self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+            self._clear_indicator_series()
+            self._update_chart()
+
+            # Signal upstream to change the data stream
+            self.emitter.emit(
+                Signals.TIMEFRAME_CHANGED,
+                exchange=self.exchange,
+                tab=self.window_tag, # Send own tag to identify source
+                new_timeframe=new_timeframe
+            )
+            logging.warning(f"Timeframe changed for {self.window_tag}. Upstream needs to handle data stream restart.")
     
     def _toggle_auto_fit(self, sender, value):
-        """Toggle automatic chart fitting."""
+        """Toggle auto-fitting of chart axes."""
         self.auto_fit_enabled = value
-        if value:
+        if self.auto_fit_enabled:
             self._fit_chart()
     
     def _fit_chart(self):
-        """Fit chart axes to the data."""
-        dpg.fit_axis_data(self.x_axis_tag)
-        dpg.fit_axis_data(self.y_axis_tag)
-        dpg.fit_axis_data(self.volume_y_axis_tag) 
+        """Fit the plot axes to the data."""
+        if self.is_created:
+             if dpg.does_item_exist(self.chart_plot_tag): dpg.fit_axis_data(self.y_axis_tag)
+             if dpg.does_item_exist(self.volume_plot_tag): dpg.fit_axis_data(self.volume_y_axis_tag)
+             # Fitting X axis might be needed too, especially if not auto-linked fully
+             if dpg.does_item_exist(self.chart_plot_tag): dpg.fit_axis_data(self.x_axis_tag)
+    
+    def _clear_indicator_series(self):
+         """Deletes existing EMA DPG items."""
+         for span, tag in self.ema_series_tags.items():
+             if dpg.does_item_exist(tag):
+                 dpg.delete_item(tag)
+                 logging.debug(f"Deleted EMA {span} series (tag {tag}) for {self.window_tag}")
+         self.ema_series_tags.clear()
+    
+    # Helper to get defaults (could be moved to config/utils)
+    def _get_default_timeframe(self) -> str:
+         # Simplified - assumes '1h' default
+         return '1h'
+    
+    # --- Overrides or specific implementations ---
+    def close(self) -> None:
+        """Clean up chart-specific resources before closing."""
+        logging.info(f"Closing chart widget {self.window_tag}")
+        # Potentially signal upstream to stop data streams associated with this widget
+        # self.emitter.emit(Signals.WIDGET_CLOSING, widget_tag=self.window_tag, ...)
+        self._clear_indicator_series() # Clean up DPG items
+        super().close() # Call base class close to delete window 
