@@ -134,3 +134,36 @@ While `Viewport` sets up the core window and docking, and `DashboardManager` han
 2.  **Next Investigation:** If you want to fully clean up, the next step would be to analyze `DashboardProgram` to see what logic can be migrated directly into `Viewport` or `DashboardManager`, potentially eliminating it entirely.
 
 Would you like to proceed with deleting the `trade_suite/gui/components/` directory, or would you prefer to investigate `dashboard_program.py` further first?
+
+
+(/components removed)
+
+
+Okay, great! Thanks for deleting the `components` directory. That completes a major part of the cleanup.
+
+Let's recap where we stand based on our initial review and the work we've done:
+
+**Completed:**
+
+1.  **Understood New Architecture:** We've analyzed `test_widgets_launch.py`, `Viewport`, `DashboardManager`, the `widgets` structure (`ChartWidget`, `OrderbookWidget`, etc.), `SignalEmitter`, `CandleFactory`, `ChartProcessor`.
+2.  **Confirmed Real-time Updates:** The flow for real-time chart updates via signals appears correct and implemented.
+3.  **Migrated `test_ob.py`:** Successfully refactored the price level table logic into the new dockable `PriceLevelWidget`.
+4.  **Migrated `indicators.py`:** Integrated the EMA indicator logic directly into `ChartWidget`.
+5.  **Removed Legacy `components`:** The old `trade_suite/gui/components/` directory (including `chart.py`, `orderbook.py`, `trading.py`, `indicators.py`, `test_ob.py`, `tpo.py`, `tab.py`, `plot_series.py`) is now gone.
+
+**Remaining / Next Steps:**
+
+1.  **Integrate `PriceLevelWidget`:** We created the widget, but users can't actually add it yet. We need to:
+    *   Add a "New Price Level" menu item in `Viewport`.
+    *   Add the corresponding signal (`NEW_PRICE_LEVEL_REQUESTED`?) to `Signals`.
+    *   Add a handler (`_show_new_price_level_dialog`) in `DashboardProgram` to show a dialog for selecting exchange/symbol.
+    *   Add logic in that dialog's callback to create and add the `PriceLevelWidget` via the `DashboardManager`.
+2.  **Refine `DashboardProgram` (Lower Priority):** While functional, we noted that `DashboardProgram` still handles widget creation orchestration, stream starting, and dialogs. Some of this *could* potentially be moved into `Viewport` or `DashboardManager` for tighter integration, but it's not strictly necessary right now.
+3.  **Refine Default Layout (`factory_layout.ini`):** You mentioned wanting a better default arrangement of widgets when the application first starts or when the layout is reset. This involves interactively arranging the widgets in the running application and then saving that layout to `config/factory_layout.ini`.
+4.  **Testing & Bug Fixes:** Thoroughly test the application to ensure all widgets load, update correctly (including real-time data and indicators), docking works as expected, and no regressions were introduced.
+
+**Recommendation:**
+
+The most logical next step to make the recent migration useful is **Step 1: Integrate `PriceLevelWidget`** by adding the menu item and creation dialog.
+
+Would you like to proceed with that?

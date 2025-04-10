@@ -6,12 +6,13 @@ from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
-from trade_suite.gui.utils import searcher
+from trade_suite.gui.utils import searcher, center_window
 from trade_suite.gui.widgets import (
     DashboardManager,
     ChartWidget,
     OrderbookWidget,
     TradingWidget,
+    PriceLevelWidget,
 )
 
 
@@ -68,6 +69,7 @@ class DashboardProgram:
         self.emitter.register(Signals.NEW_CHART_REQUESTED, self._show_new_chart_dialog)
         self.emitter.register(Signals.NEW_ORDERBOOK_REQUESTED, self._show_new_orderbook_dialog)
         self.emitter.register(Signals.NEW_TRADING_PANEL_REQUESTED, self._show_new_trading_dialog)
+        self.emitter.register(Signals.NEW_PRICE_LEVEL_REQUESTED, self._show_new_price_level_dialog)
 
     def initialize(self):
         """Initialize the dashboard program."""
@@ -386,19 +388,31 @@ class DashboardProgram:
                 )
                 self.dashboard_manager.add_widget(widget_id, orderbook_widget)
                 
-                # Start orderbook stream
-                stream_id = f"orderbook_{exchange}_{symbol}_{orderbook_widget.window_tag}"
-                self.task_manager.start_task(
-                    stream_id,
-                    self.data.watch_orderbook(orderbook_widget.window_tag, exchange, symbol)
-                )
+                # Start orderbook stream ONLY IF NOT ALREADY RUNNING
+                # Use a consistent stream ID format
+                stream_id = f"orderbook_{exchange}_{symbol}"
+                if not self.task_manager.is_stream_running(stream_id):
+                    logging.info(f"Starting orderbook stream {stream_id} for widget {orderbook_widget.window_tag}")
+                    # Use the specific widget tag in the stream task name for potential finer control later?
+                    # Maybe keep it generic for now: f"orderbook_{exchange}_{symbol}"
+                    self.task_manager.start_task(
+                        stream_id,
+                        self.data.watch_orderbook(orderbook_widget.window_tag, exchange, symbol)
+                    )
+                else:
+                    logging.info(f"Orderbook stream {stream_id} already running. New widget {orderbook_widget.window_tag} will use existing stream.")
                 
                 # Close the dialog
-                dpg.delete_item(dpg.last_item())
+                # Need to delete the modal window itself, not just the button's parent group
+                dpg.delete_item(combo_symbol) # Assuming combo_symbol is unique to this dialog instance
+                parent_window = dpg.get_item_parent(combo_symbol) # Get the modal window tag
+                if dpg.does_item_exist(parent_window):
+                    dpg.delete_item(parent_window)
             
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Create", callback=create_orderbook)
-                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.current_item_parent()))
+                # Properly reference the modal window for cancel
+                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.get_item_parent(dpg.last_item())))
     
     def _show_new_trading_dialog(self):
         """Show dialog to create a new trading widget."""
@@ -448,6 +462,110 @@ class DashboardProgram:
                 dpg.add_button(label="Create", callback=create_trading_panel)
                 dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.current_item_parent()))
     
+    def _show_new_price_level_dialog(self):
+        """Show a modal dialog to create a new price level widget."""
+        modal_id = dpg.generate_uuid()
+        # Correctly use the list of exchanges
+        available_exchanges = self.data.exchanges
+        selected_exchange = available_exchanges[0] if available_exchanges else None
+        # Need to get symbols differently now, perhaps from data.exchange_list dictionary
+        selected_symbol = self._get_default_symbol(selected_exchange) if selected_exchange else None
+
+        if not available_exchanges:
+            logging.error("Cannot create Price Level widget: No exchanges loaded.")
+            return
+
+        with dpg.window(label="New Price Level Widget", modal=True, tag=modal_id, width=400, no_close=True):
+            # Exchange Selection
+            exchange_combo = dpg.add_combo(
+                label="Exchange",
+                items=available_exchanges,
+                default_value=selected_exchange
+            )
+            # Symbol Selection
+            symbol_combo = dpg.add_combo(
+                label="Symbol",
+                items=[], # Start empty, populate on exchange change
+                default_value=selected_symbol
+            )
+            # Tick Size Input (Optional, could use widget default)
+            tick_size_input = dpg.add_input_float(
+                label="Default Tick Size",
+                default_value=1.0,
+                min_value=0.00000001, # Allow very small ticks
+                format="%.8f"
+            )
+            # Max Depth Input (Optional)
+            max_depth_input = dpg.add_input_int(
+                label="Max Depth Levels",
+                default_value=15,
+                min_value=5,
+                max_value=100
+            )
+
+            # Callback to update symbols when exchange changes
+            def update_symbols(sender, app_data):
+                exchange = dpg.get_value(exchange_combo)
+                symbols = []
+                # Access symbols via the exchange_list dictionary
+                if exchange and self.data.exchange_list and exchange in self.data.exchange_list:
+                    symbols = self.data.exchange_list[exchange].symbols
+                new_default_symbol = self._get_default_symbol(exchange) if symbols else None
+                dpg.configure_item(symbol_combo, items=symbols, default_value=new_default_symbol)
+
+            dpg.set_item_callback(exchange_combo, update_symbols)
+            # Initial population
+            update_symbols(None, None)
+
+            with dpg.group(horizontal=True):
+                # Callback for the create button
+                def create_price_level():
+                    exchange = dpg.get_value(exchange_combo)
+                    symbol = dpg.get_value(symbol_combo)
+                    tick_size = dpg.get_value(tick_size_input)
+                    max_depth = dpg.get_value(max_depth_input)
+
+                    if exchange and symbol:
+                        # Generate a unique ID for the widget instance
+                        widget_id = f"{exchange}_{symbol}_pricelevel_{dpg.generate_uuid()}".lower().replace("/", "")
+                        try:
+                            new_widget = PriceLevelWidget(
+                                emitter=self.emitter,
+                                exchange=exchange,
+                                symbol=symbol,
+                                instance_id=widget_id,
+                                default_tick_size=tick_size,
+                                max_depth=max_depth
+                            )
+                            self.dashboard_manager.add_widget(widget_id, new_widget)
+
+                            # Start order book stream only if not already running
+                            stream_id = f"orderbook_{exchange}_{symbol}" # Consistent ID
+                            if not self.task_manager.is_stream_running(stream_id):
+                                logging.info(f"Starting orderbook stream {stream_id} for PriceLevelWidget {new_widget.window_tag}")
+                                # The PriceLevelWidget listens for ORDER_BOOK_UPDATE signals
+                                # We need to start the generic watch_orderbook stream
+                                # Pass a unique tag (e.g., the widget tag) so the data source knows where it originated?
+                                # For now, let's assume the data source emits generically and widgets filter.
+                                self.task_manager.start_task(
+                                    stream_id, # Use the generic stream ID
+                                    self.data.watch_orderbook(tab=new_widget.window_tag, exchange=exchange, symbol=symbol)
+                                )
+                            else:
+                                logging.info(f"Orderbook stream {stream_id} already running. PriceLevelWidget {new_widget.window_tag} will use existing stream.")
+
+                            logging.info(f"Created new price level widget: {widget_id}")
+                            dpg.delete_item(modal_id) # Close the dialog
+                        except Exception as e:
+                            logging.error(f"Failed to create PriceLevelWidget {widget_id}: {e}", exc_info=True)
+                    else:
+                        logging.warning("Cannot create Price Level widget: missing exchange or symbol.")
+
+                dpg.add_button(label="Create", callback=create_price_level, width=75)
+                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(modal_id), width=75)
+
+            center_window(modal_id) # Center the modal
+
     def _create_debug_window(self):
         """Create a window with debug information and tools."""
         debug_window = dpg.generate_uuid()

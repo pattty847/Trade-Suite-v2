@@ -13,6 +13,7 @@ class Signals(Enum):
     NEW_CHART_REQUESTED = auto()
     NEW_ORDERBOOK_REQUESTED = auto()
     NEW_TRADING_PANEL_REQUESTED = auto()
+    NEW_PRICE_LEVEL_REQUESTED = auto()
     NEW_TRADE = auto()
     ORDER_BOOK_UPDATE = auto()
     ORDERBOOK_VISIBILITY_CHANGED = auto()

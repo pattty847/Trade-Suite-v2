@@ -455,3 +455,7 @@ class TaskManager:
             self.thread.join(timeout=1.0)
             
         logging.info("TaskManager cleanup completed")
+
+    def is_stream_running(self, stream_id: str) -> bool:
+        """Check if a task with the given ID is currently running."""
+        return stream_id in self.tasks and not self.tasks[stream_id].done()
