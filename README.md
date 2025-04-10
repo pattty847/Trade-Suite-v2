@@ -173,16 +173,16 @@ python main.py --level DEBUG
 - Multiple Tabs Feature: Support for numerous instances of the same exchange.
 - Real-Time Candlestick Updates and Indicators: Continuous updating of candlestick charts with relevant trading indicators.
 - Object-Oriented Design: Ensures ease of scalability and further development.
+- ArgParser for Command-Line Entry: To facilitate easier and more flexible program startup through the command line.
+- Performance Optimization: Enhanced the efficiency and responsiveness of the application (orderbook processing, chart updating).
 
 ## Planned Features
 
 - Separate the Data storage aspect to a new continously running Influx server the client can request data from.
-- ArgParser for Command-Line Entry: To facilitate easier and more flexible program startup through the command line.
 - Trading Capabilities: Enabling actual trading actions (buy, sell, etc.) within the platform.
 - Multi-Exchange Portfolio Management: Cross-exchange portfolio aggregation and management system.
 - Expansion of Technical Indicators: Adding more indicators for comprehensive technical analysis.
 - Order Interface Development: To manage and execute trade orders directly from the platform.
-- Performance Optimization: Enhancing the efficiency and responsiveness of the application.
 - User Authentication and Security: Implementing secure login and data protection measures.
 - Mobile Compatibility: Adapting the platform for use on mobile devices.
 - Historical Data Analysis Features: Integrating tools for back-testing strategies with historical data.
