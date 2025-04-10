@@ -1,6 +1,6 @@
 # TradeSuite - A Multi-Exchange Cryptocurrency Trading Platform
 
-![TradeSuite Screenshot](https://github.com/pattty847/Trade-Suite-v2/assets/23511285/2f5e732d-87ba-4132-b66e-7dd71e643393)
+![Screenshot 2025-04-10 155148](https://github.com/user-attachments/assets/2cc68be5-f07e-4484-9d7f-5351b1d2b695)
 
 ## Table of Contents
 - [Introduction](#introduction)
