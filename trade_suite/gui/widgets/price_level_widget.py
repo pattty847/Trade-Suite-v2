@@ -72,8 +72,9 @@ class PriceLevelWidget(DockableWidget):
         self.last_update_time = 0
         self.update_interval = 0.05  # Minimum time between updates (seconds)
 
-        # Dictionary to store the last color for each cell for optimization
+        # Dictionary to store the last color/value for each cell for optimization
         self.last_colors = {}
+        self.last_values = {} # Store last text value set for optimization
 
     def build_content(self) -> None:
         """Build the price level widget's content."""
@@ -208,16 +209,34 @@ class PriceLevelWidget(DockableWidget):
                     dpg.configure_item(price_cell, color=color)
                     dpg.configure_item(qty_cell, color=color)
                     self.last_colors[price_cell] = color
-            else:
-                # Clear unused cells
-                if self.last_colors.get(price_cell) is not None: # Check if cleared already
-                    dpg.set_value(price_cell, "")
-                    dpg.set_value(qty_cell, "")
-                    self.last_colors[price_cell] = None # Mark as cleared
 
-        # Update spread cell
+                # Update value only if changed
+                new_price_str = f"{price:,.8g}"
+                new_qty_str = f"{quantity:,.8g}"
+                if self.last_values.get(price_cell) != new_price_str:
+                    dpg.set_value(price_cell, new_price_str)
+                    self.last_values[price_cell] = new_price_str
+                if self.last_values.get(qty_cell) != new_qty_str:
+                    dpg.set_value(qty_cell, new_qty_str)
+                    self.last_values[qty_cell] = new_qty_str
+            else:
+                # Clear unused cells only if they aren't already cleared
+                if self.last_values.get(price_cell) != "":
+                    dpg.set_value(price_cell, "")
+                    self.last_values[price_cell] = ""
+                if self.last_values.get(qty_cell) != "":
+                    dpg.set_value(qty_cell, "")
+                    self.last_values[qty_cell] = ""
+                # Also ensure color cache reflects cleared state
+                if self.last_colors.get(price_cell) is not None:
+                    self.last_colors[price_cell] = None
+
+        # Update spread cell only if changed
         if self.spread_cell and dpg.does_item_exist(self.spread_cell):
-            dpg.set_value(self.spread_cell, f"Spread: {spread:,.8g}")
+            new_spread_str = f"Spread: {spread:,.8g}"
+            if self.last_values.get(self.spread_cell) != new_spread_str:
+                dpg.set_value(self.spread_cell, new_spread_str)
+                self.last_values[self.spread_cell] = new_spread_str
 
         # Update bid cells (display highest bids first, going down)
         for i in range(self.max_depth):
@@ -242,11 +261,26 @@ class PriceLevelWidget(DockableWidget):
                     dpg.configure_item(price_cell, color=color)
                     dpg.configure_item(qty_cell, color=color)
                     self.last_colors[price_cell] = color
+
+                # Update value only if changed
+                new_price_str = f"{price:,.8g}"
+                new_qty_str = f"{quantity:,.8g}"
+                if self.last_values.get(price_cell) != new_price_str:
+                    dpg.set_value(price_cell, new_price_str)
+                    self.last_values[price_cell] = new_price_str
+                if self.last_values.get(qty_cell) != new_qty_str:
+                    dpg.set_value(qty_cell, new_qty_str)
+                    self.last_values[qty_cell] = new_qty_str
             else:
-                # Clear unused cells
-                if self.last_colors.get(price_cell) is not None:
+                # Clear unused cells only if they aren't already cleared
+                if self.last_values.get(price_cell) != "":
                     dpg.set_value(price_cell, "")
+                    self.last_values[price_cell] = ""
+                if self.last_values.get(qty_cell) != "":
                     dpg.set_value(qty_cell, "")
+                    self.last_values[qty_cell] = ""
+                # Also ensure color cache reflects cleared state
+                if self.last_colors.get(price_cell) is not None:
                     self.last_colors[price_cell] = None
 
     def _aggregate_order_book(self, orderbook, tick_size):
@@ -294,6 +328,7 @@ class PriceLevelWidget(DockableWidget):
             # Clear last known orderbook and table display
             self.last_orderbook = None
             self.last_colors.clear() # Clear color cache
+            self.last_values.clear() # Clear value cache
 
             # Clear all cells immediately
             for price_cell, qty_cell in self.ask_cells + self.bid_cells:

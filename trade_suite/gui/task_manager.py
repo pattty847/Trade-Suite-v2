@@ -204,8 +204,10 @@ class TaskManager:
             tab, exchange, symbol, timeframe
         ) 
         
+        # Task ID for trades stream (usually specific to the chart/tab)
         trades_task = f"trades_{exchange}_{symbol}_{tab}"
-        orderbook_task = f"orderbook_{exchange}_{symbol}_{tab}"
+        # Task ID for the shared orderbook stream (generic)
+        orderbook_task = f"orderbook_{exchange}_{symbol}"
 
         # Create wrapped coroutines that use the queue for thread-safe communication
         async def wrapped_watch_trades():
@@ -240,12 +242,23 @@ class TaskManager:
                     trades_task,
                     coro=wrapped_watch_trades(),
                 )
-
-                self.start_task(
-                    orderbook_task,
-                    coro=wrapped_watch_orderbook(),
-                )
                 
+                # Start orderbook task using the GENERIC ID
+                # It might already be running if another widget requested it,
+                # start_task handles overwriting/cancelling the old one if necessary,
+                # but ideally we check is_stream_running first.
+                # For simplicity here, we rely on start_task idempotency.
+                # A more robust solution might check first.
+                if not self.is_stream_running(orderbook_task):
+                    logging.info(f"Starting shared orderbook stream: {orderbook_task}")
+                    self.start_task(
+                        orderbook_task,
+                        coro=wrapped_watch_orderbook(),
+                    )
+                else:
+                    logging.info(f"Shared orderbook stream {orderbook_task} already running.")
+                
+                # Add BOTH task IDs to the tab's tracking list
                 self.tabs[tab] = [trades_task, orderbook_task]
             except Exception as e:
                 logging.error(f"Error starting streams after candles: {e}")

@@ -11,6 +11,7 @@ from trade_suite.gui.widgets.chart_widget import ChartWidget
 from trade_suite.gui.widgets.orderbook_widget import OrderbookWidget
 from trade_suite.gui.widgets.trading_widget import TradingWidget
 from trade_suite.gui.widgets.price_level_widget import PriceLevelWidget
+from trade_suite.gui.widgets.sec_filing_viewer import SECFilingViewer
 
 __all__ = [
     "DockableWidget", 
@@ -18,5 +19,6 @@ __all__ = [
     "ChartWidget",
     "OrderbookWidget",
     "TradingWidget",
-    "PriceLevelWidget"
+    "PriceLevelWidget",
+    "SECFilingViewer"
 ] 

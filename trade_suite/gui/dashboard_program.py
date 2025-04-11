@@ -4,6 +4,7 @@ import dearpygui.demo as demo
 
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
+from trade_suite.data.sec_data import SECDataFetcher
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.utils import searcher, center_window
@@ -13,6 +14,7 @@ from trade_suite.gui.widgets import (
     OrderbookWidget,
     TradingWidget,
     PriceLevelWidget,
+    SECFilingViewer,
 )
 
 
@@ -28,7 +30,8 @@ class DashboardProgram:
         data: Data,
         task_manager: TaskManager, 
         config_manager: ConfigManager,
-        dashboard_manager: DashboardManager = None
+        dashboard_manager: DashboardManager,
+        sec_fetcher: SECDataFetcher,
     ):
         """
         Initialize the dashboard program.
@@ -38,26 +41,25 @@ class DashboardProgram:
             data: Data source instance
             task_manager: Task manager for async operations
             config_manager: Configuration manager
-            dashboard_manager: Dashboard manager for widget layout (created if None)
+            dashboard_manager: Dashboard manager for widget layout
+            sec_fetcher: SEC data fetcher instance
         """
         self.parent = parent
         self.data = data
         self.emitter = data.emitter
         self.task_manager = task_manager
         self.config_manager = config_manager
-        
-        # Create dashboard manager if not provided
-        self.dashboard_manager = dashboard_manager or DashboardManager(
-            emitter=self.emitter,
-            default_layout_file="config/factory_layout.ini",
-            user_layout_file="config/user_layout.ini",
-        )
+        self.dashboard_manager = dashboard_manager
+        self.sec_fetcher = sec_fetcher
         
         # Store references to widgets by exchange
         self.widgets = {}
         
         # Track default exchange
         self.default_exchange = self.config_manager.get_setting("default_exchange") or 'coinbase'
+        
+        # Counter for unique SEC Viewer instances
+        self._sec_viewer_count = 0
         
         # Register event handlers
         self._register_event_handlers()
@@ -70,6 +72,7 @@ class DashboardProgram:
         self.emitter.register(Signals.NEW_ORDERBOOK_REQUESTED, self._show_new_orderbook_dialog)
         self.emitter.register(Signals.NEW_TRADING_PANEL_REQUESTED, self._show_new_trading_dialog)
         self.emitter.register(Signals.NEW_PRICE_LEVEL_REQUESTED, self._show_new_price_level_dialog)
+        self.emitter.register(Signals.NEW_SEC_FILING_VIEWER_REQUESTED, self._handle_new_sec_viewer_request)
 
     def initialize(self):
         """Initialize the dashboard program."""
@@ -596,4 +599,25 @@ class DashboardProgram:
             dpg.add_button(
                 label="Save Current Layout",
                 callback=self.dashboard_manager.save_layout
-            ) 
+            )
+
+    def _handle_new_sec_viewer_request(self):
+        """Handles the request to create a new SEC Filing Viewer widget."""
+        self._sec_viewer_count += 1
+        instance_id = f"instance_{self._sec_viewer_count}"
+        widget_id = f"sec_filing_viewer_{instance_id}"
+        
+        logging.info(f"Creating new SEC Filing Viewer with ID: {widget_id}")
+        
+        sec_viewer = SECFilingViewer(
+            emitter=self.emitter,
+            sec_fetcher=self.sec_fetcher,
+            task_manager=self.task_manager,
+            instance_id=instance_id
+        )
+        
+        # Add the widget using the dashboard manager
+        # It will be created and shown automatically if not part of the saved layout
+        self.dashboard_manager.add_widget(widget_id, sec_viewer)
+        # Explicitly show it if needed, or let docking handle it
+        # sec_viewer.show() 

@@ -7,6 +7,7 @@ import dearpygui.dearpygui as dpg
 
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
+from trade_suite.data.sec_data import SECDataFetcher
 from trade_suite.gui.dashboard_program import DashboardProgram
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
@@ -20,6 +21,7 @@ class Viewport:
         self.config_manager = config_manager
 
         self.task_manager = TaskManager(self.data)
+        self.sec_fetcher = SECDataFetcher(emitter=self.data.emitter)
         
         # Dashboard manager will be created in initialize_program
         self.dashboard_manager = None
@@ -136,6 +138,7 @@ class Viewport:
                 dpg.add_menu_item(label="New Orderbook", callback=lambda: self.data.emitter.emit(Signals.NEW_ORDERBOOK_REQUESTED))
                 dpg.add_menu_item(label="New Trading Panel", callback=lambda: self.data.emitter.emit(Signals.NEW_TRADING_PANEL_REQUESTED))
                 dpg.add_menu_item(label="New Price Level", callback=lambda: self.data.emitter.emit(Signals.NEW_PRICE_LEVEL_REQUESTED))
+                dpg.add_menu_item(label="New SEC Filing Viewer", callback=lambda: self.data.emitter.emit(Signals.NEW_SEC_FILING_VIEWER_REQUESTED))
                 dpg.add_separator()
                 dpg.add_menu_item(label="Save Layout", callback=lambda: self.dashboard_manager.save_layout() if self.dashboard_manager else None)
                 dpg.add_menu_item(label="Reset Layout", callback=lambda: self.dashboard_manager.reset_to_default() if self.dashboard_manager else None)
@@ -248,7 +251,8 @@ class Viewport:
             data=self.data,
             task_manager=self.task_manager,
             config_manager=self.config_manager,
-            dashboard_manager=self.dashboard_manager
+            dashboard_manager=self.dashboard_manager,
+            sec_fetcher=self.sec_fetcher
         )
         self.program.initialize()
         
@@ -282,26 +286,10 @@ class Viewport:
         :return: None
         :doc-author: Trelent
         """
-        logging.info("Trying to shutdown...")
-
-        # Save dashboard layout if it exists
-        if self.dashboard_manager:
-            self.dashboard_manager.save_layout()
-
-        if self.program:
-            # Save default exchange
-            if hasattr(self.program, 'default_exchange'):
-                self.config_manager.update_setting("default_exchange", self.program.default_exchange)
-
-        # Stop all tasks
-        self.task_manager.stop_all_tasks()
-
-        # Gracefully close exchange connections
-        self.task_manager.run_task_with_loading_popup(
-            self.data.close_all_exchanges(), "Closing CCXT exchanges."
-        )
-
-        # Destroy DPG context
+        logging.info("Shutting down...")
+        # Cleanup resources
+        self.task_manager.cleanup()
+        self.sec_fetcher.close()
         dpg.destroy_context()
 
         if exc_type:

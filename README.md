@@ -146,25 +146,20 @@ These scripts will automatically:
 
 #### Option 2: Command Line (Advanced Users)
 
-You can run the application manually in several ways:
+You can run the application manually:
 
-1. As the main script:
-   ```bash
-   python main.py
-   ```
-
-2. As a module:
-   ```bash
-   python -m trade_suite
-   ```
-
-Command-line arguments are supported with both methods:
 ```bash
+# Run as a Python module (recommended)
+python -m trade_suite
+
 # With specific exchanges
-python main.py --exchanges coinbase binance
+python -m trade_suite --exchanges coinbase binance
 
 # With debug logging
-python main.py --level DEBUG
+python -m trade_suite --level DEBUG
+
+# To reset to the default layout
+python -m trade_suite --reset-layout
 ```
 
 ## Implemented Features

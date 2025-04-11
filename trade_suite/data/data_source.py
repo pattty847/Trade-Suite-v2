@@ -190,9 +190,10 @@ class Data(CCXTInterface):
         exchange_object = self.exchange_list[exchange]
         logging.info(f"Starting orderbook stream for {symbol} on {exchange}")
         
-        # Rate limiting for orderbook updates - no more than 5 per second
-        last_update_time = 0
-        rate_limit_interval = 0.2  # 200ms = 5 updates per second
+        # Throttle orderbook signal emission
+        last_emit_time = 0
+        throttle_interval = 0.5  # Emit max 5 times per second (500ms interval)
+        latest_orderbook = None # Store the most recent orderbook
         
         while self.is_running:
             try:
@@ -200,22 +201,31 @@ class Data(CCXTInterface):
                 orderbook = await exchange_object.watch_order_book(symbol)
                 logging.debug(f"[{tab}] Received order book: {'Yes' if orderbook else 'No'}") # Changed from INFO to DEBUG
 
-                # Rate limiting - only emit updates at the specified rate
+                if orderbook:
+                    latest_orderbook = orderbook # Always store the latest received book
+
+                # Check if throttle interval has passed and we have a book to send
                 current_time = asyncio.get_event_loop().time()
-                if current_time - last_update_time >= rate_limit_interval:
-                    logging.debug(f"[{tab}] Emitting ORDER_BOOK_UPDATE signal...") # Changed from INFO to DEBUG
+                if latest_orderbook and (current_time - last_emit_time >= throttle_interval):
+                    logging.debug(f"[{tab}] Throttled emit: Emitting ORDER_BOOK_UPDATE signal...")
                     self.emitter.emit(
                         Signals.ORDER_BOOK_UPDATE,
-                        tab=tab,
+                        tab=tab, # Keep tab for potential routing if needed later
                         exchange=exchange,
-                        orderbook=orderbook,
+                        orderbook=latest_orderbook, # Emit the latest stored book
                     )
-                    last_update_time = current_time
-                
-                # Small sleep to prevent CPU hogging
-                await asyncio.sleep(0.01)
+                    last_emit_time = current_time
+                    latest_orderbook = None # Clear after sending to avoid re-sending same data if no new book arrives
+
+                # No explicit sleep needed here as watch_order_book implicitly waits
+
+            except asyncio.CancelledError:
+                logging.info(f"Orderbook stream for {symbol} on {exchange} cancelled.")
+                break # Exit the loop if task is cancelled
             except Exception as e:
-                logging.error(e)
+                logging.error(f"Error in orderbook stream for {symbol} on {exchange}: {e}")
+                # Optional: Add a delay before retrying after an error
+                await asyncio.sleep(1)
 
     async def fetch_candles(
         self,

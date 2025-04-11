@@ -1,0 +1,112 @@
+{
+  "SEC_FILINGS_UPDATE": [
+    {
+      "ticker": "AAPL",
+      "filings": [
+        {
+          "accession_no": "0001140361-25-012359",
+          "form": "SD",
+          "filing_date": "2025-04-04",
+          "report_date": "",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/0001140361-25-012359-index.html",
+          "homepage": "https://www.sec.gov/Archives/edgar/data/320193/0001140361-25-012359-index.html"
+        },
+        {
+          "accession_no": "0000320193-25-000045",
+          "form": "4",
+          "filing_date": "2025-04-03",
+          "report_date": "2025-04-01",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000045-index.html",
+          "homepage": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000045-index.html"
+        },
+        {
+          "accession_no": "0000320193-25-000044",
+          "form": "4",
+          "filing_date": "2025-04-03",
+          "report_date": "2025-04-01",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000044-index.html",
+          "homepage": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000044-index.html"
+        },
+        {
+          "accession_no": "0000320193-25-000043",
+          "form": "4",
+          "filing_date": "2025-04-03",
+          "report_date": "2025-04-01",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000043-index.html",
+          "homepage": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000043-index.html"
+        },
+        {
+          "accession_no": "0000320193-25-000042",
+          "form": "4",
+          "filing_date": "2025-04-03",
+          "report_date": "2025-04-01",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000042-index.html",
+          "homepage": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000042-index.html"
+        }
+      ]
+    }
+  ],
+  "SEC_INSIDER_TX_UPDATE": [
+    {
+      "ticker": "AAPL",
+      "transactions": [
+        {
+          "filer": "Unknown",
+          "date": "2025-04-03",
+          "type": "Form 4",
+          "shares": "N/A",
+          "price": "N/A",
+          "value": "N/A",
+          "form_url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000045-index.html"
+        },
+        {
+          "filer": "Unknown",
+          "date": "2025-04-03",
+          "type": "Form 4",
+          "shares": "N/A",
+          "price": "N/A",
+          "value": "N/A",
+          "form_url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000044-index.html"
+        },
+        {
+          "filer": "Unknown",
+          "date": "2025-04-03",
+          "type": "Form 4",
+          "shares": "N/A",
+          "price": "N/A",
+          "value": "N/A",
+          "form_url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000043-index.html"
+        },
+        {
+          "filer": "Unknown",
+          "date": "2025-04-03",
+          "type": "Form 4",
+          "shares": "N/A",
+          "price": "N/A",
+          "value": "N/A",
+          "form_url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000042-index.html"
+        },
+        {
+          "filer": "Unknown",
+          "date": "2025-02-27",
+          "type": "Form 4",
+          "shares": "N/A",
+          "price": "N/A",
+          "value": "N/A",
+          "form_url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-25-000036-index.html"
+        }
+      ]
+    }
+  ],
+  "SEC_FINANCIALS_UPDATE": [
+    {
+      "ticker": "AAPL",
+      "financials": {
+        "period_end": "2024-11-01",
+        "source_form": "10-K",
+        "source_filing": "0000320193-24-000123",
+        "source_url": "https://www.sec.gov/Archives/edgar/data/320193/0000320193-24-000123-index.html"
+      }
+    }
+  ]
+}

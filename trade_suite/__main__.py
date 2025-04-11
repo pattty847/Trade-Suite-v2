@@ -1,18 +1,16 @@
-import argparse
-import logging
-from dotenv import load_dotenv
 import asyncio
-import sys
 import os
+import sys
+import logging
+import argparse
 from datetime import datetime
+from dotenv import load_dotenv
 
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
 from trade_suite.data.influx import InfluxDB
 from trade_suite.gui.signals import SignalEmitter
 from trade_suite.gui.viewport import Viewport
-
-load_dotenv(override=True)
 
 # Ensure logs directory exists
 os.makedirs('logs', exist_ok=True)
@@ -52,9 +50,8 @@ def _setup_logging(level=logging.INFO):
 
 
 def _get_args():
-    # Setup program dependencies
     # Create argparser to start the program from the command line
-    parser = argparse.ArgumentParser(description="Your program description here")
+    parser = argparse.ArgumentParser(description="Trading Suite with Dockable Widgets")
 
     # Add an argument for the list of exchanges
     parser.add_argument(
@@ -69,6 +66,12 @@ def _get_args():
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Set the logging level (default: %(default)s)",
+    )
+    
+    parser.add_argument(
+        "--reset-layout",
+        action="store_true",
+        help="Reset layout to factory default",
     )
 
     return parser.parse_args()
@@ -88,15 +91,50 @@ def main():
     
     logging.info(f"Environment variables loaded and logging setup.")
 
-    config_manager = ConfigManager()
-    exchanges = (
-        config_manager.get_setting("default_exchange") or args.exchanges
-    )  # add exchange list to initialize premptively
-    emitter = SignalEmitter()
-    influx = InfluxDB()
-    data = Data(influx, emitter, [exchanges])
+    # Load environment variables from .env file
+    load_dotenv(override=True)
 
-    # EZ START LET'S GO
+    # Create configuration manager
+    config_manager = ConfigManager()
+    
+    # Get default exchange from config or use command line arguments
+    default_exchange = config_manager.get_setting("default_exchange")
+    
+    # Determine exchanges to use
+    exchanges_to_use = []
+    if default_exchange:
+        # If default_exchange is a string, make it a single-item list
+        if isinstance(default_exchange, str):
+            exchanges_to_use = [default_exchange]
+        # If it's already a list, use it directly
+        elif isinstance(default_exchange, list):
+            exchanges_to_use = default_exchange
+    else:
+        # Use the command line arguments
+        exchanges_to_use = args.exchanges
+    
+    logging.info(f"Using exchanges: {exchanges_to_use}")
+    
+    # Create signal emitter
+    emitter = SignalEmitter()
+    
+    # Create InfluxDB
+    influx = InfluxDB()
+    
+    # Create data source with exchanges
+    data = Data(influx, emitter, exchanges_to_use)
+    
+    # If --reset-layout flag is set, delete the user layout file
+    if args.reset_layout:
+        user_layout_file = "config/user_layout.ini"
+        if os.path.exists(user_layout_file):
+            logging.info(f"Removing user layout file: {user_layout_file}")
+            os.remove(user_layout_file)
+    
+    # Ensure the config directory exists
+    os.makedirs('config', exist_ok=True)
+    
+    # Create and run the viewport (main application window)
     with Viewport(data=data, config_manager=config_manager) as viewport:
         viewport.start_program()
 

@@ -23,6 +23,18 @@ class Signals(Enum):
     VIEWPORT_RESIZED = auto()
     UPDATED_CANDLES = auto()
 
+    # SEC Data Signals
+    SEC_FILINGS_UPDATE = auto()          # Data: {'ticker': str, 'filings': list[dict]}
+    SEC_INSIDER_TX_UPDATE = auto()       # Data: {'ticker': str, 'transactions': list[dict]}
+    SEC_FINANCIALS_UPDATE = auto()     # Data: {'ticker': str, 'financials': dict} # Structure TBD
+    SEC_DATA_FETCH_ERROR = auto()        # Data: {'ticker': str, 'data_type': str, 'error': str}
+
+    # Dashboard/Widget Management Signals
+    NEW_SEC_FILING_VIEWER_REQUESTED = auto() # Added for SEC Filing Viewer
+
+    # Data Fetching Signals (Example - Adapt as needed)
+    FETCH_OHLCV = auto() # payload: {'exchange': str, 'symbol': str, 'timeframe': str}
+
 
 class SignalEmitter:
     def __init__(self) -> None:
