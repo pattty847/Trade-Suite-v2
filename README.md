@@ -209,6 +209,8 @@ TradeSuite is released under the MIT License. See the [LICENSE](LICENSE) file fo
 
 ## For Developers
 
+![image](https://github.com/user-attachments/assets/157c17e5-b3ec-4433-91ab-fba92765f868)
+
 ### Packaging the Application
 
 #### Option 1: Creating a Standalone Executable
