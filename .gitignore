@@ -10,9 +10,6 @@ project_to_text.py
 docs/TODO.md
 docs/UI_IMPROVEMENTS.md
 
-# demo_sec_viewer.py
-# sec_api.py
-
 # Environment variables (never commit these)
 .env
 
@@ -30,7 +27,7 @@ docs/UI_IMPROVEMENTS.md
 *$py.class
 
 # Data and logs
-data/
+/data/
 logs/
 
 # PyInstaller build files
