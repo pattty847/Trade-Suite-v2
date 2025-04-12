@@ -10,7 +10,18 @@ project_to_text.py
 docs/TODO.md
 docs/UI_IMPROVEMENTS.md
 
+demo_sec_viewer.py
+sec_api.py
+
 # Environment variables (never commit these)
+.env
+
+# Another one
+.env
+
+# Three just to make sure
+.env
+.env
 .env
 
 # Python cache

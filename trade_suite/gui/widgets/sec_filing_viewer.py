@@ -3,7 +3,7 @@ import dearpygui.dearpygui as dpg
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from trade_suite.data.sec_data import SECDataFetcher
+from trade_suite.data.sec_api import SECDataFetcher
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.widgets.base_widget import DockableWidget
@@ -139,10 +139,10 @@ class SECFilingViewer(DockableWidget):
             self._update_status(f"Fetching filings for {ticker}...")
             dpg.delete_item(self.filings_table_tag, children_only=True, slot=1) # Clear table content (keep header)
             # First parameter should be task_id, second parameter is coroutine object
-            task_id = f"sec_filings_{ticker}_{self.instance_id}"
+            task_id = f"sec_filings_{ticker}_{form_type}_{self.instance_id}"
             self.task_manager.start_task(
-                task_id, 
-                self.sec_fetcher.fetch_filings(ticker=ticker)
+                task_id,
+                self.sec_fetcher.get_filings_by_form(ticker=ticker, form_type=form_type)
             )
 
     def _fetch_insider_tx_callback(self, sender: int, app_data: Any, user_data: Any) -> None:
@@ -155,7 +155,7 @@ class SECFilingViewer(DockableWidget):
             task_id = f"sec_insider_tx_{ticker}_{self.instance_id}"
             self.task_manager.start_task(
                 task_id,
-                self.sec_fetcher.fetch_insider_transactions(ticker=ticker)
+                self.sec_fetcher.get_recent_insider_transactions(ticker=ticker)
             )
 
     def _fetch_financials_callback(self, sender: int, app_data: Any, user_data: Any) -> None:
@@ -169,7 +169,7 @@ class SECFilingViewer(DockableWidget):
             task_id = f"sec_financials_{ticker}_{self.instance_id}"
             self.task_manager.start_task(
                 task_id,
-                self.sec_fetcher.fetch_financials(ticker=ticker)
+                self.sec_fetcher.get_financial_summary(ticker=ticker)
             )
 
     # --- Signal Handlers ---
@@ -191,7 +191,7 @@ class SECFilingViewer(DockableWidget):
                 dpg.add_text(filing.get('accession_no', 'N/A'))
                 dpg.add_text(filing.get('form', 'N/A'))
                 dpg.add_text(filing.get('filing_date', 'N/A'))
-                dpg.add_text(filing.get('report_date', 'N/A')) # May not exist
+                dpg.add_text(filing.get('report_date', 'N/A'))
                 # Add a "View" button to open the filing in a browser
                 url = filing.get('url', None)
                 if url:
@@ -211,7 +211,6 @@ class SECFilingViewer(DockableWidget):
         self._update_status(f"Successfully loaded {len(transactions)} insider transactions for {ticker}.")
         dpg.delete_item(self.insider_tx_table_tag, children_only=True, slot=1) # Clear existing rows
 
-        # Keys based on the actual edgartools Form 4 data structure
         for tx in transactions:
             with dpg.table_row(parent=self.insider_tx_table_tag):
                 # Filer name - truncate if too long
@@ -231,24 +230,42 @@ class SECFilingViewer(DockableWidget):
                     pass
                 dpg.add_text(date_str)
                 
-                # Transaction type
-                dpg.add_text(tx.get('type', 'N/A'))
+                # Transaction type with color coding for purchase/sale
+                tx_type = tx.get('type', 'N/A')
+                tx_type_color = None
+                
+                # Color-code different transaction types
+                if tx_type.lower().startswith(('purchase', 'buy', 'acquire')):
+                    tx_type_color = (0, 180, 0)  # Green for purchases
+                elif tx_type.lower().startswith(('sale', 'sell', 'dispose')):
+                    tx_type_color = (180, 0, 0)  # Red for sales
+                
+                if tx_type_color:
+                    dpg.add_text(tx_type, color=tx_type_color)
+                else:
+                    dpg.add_text(tx_type)
                 
                 # Format numerical values properly
                 shares = tx.get('shares', 'N/A')
-                if isinstance(shares, (int, float)):
+                if shares == 'N/A':
+                    dpg.add_text('N/A')
+                elif isinstance(shares, (int, float)):
                     dpg.add_text(f"{shares:,.0f}")  # No decimal places for shares
                 else:
                     dpg.add_text(str(shares))
                 
                 price = tx.get('price', 'N/A')
-                if isinstance(price, (int, float)):
+                if price == 'N/A':
+                    dpg.add_text('N/A')
+                elif isinstance(price, (int, float)):
                     dpg.add_text(f"${price:.2f}")
                 else:
                     dpg.add_text(str(price))
                 
                 value = tx.get('value', 'N/A')
-                if isinstance(value, (int, float)):
+                if value == 'N/A':
+                    dpg.add_text('N/A')
+                elif isinstance(value, (int, float)):
                     dpg.add_text(f"${value:,.2f}")
                 else:
                     dpg.add_text(str(value))
@@ -273,7 +290,7 @@ class SECFilingViewer(DockableWidget):
 
         if financials:
             # Display source filing info
-            dpg.add_text(f"Source: {financials.get('source_form', 'N/A')} ({financials.get('source_filing', 'N/A')})", parent=self.financials_display_tag)
+            dpg.add_text(f"Source: {financials.get('source_form', 'N/A')}", parent=self.financials_display_tag)
             dpg.add_text(f"Period End: {financials.get('period_end', 'N/A')}", parent=self.financials_display_tag)
             
             # Display financial metrics with proper formatting
@@ -284,12 +301,13 @@ class SECFilingViewer(DockableWidget):
             self._add_financial_metric("Total Liabilities", financials.get('liabilities', 'N/A'), self.financials_display_tag)
             self._add_financial_metric("Stockholders' Equity", financials.get('equity', 'N/A'), self.financials_display_tag)
             
-            # Add a link to view the source filing if available
-            source_url = financials.get('source_url', None)
-            if source_url:
-                with dpg.group(horizontal=True, parent=self.financials_display_tag):
-                    dpg.add_text("Source Filing: ")
-                    dpg.add_button(label="View", callback=lambda s, a, u=source_url: self._open_url(u))
+            # Add cash flow data if available
+            if any(key in financials for key in ['operating_cash_flow', 'investing_cash_flow', 'financing_cash_flow']):
+                dpg.add_separator(parent=self.financials_display_tag)
+                dpg.add_text("Cash Flow:", parent=self.financials_display_tag)
+                self._add_financial_metric("Operating Cash Flow", financials.get('operating_cash_flow', 'N/A'), self.financials_display_tag)
+                self._add_financial_metric("Investing Cash Flow", financials.get('investing_cash_flow', 'N/A'), self.financials_display_tag)
+                self._add_financial_metric("Financing Cash Flow", financials.get('financing_cash_flow', 'N/A'), self.financials_display_tag)
         else:
             dpg.add_text("Financial data not available.", parent=self.financials_display_tag)
 
@@ -306,12 +324,32 @@ class SECFilingViewer(DockableWidget):
         """Open a URL in the default browser."""
         import webbrowser
         try:
-            if url and isinstance(url, str) and url.startswith(('http://', 'https://', 'www.')):
+            if not url:
+                logging.error(f"Invalid URL: URL is None or empty")
+                self._update_status(f"Error: URL is missing. Unable to open browser.")
+                return
+                
+            if isinstance(url, str) and url.startswith(('http://', 'https://', 'www.')):
                 logging.debug(f"Opening URL in browser: {url}")
                 webbrowser.open(url)
             else:
-                logging.error(f"Invalid URL format: {url}")
-                self._update_status(f"Error: Invalid URL format. Unable to open browser.")
+                # If URL doesn't have proper scheme, try to add it
+                if isinstance(url, str) and not url.startswith(('http://', 'https://')):
+                    if url.startswith('www.'):
+                        url = 'https://' + url
+                        webbrowser.open(url)
+                        logging.debug(f"Opening modified URL in browser: {url}")
+                    elif url.startswith('/'):
+                        # Relative URL, add SEC domain
+                        url = 'https://www.sec.gov' + url
+                        webbrowser.open(url)
+                        logging.debug(f"Opening SEC URL in browser: {url}")
+                    else:
+                        logging.error(f"Invalid URL format: {url}")
+                        self._update_status(f"Error: Invalid URL format. Unable to open browser.")
+                else:
+                    logging.error(f"Invalid URL format: {url}")
+                    self._update_status(f"Error: Invalid URL format. Unable to open browser.")
         except Exception as e:
             logging.error(f"Error opening URL {url}: {e}")
             self._update_status(f"Error opening URL: {str(e)}")
