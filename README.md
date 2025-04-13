@@ -40,7 +40,8 @@ TradeSuite is a multi-exchange cryptocurrency trading platform built using DearP
 
 - Python 3.10+ 
 - InfluxDB (local or cloud instance)
-- CCXT Pro license (for professional use)
+- Crypto Exchange key (for trading)
+- SEC EDGAR API name and email (for their API requirements)
 
 ### Installation
 
