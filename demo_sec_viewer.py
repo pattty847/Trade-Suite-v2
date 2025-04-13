@@ -8,6 +8,10 @@ import os
 import logging
 import asyncio
 import dearpygui.dearpygui as dpg
+import sys
+
+# Ensure the project root is in the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Configure logging to DEBUG level to capture all details
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,11 +20,25 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 if not os.environ.get("SEC_API_USER_AGENT"):
     os.environ["SEC_API_USER_AGENT"] = "TradeSuite Demo User (demo.user@example.com)"
 
+# Ensure the correct asyncio event loop policy is set for Windows
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # Import our components
-from trade_suite.gui.signals import SignalEmitter
+from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.data.sec_api import SECDataFetcher
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.widgets.sec_filing_viewer import SECFilingViewer
+
+# Create dump directory if it doesn't exist
+DUMP_DIR = "sec_data_dump"
+if not os.path.exists(DUMP_DIR):
+    os.makedirs(DUMP_DIR)
+
+class DemoDataContainer:
+    """Simple container to hold the emitter for the TaskManager in the demo."""
+    def __init__(self, emitter: SignalEmitter):
+        self.emitter = emitter
 
 class DemoApp:
     """Simple demo application for the SEC Filing Viewer."""
@@ -29,8 +47,11 @@ class DemoApp:
         # Set up core components
         self.emitter = SignalEmitter()
         
-        # Pass the emitter directly to TaskManager
-        self.task_manager = TaskManager(self.emitter)
+        # Create a container for the emitter
+        data_container = DemoDataContainer(self.emitter)
+        
+        # Pass the container to TaskManager
+        self.task_manager = TaskManager(data_container)
         # Enable diagnostic data dumping
         self.sec_fetcher = SECDataFetcher()
         

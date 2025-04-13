@@ -174,7 +174,19 @@ class TaskManager:
         :return: The task object
         :doc-author: Trelent
         """
-        task = self.loop.create_task(coro)
+        # Wrap the coroutine to catch exceptions and store results
+        async def wrapped_coro():
+            try:
+                result = await coro
+                return result, None # Return result and no error
+            except asyncio.CancelledError:
+                logging.info(f"Task '{name}' was cancelled.")
+                raise # Re-raise CancelledError so asyncio handles it properly
+            except Exception as e:
+                logging.error(f"Error in task '{name}': {e}", exc_info=True)
+                return None, e # Return no result and the error
+
+        task = self.loop.create_task(wrapped_coro())
         task.add_done_callback(lambda t: self._on_task_complete(name, t))
         return task
 
@@ -444,6 +456,27 @@ class TaskManager:
         """
         if name in self.tasks:
             del self.tasks[name]
+
+        # Emit signals based on task outcome
+        try:
+            result, error = task.result() # Unpack result from wrapped_coro
+            if task.cancelled():
+                # Don't emit signal if cancelled explicitly
+                logging.debug(f"Task '{name}' completion handled (cancelled).")
+            elif error:
+                 # Emit TASK_ERROR signal
+                 self.data.emitter.emit(Signals.TASK_ERROR, task_name=name, error=error)
+                 logging.debug(f"Emitted TASK_ERROR for '{name}'. Error: {error}")
+            else:
+                 # Emit TASK_SUCCESS signal
+                 self.data.emitter.emit(Signals.TASK_SUCCESS, task_name=name, result=result)
+                 logging.debug(f"Emitted TASK_SUCCESS for '{name}'. Result type: {type(result)}")
+        except asyncio.CancelledError:
+            logging.debug(f"Task '{name}' completion handled (cancelled exception caught).")
+        except Exception as e:
+            # Catch potential errors retrieving result (though wrapped_coro should prevent most)
+            logging.error(f"Error processing task completion for '{name}': {e}", exc_info=True)
+            self.data.emitter.emit(Signals.TASK_ERROR, task_name=name, error=e)
 
     def cleanup(self):
         """

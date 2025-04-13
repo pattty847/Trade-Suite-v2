@@ -10,16 +10,26 @@ import glob
 import xml.etree.ElementTree as ET
 import asyncio
 import aiohttp
+import re
 
+from dotenv import load_dotenv
+
+load_dotenv()
 class SECDataFetcher:
     """
-    A comprehensive library for fetching and processing data from SEC EDGAR APIs.
+    A comprehensive asynchronous library for fetching and processing data from SEC EDGAR APIs.
     
-    Features:
-    - Fetch data for multiple SEC form types (Form 4, 10-K, 10-Q, etc.)
-    - Local caching of results to reduce API calls
-    - Conversion to pandas DataFrames for easy analysis
-    - Rate limiting to comply with SEC API guidelines
+    Handles interactions with various SEC endpoints, including submissions, company facts,
+    and fetching specific filing documents. Implements caching, rate limiting,
+    and parsing capabilities (e.g., for Form 4 XML).
+    
+    Attributes:
+        user_agent (str): The User-Agent string used for SEC requests.
+        cache_dir (str): The directory path for storing cached API responses.
+        headers (Dict[str, str]): Default headers for API requests.
+        request_interval (float): Minimum time interval (seconds) between requests.
+        last_request_time (float): Timestamp of the last request made.
+        _session (Optional[aiohttp.ClientSession]): The asynchronous HTTP session.
     """
     
     # Base endpoints for SEC EDGAR APIs
@@ -95,11 +105,11 @@ class SECDataFetcher:
         Initialize the SECDataFetcher.
         
         Args:
-            user_agent (str): User-Agent string for SEC API requests.
-                             If None, will try to read from environment variable SEC_API_USER_AGENT
-                             Format should be: "name (email)" e.g., "Market Analysis Tool (user@example.com)"
-            cache_dir (str): Directory for storing cached data
-            rate_limit_sleep (float): Seconds to wait between API requests
+            user_agent (str, optional): User-Agent string for SEC API requests.
+                             Format: "Sample Company Name AdminContact@example.com".
+                             Defaults to None, attempts to read from 'SEC_API_USER_AGENT' env var.
+            cache_dir (str, optional): Directory for storing cached data. Defaults to "data/edgar".
+            rate_limit_sleep (float, optional): Seconds to wait between API requests. Defaults to 0.1.
         """
         # Set up user agent
         self.user_agent = user_agent or os.environ.get('SEC_API_USER_AGENT')
@@ -132,7 +142,7 @@ class SECDataFetcher:
         self._session: Optional[aiohttp.ClientSession] = None # Initialize later or pass in
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create the aiohttp session."""
+        """Lazily initializes and returns the aiohttp ClientSession."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
         return self._session
@@ -146,7 +156,7 @@ class SECDataFetcher:
         os.makedirs(os.path.join(self.cache_dir, "reports"), exist_ok=True)
         os.makedirs(os.path.join(self.cache_dir, "facts"), exist_ok=True)
     
-    def _test_api_access(self) -> bool:
+    async def _test_api_access(self) -> bool:
         """Test if the SEC API is accessible with the provided user agent."""
         if not self.user_agent:
             logging.error("Cannot test API access: No User-Agent provided")
@@ -157,17 +167,13 @@ class SECDataFetcher:
             test_url = self.SUBMISSIONS_ENDPOINT.format(cik="0000320193")
             logging.info(f"Testing SEC API connection to: {test_url}")
             
-            response = self._make_request(test_url)
+            response = await self._make_request(test_url)
             
-            if response and response.status_code == 200:
+            if response:
                 logging.info("SEC API access test successful")
                 return True
             else:
-                status = response.status_code if response else "No response"
-                reason = response.reason if response else "Connection failed"
-                logging.error(f"SEC API access test failed: {status} {reason}")
-                if response and response.text:
-                    logging.error(f"Error details: {response.text[:500]}")
+                logging.error(f"SEC API access test failed: No response")
                 return False
                 
         except Exception as e:
@@ -176,16 +182,23 @@ class SECDataFetcher:
     
     async def _make_request(self, url: str, max_retries: int = 3, headers: Optional[Dict] = None, is_json: bool = True) -> Optional[Union[Dict, str]]:
         """
-        Make a rate-limited request to the SEC API.
+        Internal helper to make a rate-limited, retrying asynchronous HTTP GET request.
+        
+        Handles rate limiting (429 errors) with exponential backoff and basic error handling.
+        Parses JSON response by default.
         
         Args:
-            url (str): URL to request
-            max_retries (int): Maximum number of retries for failed requests
-            headers (Optional[Dict]): Optional headers dictionary to override self.headers
-            is_json (bool): Whether to expect and parse JSON response. If False, returns text.
+            url (str): The URL to request.
+            max_retries (int, optional): Maximum retry attempts. Defaults to 3.
+            headers (Optional[Dict], optional): Headers to use for the request, overriding default headers.
+                                              Defaults to None (uses self.headers).
+            is_json (bool, optional): If True, attempts to parse the response as JSON.
+                                     If False, returns the raw response text.
+                                     Defaults to True.
             
         Returns:
-            Optional[Union[Dict, str]]: Parsed JSON dictionary or response text, or None if all retries fail.
+            Optional[Union[Dict, str]]: The parsed JSON dictionary or raw text content,
+                                       or None if the request fails after all retries.
         """
         # Implement simple rate limiting
         current_time = time.time()
@@ -226,17 +239,22 @@ class SECDataFetcher:
 
                     # Process successful response
                     if is_json:
+                        # First get the text content
+                        text_content = await response.text()
+                        
+                        # Try to parse as JSON regardless of content type
+                        # SEC API often returns JSON with text/html content type
                         try:
-                            return await response.json()
+                            # Check if it starts with { or [ (likely JSON)
+                            if text_content.strip().startswith(('{', '[')):
+                                return json.loads(text_content)
+                            else:
+                                logging.warning(f"Content doesn't appear to be JSON: {text_content[:100]}...")
+                                return text_content
                         except json.JSONDecodeError as json_err:
-                             logging.error(f"JSON decode error for {url}: {json_err}")
-                             # Optionally log the response text that failed
-                             try:
-                                 text_content = await response.text()
-                                 logging.error(f"Response text: {text_content[:500]}")
-                             except Exception:
-                                 logging.error("Could not get response text after JSON error.")
-                             return None # Or raise an error
+                            logging.error(f"JSON decode error for {url}: {json_err}")
+                            logging.warning(f"Returning raw text instead (first 100 chars): {text_content[:100]}...")
+                            return text_content
                     else:
                         return await response.text() # Return raw text
 
@@ -252,25 +270,40 @@ class SECDataFetcher:
         
         return None
     
-    def get_cik_for_ticker(self, ticker: str) -> Optional[str]:
+    async def get_cik_for_ticker(self, ticker: str) -> Optional[str]:
         """
-        Get the CIK (Central Index Key) for a ticker symbol.
+        Retrieves the 10-digit CIK (Central Index Key) for a given stock ticker symbol.
+        
+        First attempts to load the CIK from a local cache (`ticker_cik_map.json`).
+        If not found in cache, fetches the official SEC `company_tickers.json` mapping,
+        updates the cache, and then attempts to retrieve the CIK again.
         
         Args:
-            ticker (str): Stock ticker symbol
+            ticker (str): The stock ticker symbol (case-insensitive).
             
         Returns:
-            Optional[str]: 10-digit CIK with leading zeros, or None if not found
+            Optional[str]: The 10-digit CIK string with leading zeros if found, otherwise None.
         """
         ticker = ticker.upper()
         
-        # First check ticker-to-CIK mapping file
+        # 1. Check local cache file
         cik = self._load_cik_from_cache(ticker)
         if cik:
             return cik
+        
+        # 2. If not in cache, fetch the official map, cache it, and retry
+        logging.info(f"CIK for {ticker} not found in cache. Fetching official map...")
+        success = await self._fetch_and_cache_cik_map()
+        if success:
+            cik = self._load_cik_from_cache(ticker) # Retry loading from cache
+            if cik:
+                return cik
+        
+        logging.error(f"Could not find or fetch CIK for {ticker}.")
+        return None
     
     def _load_cik_from_cache(self, ticker: str) -> Optional[str]:
-        """Load CIK from cache file for a ticker."""
+        """Loads a CIK from the `ticker_cik_map.json` cache file."""
         cache_file = os.path.join(self.cache_dir, "ticker_cik_map.json")
         
         if not os.path.exists(cache_file):
@@ -285,7 +318,7 @@ class SECDataFetcher:
             return None
     
     def _save_cik_to_cache(self, ticker: str, cik: str) -> None:
-        """Save a ticker to CIK mapping in the cache file."""
+        """Saves or updates a ticker-CIK mapping in the `ticker_cik_map.json` cache file."""
         cache_file = os.path.join(self.cache_dir, "ticker_cik_map.json")
         
         # Read existing mappings
@@ -307,16 +340,60 @@ class SECDataFetcher:
         except Exception as e:
             logging.error(f"Error saving ticker-CIK mapping to cache: {str(e)}")
     
-    def get_company_info(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
+    async def _fetch_and_cache_cik_map(self) -> bool:
+        """Fetches the official Ticker-CIK map from SEC and caches it."""
+        url = "https://www.sec.gov/files/company_tickers.json"
+        logging.info(f"Fetching Ticker-CIK map from {url}")
+        try:
+            # SEC serves this as application/json, use standard headers
+            # Need to adjust host in headers if necessary
+            temp_headers = self.headers.copy()
+            temp_headers['Host'] = 'www.sec.gov' # Host for this specific URL
+
+            sec_map_data = await self._make_request(url, headers=temp_headers, is_json=True)
+            if not sec_map_data:
+                logging.error(f"Failed to fetch or parse Ticker-CIK map from {url}")
+                return False
+
+            # Process the map: { "0": { "cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc." }, ... }
+            ticker_to_cik = {}
+            for _index, company_info in sec_map_data.items():
+                ticker = company_info.get('ticker')
+                cik_int = company_info.get('cik_str')
+                if ticker and cik_int:
+                    # Format CIK to 10 digits with leading zeros
+                    cik_str = str(cik_int).zfill(10)
+                    ticker_to_cik[ticker.upper()] = cik_str
+
+            # Save the processed map
+            cache_file = os.path.join(self.cache_dir, "ticker_cik_map.json")
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump(ticker_to_cik, f, indent=2)
+                logging.info(f"Successfully fetched and cached Ticker-CIK map to {cache_file}")
+                return True
+            except IOError as e:
+                logging.error(f"Error saving fetched Ticker-CIK map to cache: {str(e)}")
+                return False
+
+        except Exception as e:
+            logging.error(f"Error during Ticker-CIK map fetch/processing: {e}", exc_info=True)
+            return False
+    
+    async def get_company_info(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
         """
-        Get company information using the submissions API.
+        Fetches basic company information using the SEC submissions endpoint.
+        
+        This data includes name, CIK, SIC description, address, etc.
+        Uses caching by default.
         
         Args:
-            ticker (str): Stock ticker symbol
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): The stock ticker symbol.
+            use_cache (bool, optional): Whether to use cached data if available and recent.
+                                       Defaults to True.
             
         Returns:
-            Optional[Dict]: Company information or None if error
+            Optional[Dict]: A dictionary containing company information, or None if an error occurs.
         """
         ticker = ticker.upper()
         
@@ -327,7 +404,7 @@ class SECDataFetcher:
                 return cache_data
         
         # Convert ticker to CIK
-        cik = self.get_cik_for_ticker(ticker)
+        cik = await self.get_cik_for_ticker(ticker)
         if not cik:
             logging.error(f"Cannot get company info: No CIK found for {ticker}")
             return None
@@ -336,24 +413,21 @@ class SECDataFetcher:
         submissions_url = self.SUBMISSIONS_ENDPOINT.format(cik=cik)
         
         try:
-            response = self._make_request(submissions_url)
-            if not response or response.status_code != 200:
-                logging.error(f"Failed to get company info for {ticker} (CIK: {cik}): {response.status_code if response else 'No response'}")
+            response = await self._make_request(submissions_url, is_json=True)
+            if response is None:
+                logging.error(f"Failed to get company submission data for info lookup for {ticker} (CIK: {cik})")
                 return None
-                
-            # Parse company data
-            company_data = response.json()
             
             # Extract relevant company info
             company_info = {
                 'ticker': ticker,
                 'cik': cik,
-                'name': company_data.get('name'),
-                'sic': company_data.get('sic'),
-                'sic_description': company_data.get('sicDescription'),
-                'address': company_data.get('addresses', {}).get('mailing'),
-                'phone': company_data.get('phone'),
-                'exchange': company_data.get('exchanges'),
+                'name': response.get('name'),
+                'sic': response.get('sic'),
+                'sic_description': response.get('sicDescription'),
+                'address': response.get('addresses', {}).get('mailing'),
+                'phone': response.get('phone'),
+                'exchange': response.get('exchanges'),
             }
             
             # Cache the company info data
@@ -366,7 +440,7 @@ class SECDataFetcher:
             return None
     
     def _load_company_info_from_cache(self, ticker: str) -> Optional[Dict]:
-        """Load company info from cache file for a ticker."""
+        """Loads company info from the most recent cache file for the ticker."""
         # Find the most recent cache file for this ticker
         cache_pattern = os.path.join(self.cache_dir, "submissions", f"{ticker.upper()}_info_*.json")
         cache_files = sorted(glob.glob(cache_pattern), key=os.path.getmtime, reverse=True)
@@ -394,16 +468,20 @@ class SECDataFetcher:
         except Exception as e:
             logging.error(f"Error saving company info to cache: {str(e)}")
     
-    def get_company_submissions(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
+    async def get_company_submissions(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
         """
-        Get all submissions for a company using the submissions API.
+        Fetches the complete submissions data for a company from the SEC API.
+        
+        The submissions data contains details about all filings, including recent ones.
+        Uses caching by default (checks for cache file from the current day).
         
         Args:
-            ticker (str): Stock ticker symbol
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): The stock ticker symbol.
+            use_cache (bool, optional): Whether to use cached data if available and recent.
+                                       Defaults to True.
             
         Returns:
-            Optional[Dict]: Submissions data or None if error
+            Optional[Dict]: The complete submissions JSON data as a dictionary, or None if an error occurs.
         """
         ticker = ticker.upper()
         
@@ -414,7 +492,7 @@ class SECDataFetcher:
                 return cache_data
         
         # Convert ticker to CIK
-        cik = self.get_cik_for_ticker(ticker)
+        cik = await self.get_cik_for_ticker(ticker)
         if not cik:
             logging.error(f"Cannot get submissions: No CIK found for {ticker}")
             return None
@@ -423,13 +501,13 @@ class SECDataFetcher:
         submissions_url = self.SUBMISSIONS_ENDPOINT.format(cik=cik)
         
         try:
-            response = self._make_request(submissions_url)
-            if not response or response.status_code != 200:
-                logging.error(f"Failed to get submissions for {ticker} (CIK: {cik}): {response.status_code if response else 'No response'}")
+            response = await self._make_request(submissions_url, is_json=True)
+            if response is None:
+                logging.error(f"Failed to get submissions for {ticker} (CIK: {cik})")
                 return None
-                
+            
             # Parse submissions data
-            submissions_data = response.json()
+            submissions_data = response
             
             # Cache the submissions data
             self._save_submissions_to_cache(ticker, cik, submissions_data)
@@ -480,16 +558,24 @@ class SECDataFetcher:
     async def get_filings_by_form(self, ticker: str, form_type: str, days_back: int = 90, 
                             use_cache: bool = True) -> List[Dict]:
         """
-        Fetch filings of a specific form type for a ticker.
+        Fetches a list of filings of a specific form type for a ticker within a given timeframe.
+        
+        Retrieves the company's submissions data first (using cache if enabled)
+        and then filters the recent filings based on the specified `form_type` and `days_back`.
+        Formats the results into a list of dictionaries suitable for display.
+        Caches the filtered results for the specific form type and day.
         
         Args:
-            ticker (str): Stock ticker symbol
-            form_type (str): SEC form type (e.g. "4" for Form 4, "10-K", etc.)
-            days_back (int): Limit results to filings within this many days
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            form_type (str): SEC form type (e.g., "4", "8-K", "10-K").
+            days_back (int, optional): Number of past days to include filings from. Defaults to 90.
+            use_cache (bool, optional): Whether to use cached submissions and filtered filings data.
+                                       Defaults to True.
             
         Returns:
-            List[Dict]: List of filing data records
+            List[Dict]: A list of dictionaries, each representing a filing. Includes keys like
+                        'accession_no', 'filing_date', 'form', 'report_date', 'url',
+                        'primary_document'. Returns an empty list if no filings are found or an error occurs.
         """
         ticker = ticker.upper()
         
@@ -512,7 +598,7 @@ class SECDataFetcher:
         if not cik:
             logging.error(f"CIK not found in submissions data for {ticker}. Cannot construct URLs.")
             # Optionally, try getting CIK again, but submissions should ideally contain it
-            cik = self.get_cik_for_ticker(ticker)
+            cik = await self.get_cik_for_ticker(ticker)
             if not cik:
                  logging.error(f"Failed to get CIK for {ticker} separately. Returning empty list.")
                  return []
@@ -534,9 +620,10 @@ class SECDataFetcher:
             filing_date_list = recent_filings.get('filingDate', [])
             accession_number_list = recent_filings.get('accessionNumber', [])
             report_date_list = recent_filings.get('reportDate', []) # Extract reportDate
-            # primary_document_list = recent_filings.get('primaryDocument', []) # Not needed for target format
+            primary_document_list = recent_filings.get('primaryDocument', []) # Extract primaryDocument
 
             # Ensure all lists have the same length for safe iteration
+            # Note: primaryDocument list might be shorter, handle index errors or check length
             min_len = min(len(form_list), len(filing_date_list), len(accession_number_list), len(report_date_list))
 
             # Filter for specified form type filings within the date range
@@ -544,7 +631,9 @@ class SECDataFetcher:
                 form = form_list[i]
                 filing_date = filing_date_list[i]
                 accession_no = accession_number_list[i]
-                report_date = report_date_list[i] if i < len(report_date_list) else None # Handle if reportDate list is shorter
+                report_date = report_date_list[i] # No need to check index, already limited by min_len
+                # Get primary document, default to None if list is shorter or index out of bounds
+                primary_doc = primary_document_list[i] if i < len(primary_document_list) else None
 
                 if form == form_type and filing_date >= cutoff_date:
                     # Clean accession number (remove dashes)
@@ -558,6 +647,7 @@ class SECDataFetcher:
                         'form': form,
                         'report_date': report_date, # Include report_date
                         'url': filing_url,          # Include constructed URL
+                        'primary_document': primary_doc, # Include primary document filename
                         # Keep ticker for potential caching key consistency if needed, though not required by UI
                         # 'ticker': ticker
                     }
@@ -580,7 +670,7 @@ class SECDataFetcher:
             return []
 
     def _load_filings_from_cache(self, ticker: str, form_type: str) -> List[Dict]:
-        """Load filings from cache file for a ticker and form type."""
+        """Loads cached filtered filings for a specific ticker and form type from today."""
         # Find the most recent cache file for this ticker and form type
         cache_pattern = os.path.join(self.cache_dir, "forms", f"{ticker.upper()}_{form_type}_*.json")
         cache_files = sorted(glob.glob(cache_pattern), key=os.path.getmtime, reverse=True)
@@ -622,76 +712,86 @@ class SECDataFetcher:
     async def fetch_insider_filings(self, ticker: str, days_back: int = 90, 
                              use_cache: bool = True) -> List[Dict]:
         """
-        Fetch insider trading filings (Form 4) for a ticker.
+        Convenience method to fetch Form 4 (insider trading) filings.
+        
+        Calls `get_filings_by_form` with `form_type="4"`.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Limit results to filings within this many days
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            days_back (int, optional): Number of past days to include filings from. Defaults to 90.
+            use_cache (bool, optional): Whether to use cached data. Defaults to True.
             
         Returns:
-            List[Dict]: List of insider filings
+            List[Dict]: List of Form 4 filing data dictionaries.
         """
         return await self.get_filings_by_form(ticker, "4", days_back, use_cache)
     
     async def fetch_annual_reports(self, ticker: str, days_back: int = 365, 
                             use_cache: bool = True) -> List[Dict]:
         """
-        Fetch annual reports (10-K) for a ticker.
+        Convenience method to fetch Form 10-K (annual report) filings.
+        
+        Calls `get_filings_by_form` with `form_type="10-K"`.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Limit results to filings within this many days
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            days_back (int, optional): Number of past days to include filings from. Defaults to 365.
+            use_cache (bool, optional): Whether to use cached data. Defaults to True.
             
         Returns:
-            List[Dict]: List of 10-K filings
+            List[Dict]: List of 10-K filing data dictionaries.
         """
         return await self.get_filings_by_form(ticker, "10-K", days_back, use_cache)
     
     async def fetch_quarterly_reports(self, ticker: str, days_back: int = 365, 
                                use_cache: bool = True) -> List[Dict]:
         """
-        Fetch quarterly reports (10-Q) for a ticker.
+        Convenience method to fetch Form 10-Q (quarterly report) filings.
+        
+        Calls `get_filings_by_form` with `form_type="10-Q"`.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Limit results to filings within this many days
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            days_back (int, optional): Number of past days to include filings from. Defaults to 365.
+            use_cache (bool, optional): Whether to use cached data. Defaults to True.
             
         Returns:
-            List[Dict]: List of 10-Q filings
+            List[Dict]: List of 10-Q filing data dictionaries.
         """
         return await self.get_filings_by_form(ticker, "10-Q", days_back, use_cache)
     
     async def fetch_current_reports(self, ticker: str, days_back: int = 90, 
                              use_cache: bool = True) -> List[Dict]:
         """
-        Fetch current reports (8-K) for a ticker.
+        Convenience method to fetch Form 8-K (current report) filings.
+        
+        Calls `get_filings_by_form` with `form_type="8-K"`.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Limit results to filings within this many days
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            days_back (int, optional): Number of past days to include filings from. Defaults to 90.
+            use_cache (bool, optional): Whether to use cached data. Defaults to True.
             
         Returns:
-            List[Dict]: List of 8-K filings
+            List[Dict]: List of 8-K filing data dictionaries.
         """
         return await self.get_filings_by_form(ticker, "8-K", days_back, use_cache)
     
     async def fetch_form_direct(self, ticker: str, form_type: str, count: int = 1) -> List[Dict]:
         """
-        Directly fetch the most recent forms of a specific type for a company.
+        DEPRECATED/Potentially Unreliable: Directly fetch metadata for the most recent forms of a specific type.
+        Relies on synchronous requests within an async method, which is problematic.
+        Prefer `get_filings_by_form`.
         
         Args:
-            ticker (str): Stock ticker symbol
-            form_type (str): Form type (e.g., "10-K", "10-Q", "4")
-            count (int): Number of most recent forms to fetch
+            ticker (str): Stock ticker symbol.
+            form_type (str): Form type (e.g., "10-K", "10-Q", "4").
+            count (int): Number of most recent forms to fetch.
             
         Returns:
-            List[Dict]: List of form data including accession numbers and filing dates
+            List[Dict]: List of form data including accession numbers and filing dates.
         """
-        cik = self.get_cik_for_ticker(ticker)
+        cik = await self.get_cik_for_ticker(ticker)
         if not cik:
             logging.error(f"Cannot fetch forms: No CIK found for {ticker}")
             return []
@@ -794,7 +894,7 @@ class SECDataFetcher:
             logging.info(f"Using headers for document download: {temp_headers}") # Log headers
             
             # Use the modified headers for this specific request
-            response = self._make_request(url, headers=temp_headers)
+            response = await self._make_request(url, is_json=False, headers=temp_headers)
             
             if not response:
                 logging.error(f"Failed to download document {document_name} (No response from server)")
@@ -817,75 +917,201 @@ class SECDataFetcher:
             logging.error(f"URL attempted: {url}")
             return None
 
-    async def fetch_filing_document(self, accession_no: str, primary_doc: str = None) -> Optional[str]:
+    async def fetch_filing_document(self, accession_no: str, primary_doc: str = None, ticker: str = None) -> Optional[str]:
         """
-        Fetches the primary document text for a specific filing by accession number.
+        Fetches the textual content of a specific document within an SEC filing.
 
-        If the `primary_doc` filename is provided, it downloads that specific file directly.
-        If `primary_doc` is NOT provided, this method first fetches the filing's
-        `index.json` to automatically determine the primary document filename,
-        then downloads it. This incurs an extra API call compared to
-        `download_form_document`.
+        Determines the correct CIK and document URL. If `primary_doc` is not provided,
+        it attempts to find the most likely primary document (HTML or XML) by first checking
+        `index.json` and falling back to parsing `index.htm`.
 
         Args:
-            accession_no (str): Accession number for the filing (dashes optional).
-            primary_doc (str, optional): Primary document filename. If None, it will be
-                                         looked up via the filing index. Defaults to None.
+            accession_no (str): The SEC filing accession number (e.g., '0001193125-23-017489').
+                                Dashes are optional.
+            primary_doc (str, optional): The specific filename of the document within the filing
+                                         (e.g., 'd451917d8k.htm'). If None, the method attempts
+                                         to automatically determine the primary document.
+                                         Defaults to None.
+            ticker (str, optional): The stock ticker symbol. Used as a hint to find the CIK more reliably.
+                                    Defaults to None.
 
         Returns:
-            Optional[str]: Document text (usually HTML or XML) or None if error or
-                           primary document cannot be found.
+            Optional[str]: The textual content (HTML, XML, or plain text) of the specified or
+                           determined primary document, or None if an error occurs or the document
+                           cannot be found/retrieved.
         """
         # Format accession number for URL (remove dashes)
         accession_no_clean = accession_no.replace('-', '')
         
-        # If primary document not provided, fetch the index first to find it
+        # Get CIK (either from ticker or extracted from accession number)
+        cik = None
+        
+        # 1. Try to get CIK from ticker (most reliable)
+        if ticker:
+            try:
+                cik = await self.get_cik_for_ticker(ticker)
+                if cik:
+                    # Strip leading zeros for URL
+                    cik = cik.lstrip('0')
+                    logging.debug(f"Using CIK {cik} from ticker {ticker}")
+            except Exception as e:
+                logging.error(f"Error looking up CIK for ticker {ticker}: {e}")
+        
+        # 2. Try to extract from accession number format
+        if not cik:
+            parts = accession_no.split('-')
+            if len(parts) == 3:
+                potential_cik_part = parts[0]
+                # Remove leading zeros to get actual CIK number
+                cik = potential_cik_part.lstrip('0')
+                logging.debug(f"Extracted potential CIK {cik} from accession {accession_no}")
+                
+        # If we still don't have a CIK, we can't continue
+        if not cik:
+            logging.error(f"Could not determine CIK for accession {accession_no}")
+            return None
+            
+        logging.info(f"Using CIK {cik} for accessing accession {accession_no}")
+        
+        # If primary_doc isn't provided, try to find it
         if not primary_doc:
-            index_url = f"https://www.sec.gov/Archives/edgar/data/{accession_no_clean[0:10]}/{accession_no_clean}/index.json"
+            # First try the index.json approach (SEC should return JSON with content type text/html)
+            index_json_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_no_clean}/index.json"
+            logging.info(f"Looking for primary document via index.json: {index_json_url}")
             
             try:
-                response = self._make_request(index_url)
-                if not response or response.status_code != 200:
-                    logging.error(f"Failed to get index for accession number {accession_no}")
-                    return None
+                # Prepare headers for www.sec.gov
+                temp_headers = self.headers.copy()
+                temp_headers['Host'] = 'www.sec.gov'
                 
-                # Extract primary document from index
-                index_data = response.json()
-                primary_doc = index_data.get('primaryDocument', '')
+                # Get the index data
+                index_data = await self._make_request(index_json_url, headers=temp_headers)
                 
-                if not primary_doc:
-                    logging.error(f"No primary document found for accession number {accession_no}")
-                    return None
+                # Check if we got valid JSON with a directory structure
+                if isinstance(index_data, dict) and 'directory' in index_data:
+                    # Look for XML or HTML files in the directory
+                    potential_docs = []
                     
+                    for item in index_data.get('directory', {}).get('item', []):
+                        name = item.get('name', '')
+                        # Look for likely primary document formats
+                        if name.endswith(('.xml', '.htm', '.html')) and not name.endswith('-index.html'):
+                            if name.startswith(('form4', 'xslF345X', 'wk-form')):
+                                # Form 4 patterns - prioritize
+                                potential_docs.insert(0, name)
+                            elif any(x in name.lower() for x in ['-10k', '-10q', '-8k']):
+                                # Annual/quarterly report patterns
+                                potential_docs.insert(0, name)
+                            else:
+                                # Other possibly relevant files
+                                potential_docs.append(name)
+                    
+                    if potential_docs:
+                        primary_doc = potential_docs[0]
+                        logging.info(f"Found primary document from index.json: {primary_doc}")
+                    else:
+                        logging.warning(f"No likely primary documents found in index.json")
+                else:
+                    # We didn't get valid JSON directory data
+                    logging.warning(f"index.json didn't return expected directory structure")
+            
             except Exception as e:
-                logging.error(f"Error getting index for accession number {accession_no}: {str(e)}")
+                logging.error(f"Error parsing index.json for {accession_no}: {str(e)}")
+            
+            # If we still don't have a primary_doc, fall back to HTML index page
+            if not primary_doc:
+                index_html_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_no_clean}/index.htm"
+                logging.info(f"Falling back to HTML index page: {index_html_url}")
+                
+                try:
+                    # Use same headers as above
+                    index_html = await self._make_request(index_html_url, headers=temp_headers, is_json=False)
+                    if not index_html:
+                        logging.error(f"Failed to get HTML index page for accession number {accession_no}")
+                        return None
+                    
+                    # Use regex pattern matching to find document links
+                    # Common patterns for main documents
+                    patterns = [
+                        # 10-K/10-Q patterns
+                        r'(\w+-\d+\.htm)',
+                        r'(10-[kq]\.htm)',
+                        # Form 4 patterns
+                        r'(form4\.xml)',
+                        r'(xslF345X\d+\.xml)',
+                        r'(wk-form4_\d+\.xml)',
+                        # Generic patterns
+                        r'(primary_doc\.\w+)',
+                        r'_(\w+\.htm)'
+                    ]
+                    
+                    # Try each pattern
+                    possible_docs = []
+                    for pattern in patterns:
+                        matches = re.findall(pattern, index_html.lower())
+                        if matches:
+                            for match in matches:
+                                if match not in possible_docs:
+                                    possible_docs.append(match)
+                    
+                    # If we found possible documents, use the first one
+                    if possible_docs:
+                        primary_doc = possible_docs[0]
+                        logging.info(f"Found potential primary document from HTML: {primary_doc}")
+                    else:
+                        # If no pattern match, look for any links with .htm or .xml extension
+                        htm_links = re.findall(r'href=[\'"]?([^\'" >]+\.htm)', index_html) 
+                        xml_links = re.findall(r'href=[\'"]?([^\'" >]+\.xml)', index_html)
+                        
+                        all_links = htm_links + xml_links
+                        if all_links:
+                            # Filter out links that don't seem like document names
+                            filtered_links = [link for link in all_links if '?' not in link and '//' not in link]
+                            if filtered_links:
+                                primary_doc = filtered_links[0]
+                                logging.info(f"Found primary document from HTML links: {primary_doc}")
+                
+                except Exception as e:
+                    logging.error(f"Error processing HTML index for {accession_no}: {str(e)}")
+                
+            # If we still don't have a primary document, we can't continue
+            if not primary_doc:
+                logging.error(f"Could not determine primary document for {accession_no}")
                 return None
         
-        # Now fetch the actual document
-        document_url = f"https://www.sec.gov/Archives/edgar/data/{accession_no_clean[0:10]}/{accession_no_clean}/{primary_doc}"
+        # Now that we have both CIK and primary_doc, fetch the actual document
+        document_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_no_clean}/{primary_doc}"
+        logging.info(f"Fetching document: {document_url}")
         
         try:
-            response = self._make_request(document_url)
-            if not response or response.status_code != 200:
-                logging.error(f"Failed to get document for accession number {accession_no}: {response.status_code if response else 'No response'}")
+            # Prepare headers for www.sec.gov
+            temp_headers = self.headers.copy()
+            temp_headers['Host'] = 'www.sec.gov'
+
+            # Get the document content (text, not JSON)
+            document_content = await self._make_request(document_url, is_json=False, headers=temp_headers)
+            if not document_content:
+                logging.error(f"Failed to get document for accession number {accession_no} (no response)")
                 return None
                 
-            return response.text
+            return document_content
             
         except Exception as e:
             logging.error(f"Error fetching document for accession number {accession_no}: {str(e)}")
             return None
-        
+    
     async def process_insider_filings(self, ticker: str, days_back: int = 90) -> pd.DataFrame:
         """
-        Process Form 4 filings into a structured DataFrame of individual transactions.
+        DEPRECATED/Placeholder: Processes Form 4 filings metadata into a basic DataFrame.
+        Does NOT currently fetch or parse the actual transaction details from the forms.
+        Prefer `get_recent_insider_transactions` for actual transaction data.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Number of days back to analyze filings
+            ticker (str): Stock ticker symbol.
+            days_back (int): Number of days back to analyze filings.
             
         Returns:
-            pd.DataFrame: DataFrame of processed insider transactions
+            pd.DataFrame: DataFrame containing basic metadata of Form 4 filings.
         """
         # Get Form 4 filings
         filings = await self.fetch_insider_filings(ticker, days_back)
@@ -968,15 +1194,17 @@ class SECDataFetcher:
     async def summarize_insider_activity(self, ticker: str, days_back: int = 90, 
                                 use_cache: bool = True) -> Dict:
         """
-        Create a summary of insider trading activity for a ticker.
+        DEPRECATED/Placeholder: Creates a summary based only on the *count* of Form 4 filings.
+        Does NOT analyze actual transaction data (buy/sell counts or values).
+        Prefer `analyze_insider_transactions` for meaningful analysis.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Number of days back to analyze
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            days_back (int): Number of days back to analyze.
+            use_cache (bool): Whether to use cached data if available.
             
         Returns:
-            Dict: Summary of insider trading activity
+            Dict: Summary containing total filings count and basic metadata.
         """
         ticker = ticker.upper()
         
@@ -1017,15 +1245,16 @@ class SECDataFetcher:
     async def generate_insider_report(self, ticker: str, days_back: int = 90, 
                              use_cache: bool = True) -> str:
         """
-        Generate a formatted text report of insider activity for a ticker.
+        DEPRECATED/Placeholder: Generates a text report based on filing counts, not actual transactions.
+        Uses deprecated `summarize_insider_activity`.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Number of days back to analyze
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            days_back (int): Number of days back to analyze.
+            use_cache (bool): Whether to use cached data if available.
             
         Returns:
-            str: Formatted text report
+            str: Formatted text report (based on filing counts only).
         """
         ticker = ticker.upper()
         
@@ -1075,26 +1304,50 @@ class SECDataFetcher:
         
         return "\n".join(lines)
 
-    async def download_form_xml(self, accession_no: str) -> Optional[str]:
+    async def download_form_xml(self, accession_no: str, ticker: str = None) -> Optional[str]:
         """
-        Download and return the XML file for a Form 4 filing.
+        Downloads the primary XML document (typically for Form 4) for a given filing.
+
+        It first fetches the filing's `index.json` to identify the correct XML filename
+        (looking for patterns like `form4.xml`, `wk-form4_*.xml`, etc.) and then downloads that file.
         
         Args:
-            accession_no (str): Accession number for the filing
-            
+            accession_no (str): The SEC filing accession number (dashes optional).
+            ticker (str, optional): The stock ticker symbol of the *issuer*. Used to find the correct CIK
+                                    for the URL path. Defaults to None (will attempt CIK from accession no).
+
         Returns:
-            Optional[str]: XML content or None if error
+            Optional[str]: The content of the XML file as a string, or None if not found or error.
         """
         # Format accession number for URL (remove dashes)
         accession_no_clean = accession_no.replace('-', '')
-        # Get CIK from the accession number (first 10 digits, no leading zeros needed for URL path here)
-        cik_part = accession_no_clean[0:10]
-        if not cik_part.isdigit():
-            logging.error(f"Could not extract valid CIK part from accession number: {accession_no}")
-            return None
+        cik_for_url = None
+
+        # 1. Try to get CIK from ticker (most reliable)
+        if ticker:
+            try:
+                cik_lookup = await self.get_cik_for_ticker(ticker)
+                if cik_lookup:
+                    cik_for_url = cik_lookup.lstrip('0') # Use CIK stripped of leading zeros for path
+                    logging.debug(f"Using CIK {cik_for_url} from ticker {ticker} for XML download URL.")
+            except Exception as e:
+                logging.warning(f"Error looking up CIK for ticker {ticker} during XML download: {e}")
+
+        # 2. Fallback: Try to extract CIK-like part from accession number
+        if not cik_for_url:
+            cik_part_from_acc = accession_no_clean[0:10]
+            if cik_part_from_acc.isdigit():
+                cik_for_url = cik_part_from_acc # Keep leading zeros if extracted this way? SEC inconsistent.
+                # Let's try stripping zeros here too for consistency
+                cik_for_url = cik_for_url.lstrip('0')
+                logging.warning(f"Could not get CIK from ticker {ticker}. Falling back to using extracted part {cik_for_url} from accession {accession_no} for URL.")
+            else:
+                logging.error(f"Could not determine valid CIK for URL from ticker {ticker} or accession {accession_no}. Cannot download XML.")
+                return None
 
         # First get the index to find the XML file
-        index_url = f"https://www.sec.gov/Archives/edgar/data/{cik_part}/{accession_no_clean}/index.json"
+        # Use the determined CIK for the URL path
+        index_url = f"https://www.sec.gov/Archives/edgar/data/{cik_for_url}/{accession_no_clean}/index.json"
 
         try:
             # Prepare headers for www.sec.gov
@@ -1102,13 +1355,21 @@ class SECDataFetcher:
             temp_headers['Host'] = 'www.sec.gov'
             logging.info(f"Fetching index.json from {index_url} with headers: {temp_headers}")
 
-            response = self._make_request(index_url, headers=temp_headers)
-            if not response or response.status_code != 200:
-                logging.error(f"Failed to get index for accession number {accession_no}. Status: {response.status_code if response else 'No Response'}, URL: {index_url}")
-                return None
-
+            # ADD AWAIT HERE
+            response = await self._make_request(index_url, headers=temp_headers, is_json=True) # Expecting JSON
+            # Check response status (make_request doesn't raise for non-200 by default if retries fail)
+            # if response is None or not isinstance(response, dict): # _make_request returns dict on success for json
+            #     logging.error(f"Failed to get or parse index for accession number {accession_no}. URL: {index_url}")
+            #     return None
+            
             # Parse the index to find XML files
-            index_data = response.json()
+            # index_data = response # Already parsed by _make_request
+
+            # Check if response is a dictionary (parsed JSON)
+            if not isinstance(response, dict):
+                logging.error(f"Index response for {accession_no} was not valid JSON. Type: {type(response)}. URL: {index_url}")
+                return None
+            index_data = response
 
             # Look for XML file - SEC often uses filenames like 'wk-form4_*.xml' or 'form4.xml' or 'XML' doc type
             xml_file = None
@@ -1137,16 +1398,17 @@ class SECDataFetcher:
                 return None
 
             # Now download the XML file
-            xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik_part}/{accession_no_clean}/{xml_file}"
+            xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik_for_url}/{accession_no_clean}/{xml_file}"
             logging.info(f"Attempting to download XML file: {xml_url}")
 
-            # Use the same www.sec.gov headers
-            response = self._make_request(xml_url, headers=temp_headers)
-            if not response or response.status_code != 200:
-                logging.error(f"Failed to get XML file '{xml_file}' for accession number {accession_no}. Status: {response.status_code if response else 'No Response'}")
+            # ADD AWAIT HERE TOO, and specify is_json=False
+            response_text = await self._make_request(xml_url, headers=temp_headers, is_json=False)
+            # Check if response_text is actually text content
+            if response_text is None or not isinstance(response_text, str):
+                logging.error(f"Failed to get XML file '{xml_file}' content for accession number {accession_no}. Received: {type(response_text)}")
                 return None
 
-            return response.text
+            return response_text
         
         except json.JSONDecodeError as e:
              logging.error(f"Error decoding index.json for {accession_no}: {e}. URL: {index_url}")
@@ -1158,14 +1420,22 @@ class SECDataFetcher:
     
     async def download_all_form_documents(self, accession_no: str, output_dir: str = None) -> Dict[str, str]:
         """
-        Download all documents for a filing by accession number.
+        Downloads all documents listed in a filing's `index.json`.
+        
+        Optionally saves the documents to a specified output directory.
+        Note: This currently relies on synchronous requests within an async method via `_make_request`,
+        which might be inefficient for numerous small files. Consider refactoring for full async downloads if performance is critical.
         
         Args:
-            accession_no (str): Accession number for the filing
-            output_dir (str): Directory to save documents to (optional)
+            accession_no (str): The SEC filing accession number (dashes optional).
+            output_dir (str, optional): If provided, saves each downloaded document to this directory.
+                                        Directory will be created if it doesn't exist.
+                                        Defaults to None (documents are not saved locally).
             
         Returns:
-            Dict[str, str]: Dictionary of filenames to file contents
+            Dict[str, str]: A dictionary where keys are filenames and values are the
+                            corresponding file contents (as strings).
+                            Returns an empty dictionary if the index cannot be fetched or other errors occur.
         """
         # Format accession number for URL (remove dashes)
         accession_no_clean = accession_no.replace('-', '')
@@ -1178,7 +1448,11 @@ class SECDataFetcher:
         index_url = f"https://www.sec.gov/Archives/edgar/data/{accession_no_clean[0:10]}/{accession_no_clean}/index.json"
         
         try:
-            response = self._make_request(index_url)
+            # Prepare headers for www.sec.gov
+            temp_headers = self.headers.copy()
+            temp_headers['Host'] = 'www.sec.gov'
+            
+            response = await self._make_request(index_url, headers=temp_headers)
             if not response or response.status_code != 200:
                 logging.error(f"Failed to get index for accession number {accession_no}")
                 return {}
@@ -1197,7 +1471,7 @@ class SECDataFetcher:
                 # Download the file
                 file_url = f"https://www.sec.gov/Archives/edgar/data/{accession_no_clean[0:10]}/{accession_no_clean}/{file_name}"
                 
-                response = self._make_request(file_url)
+                response = await self._make_request(file_url, headers=temp_headers, is_json=False)
                 if not response or response.status_code != 200:
                     logging.warning(f"Failed to get file {file_name} for accession number {accession_no}")
                     continue
@@ -1367,18 +1641,23 @@ class SECDataFetcher:
             logging.error(f"Unexpected error parsing Form 4 XML: {e}")
             return []
     
-    async def process_form4_filing(self, accession_no: str) -> List[Dict]:
+    async def process_form4_filing(self, accession_no: str, ticker: str = None) -> List[Dict]:
         """
-        Process a single Form 4 filing into structured transaction data.
-        
+        Downloads and parses a single Form 4 XML filing into structured transaction data.
+
+        Calls `download_form_xml` to get the content and `parse_form4_xml` to process it.
+
         Args:
-            accession_no (str): Accession number for the filing
-            
+            accession_no (str): Accession number for the Form 4 filing.
+            ticker (str, optional): The stock ticker symbol of the *issuer*, passed to `download_form_xml`
+                                    to help construct the correct URL. Defaults to None.
+
         Returns:
-            List[Dict]: List of transaction dictionaries
+            List[Dict]: A list of dictionaries, each representing a transaction parsed from the form.
+                        Returns an empty list if download or parsing fails.
         """
-        # Download the XML
-        xml_content = await self.download_form_xml(accession_no)
+        # Download the XML, passing the ticker
+        xml_content = await self.download_form_xml(accession_no, ticker=ticker)
         
         if not xml_content:
             return []
@@ -1389,15 +1668,24 @@ class SECDataFetcher:
     async def get_recent_insider_transactions(self, ticker: str, days_back: int = 90, 
                                      use_cache: bool = True) -> List[Dict]:
         """
-        Get all recent insider transactions for a ticker, formatted for UI.
+        Fetches, parses, and formats recent Form 4 (insider) transactions for UI display.
+        
+        1. Fetches Form 4 filing metadata using `fetch_insider_filings`.
+        2. For each recent filing (currently limited to the first 5 for performance):
+           - Calls `process_form4_filing` to download and parse the XML.
+           - Formats the parsed transactions into a structure suitable for the UI table.
+           - Attempts to determine the filing's CIK for constructing the `form_url`.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Number of days back to analyze
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            days_back (int, optional): Number of past days to include filings from. Defaults to 90.
+            use_cache (bool, optional): Whether to use cached filing metadata. Defaults to True.
             
         Returns:
-            List[Dict]: List of insider transactions formatted for the UI.
+            List[Dict]: A list of dictionaries, each representing an insider transaction
+                        formatted for the `SECFilingViewer` table (keys: 'filer', 'date', 'type',
+                        'shares', 'price', 'value', 'form_url', 'primary_document').
+                        Returns an empty list if no transactions are found or errors occur.
         """
         ticker = ticker.upper()
         
@@ -1411,7 +1699,11 @@ class SECDataFetcher:
         # Process each filing to get transaction details and format for UI
         all_ui_transactions = [] 
         
-        for filing_meta in filings: # Use a more descriptive name
+        # Limit to first N filings for faster testing/debugging (e.g., 5 or 10)
+        # TODO: Consider making this limit configurable or removing it later
+        filing_limit = 10 
+        logging.debug(f"Processing up to {filing_limit} most recent Form 4 filings for {ticker}...")
+        for filing_meta in filings[:filing_limit]: 
             accession_no = filing_meta.get('accession_no')
             if not accession_no:
                 logging.warning(f"Skipping filing for {ticker} due to missing accession number.")
@@ -1419,7 +1711,8 @@ class SECDataFetcher:
             
             # Process the XML to get detailed transactions for this filing
             # process_form4_filing returns List[Dict] with parsed data
-            parsed_transactions = await self.process_form4_filing(accession_no)
+            # Pass the ticker down to help find the XML
+            parsed_transactions = await self.process_form4_filing(accession_no, ticker=ticker)
             
             if not parsed_transactions:
                 logging.debug(f"No transactions parsed for {ticker}, accession: {accession_no}")
@@ -1427,22 +1720,27 @@ class SECDataFetcher:
 
             # Get CIK for URL construction (ideally from parsed data)
             # Assuming all transactions in a filing share the same issuer CIK
-            issuer_cik = parsed_transactions[0].get('issuer_cik', 'N/A')
-            if issuer_cik == 'N/A' or not issuer_cik:
-                # Fallback: try getting CIK from ticker if parse failed to get it
-                logging.warning(f"Issuer CIK not found in parsed data for {accession_no}, attempting fallback.")
-                issuer_cik = self.get_cik_for_ticker(ticker) 
-                if not issuer_cik:
-                     logging.error(f"Cannot construct form URL for {accession_no}: CIK unavailable.")
-                     # Decide whether to skip or proceed without URL
-                     # continue # Option: skip transactions without a URL
-                     issuer_cik = "N/A" # Option: proceed without URL
+            # Try getting CIK from parsed data first
+            issuer_cik = parsed_transactions[0].get('issuer_cik') 
+            
+            # If not in parsed data, use the CIK we likely already looked up
+            if not issuer_cik or issuer_cik == 'N/A':
+                # Use the ticker passed into this function to get the CIK again if needed
+                logging.warning(f"Issuer CIK not found in parsed data for {accession_no}. Using ticker {ticker} to construct form URL.")
+                looked_up_cik = await self.get_cik_for_ticker(ticker)
+                if looked_up_cik:
+                    issuer_cik = looked_up_cik # Use the full CIK with leading zeros here if needed?
+                else:
+                     logging.error(f"Cannot construct form URL for {accession_no}: CIK for {ticker} unavailable.")
+                     issuer_cik = "N/A" # Proceed without URL
             
             # Clean accession number once for the filing
             accession_no_cleaned = accession_no.replace('-', '')
             form_url = "N/A" # Default if CIK is unavailable
+            # Construct URL using CIK (strip leading zeros for path)
             if issuer_cik != "N/A" and issuer_cik:
-                 form_url = f"https://www.sec.gov/Archives/edgar/data/{issuer_cik}/{accession_no_cleaned}/"
+                 cik_for_path = issuer_cik.lstrip('0')
+                 form_url = f"https://www.sec.gov/Archives/edgar/data/{cik_for_path}/{accession_no_cleaned}/"
 
             # Format each parsed transaction for the UI
             for tx in parsed_transactions:
@@ -1454,7 +1752,8 @@ class SECDataFetcher:
                     'shares': tx.get('shares'), # Already float or 0.0
                     'price': tx.get('price_per_share', tx.get('conversion_exercise_price')), # Use price_per_share for non-deriv, fallback for deriv
                     'value': tx.get('value', 0.0), # Use pre-calculated value if available
-                    'form_url': form_url # Use the constructed URL
+                    'form_url': form_url, # Use the constructed URL
+                    'primary_document': tx.get('primary_document') # Include primary document filename
                 }
 
                 # Handle potential None for shares/price before calculating value if needed
@@ -1477,15 +1776,21 @@ class SECDataFetcher:
     async def analyze_insider_transactions(self, ticker: str, days_back: int = 90, 
                                   use_cache: bool = True) -> Dict:
         """
-        Analyze insider transactions for a ticker.
+        Performs basic analysis on recent insider transactions for a ticker.
+        
+        Fetches transaction data using `get_recent_insider_transactions`, converts it to a DataFrame,
+        and calculates summary statistics like buy/sell counts, total/net values, involved owners, etc.
         
         Args:
-            ticker (str): Stock ticker symbol
-            days_back (int): Number of days back to analyze
-            use_cache (bool): Whether to use cached data if available
+            ticker (str): Stock ticker symbol.
+            days_back (int, optional): Number of past days to include transactions from. Defaults to 90.
+            use_cache (bool, optional): Whether to use cached data when fetching transactions.
+                                       Defaults to True.
             
         Returns:
-            Dict: Dictionary of analysis results
+            Dict: A dictionary containing analysis results (e.g., 'total_transactions',
+                  'buy_count', 'sell_count', 'total_buy_value', 'net_value', 'owners').
+                  Includes an 'error' key if fetching or analysis fails.
         """
         ticker = ticker.upper()
         
@@ -1541,51 +1846,59 @@ class SECDataFetcher:
     _load_company_facts_from_cache = _save_company_facts_to_cache = get_company_facts = _get_latest_fact_value = _calculate_ratios = None
 
     async def get_company_facts(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
-        """Fetches company facts (XBRL data) from the SEC API.
+        """Fetches company facts (XBRL data) from the SEC's `companyfacts` API endpoint.
 
+        This endpoint provides standardized financial data extracted from company filings.
+        The data is structured by taxonomy (e.g., us-gaap, dei) and concept tag.
+        Uses caching by default.
+        
         Args:
             ticker (str): Stock ticker symbol.
-            use_cache (bool): Whether to use cached data if available.
-
+            use_cache (bool, optional): Whether to use cached data if available. Defaults to True.
+            
         Returns:
-            Optional[Dict]: Dictionary containing company facts, or None if error.
-                           The structure includes keys like 'cik', 'entityName',
-                           and 'facts' (which holds us-gaap, dei, etc. taxonomies).
+            Optional[Dict]: The raw company facts JSON data as a dictionary, including keys
+                           like 'cik', 'entityName', and 'facts'. Returns None if an error occurs.
         """
         ticker = ticker.upper()
-        
+
         # Try cache first
         if use_cache:
             cached_data = self._load_company_facts_from_cache(ticker)
             if cached_data:
                 return cached_data
-                
+
         # Get CIK
-        cik = self.get_cik_for_ticker(ticker)
+        cik = await self.get_cik_for_ticker(ticker)
         if not cik:
             logging.error(f"Cannot get company facts: No CIK found for {ticker}")
             return None
-            
+
         # Construct URL
         facts_url = self.COMPANY_FACTS_ENDPOINT.format(cik=cik)
         logging.info(f"Fetching company facts from: {facts_url}")
-        
+
         try:
-            response = self._make_request(facts_url)
-            company_facts_data = await self._make_request(facts_url, is_json=True)
-            
+            # Use standard headers for data.sec.gov
+            company_facts_data = await self._make_request(facts_url, is_json=True, headers=self.headers)
+
             if company_facts_data is None:
                 logging.error(f"Failed to get company facts for {ticker} (CIK: {cik})")
                 return None
-                
+
             # Cache the result
             self._save_company_facts_to_cache(ticker, cik, company_facts_data)
-            
+
             return company_facts_data
 
         except json.JSONDecodeError as e:
             logging.error(f"Error decoding company facts JSON for {ticker}: {str(e)}")
-            if response: logging.error(f"Response text that failed decoding: {response.text[:1000]}")
+            # Optionally log response text if decode fails
+            # try:
+            #     text_content = await response.text() # Need response object if logging text
+            #     logging.error(f"Response text that failed decoding: {text_content[:1000]}")
+            # except Exception:
+            #     logging.error("Could not get response text after JSON error.")
             return None
         except Exception as e:
             logging.error(f"Error fetching company facts for {ticker} (CIK: {cik}): {str(e)}")
@@ -1593,16 +1906,21 @@ class SECDataFetcher:
 
     # Helper function to get the latest value for a specific fact
     def _get_latest_fact_value(self, facts_data: Dict, taxonomy: str, concept_tag: str) -> Optional[Dict]:
-        """Internal helper to find the latest reported value for a specific XBRL concept.
+        """Internal helper to find the latest reported value for a specific XBRL concept
+        within the raw company facts data.
 
+        Searches within the specified taxonomy and concept tag for the data point
+        with the most recent 'end' date. Prioritizes 'USD' or 'shares' units.
+        
         Args:
-            facts_data (Dict): The raw dictionary from get_company_facts.
-            taxonomy (str): The taxonomy (e.g., 'us-gaap', 'dei').
-            concept_tag (str): The specific XBRL concept tag (e.g., 'Assets').
-
+            facts_data (Dict): The raw dictionary returned by `get_company_facts`.
+            taxonomy (str): The XBRL taxonomy to search within (e.g., 'us-gaap', 'dei').
+            concept_tag (str): The specific XBRL concept tag (e.g., 'Assets', 'RevenueFromContractWithCustomerExcludingAssessedTax').
+            
         Returns:
-            Optional[Dict]: A dictionary containing the latest fact details 
-                            (value, unit, end_date, fy, fp) or None if not found.
+            Optional[Dict]: A dictionary containing details of the latest fact if found
+                            (keys: 'value', 'unit', 'end_date', 'fy', 'fp', 'form', 'filed'),
+                            otherwise None.
         """
         try:
             concept_data = facts_data.get('facts', {}).get(taxonomy, {}).get(concept_tag)
@@ -1656,7 +1974,7 @@ class SECDataFetcher:
 
     # --- Financial Ratio Calculations ---
     def _calculate_ratios(self, summary_metrics: Dict) -> Dict:
-        """Calculates key financial ratios from extracted summary metrics."""
+        """Placeholder for calculating financial ratios. Currently not fully implemented or used."""
         calculated = {}
 
         # Helper to safely get metric values if periods match
@@ -1757,19 +2075,23 @@ class SECDataFetcher:
 
     # Main function to get financial summary, refactored for UI
     async def get_financial_summary(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
-        """Generates a flat summary of key financial metrics using the latest 
-        available data, formatted for the UI.
+        """Generates a flattened summary of key financial metrics required by the UI.
 
+        1. Fetches company facts using `get_company_facts`.
+        2. Iterates through `KEY_FINANCIAL_SUMMARY_METRICS` defined in the class.
+        3. For each required metric, calls `_get_latest_fact_value` to find the most recent data point.
+        4. Constructs a flat dictionary containing the ticker, entity name, CIK, the source form
+           and period end date of the latest key data points, and the values of the requested metrics.
+        
         Args:
             ticker (str): Stock ticker symbol.
-            use_cache (bool): Whether to use cached company facts data.
-
+            use_cache (bool, optional): Whether to use cached company facts data. Defaults to True.
+            
         Returns:
-            Optional[Dict]: A flat dictionary summarizing key metrics required by the UI,
-                            or None if facts aren't available or key data is missing.
-                            Keys include: ticker, entityName, cik, source_form, period_end,
-                            revenue, net_income, eps, assets, liabilities, equity, 
-                            operating_cash_flow, investing_cash_flow, financing_cash_flow.
+            Optional[Dict]: A flat dictionary summarizing key financial metrics (keys defined in
+                            `KEY_FINANCIAL_SUMMARY_METRICS` plus metadata like 'ticker', 'entityName', 'cik',
+                            'source_form', 'period_end'), or None if facts cannot be retrieved or
+                            no relevant metric data is found.
         """
         company_facts = await self.get_company_facts(ticker, use_cache=use_cache)
         if not company_facts:
@@ -1829,8 +2151,104 @@ class SECDataFetcher:
         return summary_data
 
     async def close(self):
-        """Closes the underlying aiohttp session."""
+        """Closes the underlying aiohttp ClientSession if it's open."""
         if self._session and not self._session.closed:
             await self._session.close()
             logging.info("SECDataFetcher aiohttp session closed.")
         self._session = None # Ensure it's reset
+
+    def _load_company_facts_from_cache(self, ticker: str) -> Optional[Dict]:
+        """Load company facts from the most recent cache file."""
+        cache_pattern = os.path.join(self.cache_dir, "facts", f"{ticker.upper()}_facts_*.json")
+        cache_files = sorted(glob.glob(cache_pattern), key=os.path.getmtime, reverse=True)
+        if not cache_files:
+            return None
+        # Optionally check for freshness (e.g., if cache_files[0] is from today)
+        try:
+            with open(cache_files[0], 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logging.warning(f"Error loading company facts from cache {cache_files[0]}: {e}")
+            return None
+
+    def _save_company_facts_to_cache(self, ticker: str, cik: str, data: Dict) -> None:
+        """Save company facts data to a timestamped cache file."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cache_subdir = os.path.join(self.cache_dir, "facts")
+        os.makedirs(cache_subdir, exist_ok=True)
+        cache_file = os.path.join(cache_subdir, f"{ticker.upper()}_facts_{timestamp}.json")
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            logging.info(f"Saved company facts to cache: {cache_file}")
+        except Exception as e:
+            logging.error(f"Error saving company facts to cache: {e}")
+
+    async def get_filing_documents_list(self, accession_no: str, ticker: str = None) -> Optional[List[Dict]]:
+        """Fetches the list of documents available within a specific filing.
+
+        Attempts to fetch and parse the filing's index.json to get a list of
+        contained files (name, type, size).
+
+        Args:
+            accession_no (str): The SEC filing accession number (dashes optional).
+            ticker (str, optional): The stock ticker symbol, used as a hint for CIK lookup.
+                                    Defaults to None.
+
+        Returns:
+            Optional[List[Dict]]: A list of dictionaries, where each dictionary
+                                 represents a document in the filing (keys: 'name', 'type', 'size').
+                                 Returns None if the index cannot be fetched or parsed.
+        """
+        accession_no_clean = accession_no.replace('-', '')
+        cik = None
+
+        # Get CIK first
+        if ticker:
+            try:
+                cik = await self.get_cik_for_ticker(ticker)
+                if cik:
+                    cik = cik.lstrip('0')
+            except Exception as e:
+                logging.error(f"Error looking up CIK for ticker {ticker} while fetching doc list: {e}")
+
+        if not cik:
+            parts = accession_no.split('-')
+            if len(parts) == 3:
+                cik = parts[0].lstrip('0')
+
+        if not cik:
+            logging.error(f"Could not determine CIK for {accession_no} to fetch document list.")
+            return None
+
+        index_json_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_no_clean}/index.json"
+        logging.info(f"Fetching document list via index.json: {index_json_url}")
+
+        try:
+            temp_headers = self.headers.copy()
+            temp_headers['Host'] = 'www.sec.gov'
+
+            index_data = await self._make_request(index_json_url, headers=temp_headers, is_json=True)
+
+            if not isinstance(index_data, dict) or 'directory' not in index_data:
+                logging.warning(f"index.json for {accession_no} did not return expected structure. Type: {type(index_data)}")
+                # TODO: Fallback to parsing index.htm if index.json fails?
+                return None
+
+            documents = []
+            for item in index_data.get('directory', {}).get('item', []):
+                doc_info = {
+                    'name': item.get('name'),
+                    'type': item.get('type'), # e.g., 'XML', 'GRAPHIC', 'EX-10.1', 'COVER'
+                    'size': item.get('size')
+                    # Add 'last_modified' if needed: item.get('last_modified')
+                }
+                if doc_info['name']:
+                    documents.append(doc_info)
+
+            logging.info(f"Found {len(documents)} documents in index for {accession_no}")
+            return documents
+
+        except Exception as e:
+            logging.error(f"Error fetching/parsing index.json for document list ({accession_no}): {e}", exc_info=True)
+            return None

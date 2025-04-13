@@ -35,6 +35,10 @@ class Signals(Enum):
     # Data Fetching Signals (Example - Adapt as needed)
     FETCH_OHLCV = auto() # payload: {'exchange': str, 'symbol': str, 'timeframe': str}
 
+    # Generic Task Signals
+    TASK_SUCCESS = auto() # data: {'task_name': str, 'result': Any}
+    TASK_ERROR = auto()   # data: {'task_name': str, 'error': Exception}
+
 
 class SignalEmitter:
     def __init__(self) -> None:
@@ -99,9 +103,6 @@ class SignalEmitter:
         regularly by the main GUI thread (e.g., via a frame callback).
         The sender, app_data, user_data arguments are ignored but needed for dpg frame callback compatibility.
         """
-        # Log entry to this function periodically (not every frame to avoid log spam)
-        if dpg.get_frame_count() % 60 == 0:  # Log roughly once per second at 60fps
-            logging.debug(f"[SignalQueue] Processing queue at frame {dpg.get_frame_count()}")
         
         processed_count = 0
         while not self._queue.empty():
@@ -115,9 +116,7 @@ class SignalEmitter:
                 break
             except Exception as e:
                 logging.error(f"Error processing signal queue: {e}", exc_info=True)
-        
-        if processed_count > 0:
-            logging.debug(f"[SignalQueue] Processed {processed_count} signals this frame.")
+    
 
     def unregister(self, signal: Signals, callback: Callable):
         """

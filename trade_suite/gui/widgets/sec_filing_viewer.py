@@ -10,7 +10,36 @@ from trade_suite.gui.widgets.base_widget import DockableWidget
 
 class SECFilingViewer(DockableWidget):
     """
-    A dockable widget to fetch and display SEC filing data for a company ticker.
+    A dockable DearPyGui widget for fetching, displaying, and interacting with
+    SEC filing data for a specified company ticker.
+
+    Features:
+    - Input field for ticker symbol.
+    - Dropdown to select common SEC form types (excluding Form 4).
+    - Buttons to trigger fetching of:
+        - General filings (based on selected form type).
+        - Insider transactions (Form 4).
+        - Key financial summary metrics (from XBRL data).
+    - Displays fetched data in tables (Filings, Insider Transactions) and a dedicated area (Financials).
+    - Provides a status bar for feedback on operations.
+    - Integrates with TaskManager to perform asynchronous data fetching.
+    - Uses SignalEmitter for asynchronous communication and UI updates.
+    - Allows viewing raw filing content in a modal window.
+    - Allows opening SEC filing URLs in a web browser.
+
+    Attributes:
+        sec_fetcher (SECDataFetcher): Instance used to fetch data from SEC APIs.
+        task_manager (TaskManager): Instance used to run fetch operations asynchronously.
+        ticker_input_tag (str): DPG tag for the ticker input field.
+        form_type_combo_tag (str): DPG tag for the form type dropdown.
+        filings_table_tag (str): DPG tag for the general filings table.
+        insider_tx_table_tag (str): DPG tag for the insider transactions table.
+        financials_display_tag (str): DPG tag for the group displaying financial data.
+        status_text_tag (str): DPG tag for the status text label.
+        _last_requested_ticker (Optional[str]): Stores the last ticker requested to prevent race conditions.
+        _last_fetched_filings (List[Dict]): Stores the last fetched filings data for debugging.
+        _last_fetched_transactions (List[Dict]): Stores the last fetched transactions data for debugging.
+        _last_fetched_financials (Optional[Dict]): Stores the last fetched financials data for debugging.
     """
     WIDGET_TYPE = "SECFilingViewer"
 
@@ -22,6 +51,16 @@ class SECFilingViewer(DockableWidget):
         instance_id: Optional[str] = None,
         **kwargs
     ):
+        """Initializes the SECFilingViewer widget.
+
+        Args:
+            emitter (SignalEmitter): The application's signal emitter for communication.
+            sec_fetcher (SECDataFetcher): An instance of the SEC data fetching class.
+            task_manager (TaskManager): An instance of the application's task manager.
+            instance_id (Optional[str], optional): A unique identifier for this widget instance.
+                                                   Defaults to None (will be auto-generated).
+            **kwargs: Additional keyword arguments passed to the base DockableWidget constructor.
+        """
         super().__init__(
             title="SEC Filing Viewer",
             widget_type=self.WIDGET_TYPE,
@@ -36,6 +75,7 @@ class SECFilingViewer(DockableWidget):
 
         # Tags for UI elements
         self.ticker_input_tag = f"{self.content_tag}_ticker_input"
+        self.form_type_combo_tag = f"{self.content_tag}_form_type_combo"
         self.filings_table_tag = f"{self.content_tag}_filings_table"
         self.insider_tx_table_tag = f"{self.content_tag}_insider_tx_table"
         self.financials_display_tag = f"{self.content_tag}_financials_display"
@@ -43,16 +83,31 @@ class SECFilingViewer(DockableWidget):
 
         # Store the last requested ticker to avoid race conditions in UI updates
         self._last_requested_ticker: Optional[str] = None
+        # Store last fetched data for debugging
+        self._last_fetched_filings: List[Dict] = []
+        self._last_fetched_transactions: List[Dict] = []
+        self._last_fetched_financials: Optional[Dict] = None
 
         logging.info(f"SECFilingViewer instance {self.instance_id} created.")
 
     def build_content(self) -> None:
-        """Build the widget's main content area."""
+        """Builds the DearPyGui elements within the widget's content area."""
         with dpg.group(horizontal=True):
             dpg.add_input_text(tag=self.ticker_input_tag, label="Ticker", hint="Enter Ticker (e.g., AAPL)", width=150, callback=self._clear_on_ticker_change)
+
+            # Form type selector dropdown
+            # Filter out Form 4 as it has its own button
+            common_forms = [ft for ft in SECDataFetcher.FORM_TYPES.keys() if ft != "4"]
+            dpg.add_combo(tag=self.form_type_combo_tag,
+                          items=common_forms,
+                          label="Form Type",
+                          default_value="8-K", # Sensible default
+                          width=100)
+
             dpg.add_button(label="Fetch Filings", callback=self._fetch_filings_callback)
             dpg.add_button(label="Fetch Insider Tx", callback=self._fetch_insider_tx_callback)
             dpg.add_button(label="Fetch Financials", callback=self._fetch_financials_callback)
+            dpg.add_button(label="Save Fetched Data", callback=self._save_fetched_data_callback)
 
         dpg.add_separator()
         dpg.add_text("Status:", tag=self.status_text_tag, wrap=dpg.get_item_width(self.content_tag) - 20 if dpg.get_item_width(self.content_tag) else 580) # Adjust wrap width dynamically if possible
@@ -91,15 +146,15 @@ class SECFilingViewer(DockableWidget):
              dpg.add_text("No data loaded.") # Placeholder
 
     def register_handlers(self) -> None:
-        """Register signal handlers."""
-        self.emitter.register(Signals.SEC_FILINGS_UPDATE, self._handle_filings_update)
-        self.emitter.register(Signals.SEC_INSIDER_TX_UPDATE, self._handle_insider_tx_update)
-        self.emitter.register(Signals.SEC_FINANCIALS_UPDATE, self._handle_financials_update)
-        self.emitter.register(Signals.SEC_DATA_FETCH_ERROR, self._handle_fetch_error)
+        """Registers necessary signal handlers with the application's emitter."""
+        # Register for generic task success/error signals
+        self.emitter.register(Signals.TASK_SUCCESS, self._handle_task_success)
+        self.emitter.register(Signals.TASK_ERROR, self._handle_task_error)
+
         logging.info(f"SECFilingViewer {self.instance_id} registered signal handlers.")
 
     def _clear_on_ticker_change(self, sender: int, app_data: str, user_data: Any) -> None:
-        """Clear results when ticker changes."""
+        """Callback triggered when the ticker input value changes. Clears results if ticker differs."""
         # Clear tables and financials if ticker changes significantly
         # Avoid clearing if just adding a character during typing (optional optimization)
         if self._last_requested_ticker and app_data.upper() != self._last_requested_ticker:
@@ -115,12 +170,19 @@ class SECFilingViewer(DockableWidget):
         dpg.add_text("No data loaded.", parent=self.financials_display_tag) # Add back placeholder
 
     def _update_status(self, message: str):
-        """Updates the status text area."""
+        """Helper method to update the status text label within the widget."""
         if dpg.does_item_exist(self.status_text_tag):
             dpg.set_value(self.status_text_tag, f"Status: {message}")
 
     def _get_ticker(self) -> Optional[str]:
-        """Gets the ticker from the input field, validates, and sets status."""
+        """Gets and validates the ticker symbol from the input field.
+
+        Updates the status bar if the ticker is invalid. Stores the valid ticker
+        in `_last_requested_ticker`.
+
+        Returns:
+            Optional[str]: The validated, uppercase ticker symbol, or None if invalid.
+        """
         if not dpg.does_item_exist(self.ticker_input_tag):
             return None
         ticker = dpg.get_value(self.ticker_input_tag).strip().upper()
@@ -133,10 +195,21 @@ class SECFilingViewer(DockableWidget):
     # --- Button Callbacks ---
 
     def _fetch_filings_callback(self, sender: int, app_data: Any, user_data: Any) -> None:
-        """Callback for the 'Fetch Filings' button."""
+        """Callback for the 'Fetch Filings' button.
+
+        Retrieves the ticker and selected form type, clears the filings table,
+        updates the status, and starts an asynchronous task via TaskManager
+        to fetch the filings using `sec_fetcher.get_filings_by_form`.
+        """
         ticker = self._get_ticker()
-        if ticker:
-            self._update_status(f"Fetching filings for {ticker}...")
+
+        # Get the selected form type from the UI
+        form_type = None
+        if dpg.does_item_exist(self.form_type_combo_tag):
+            form_type = dpg.get_value(self.form_type_combo_tag)
+
+        if ticker and form_type: # Ensure both ticker and form type are present
+            self._update_status(f"Fetching {form_type} filings for {ticker}...")
             dpg.delete_item(self.filings_table_tag, children_only=True, slot=1) # Clear table content (keep header)
             # First parameter should be task_id, second parameter is coroutine object
             task_id = f"sec_filings_{ticker}_{form_type}_{self.instance_id}"
@@ -144,9 +217,18 @@ class SECFilingViewer(DockableWidget):
                 task_id,
                 self.sec_fetcher.get_filings_by_form(ticker=ticker, form_type=form_type)
             )
+        elif not ticker:
+            self._update_status("Error: Please enter a ticker symbol.")
+        elif not form_type:
+            self._update_status("Error: Please select a form type.")
 
     def _fetch_insider_tx_callback(self, sender: int, app_data: Any, user_data: Any) -> None:
-        """Callback for the 'Fetch Insider Tx' button."""
+        """Callback for the 'Fetch Insider Tx' button.
+
+        Retrieves the ticker, clears the insider transactions table,
+        updates the status, and starts an asynchronous task via TaskManager
+        to fetch transactions using `sec_fetcher.get_recent_insider_transactions`.
+        """
         ticker = self._get_ticker()
         if ticker:
             self._update_status(f"Fetching insider transactions for {ticker}...")
@@ -159,7 +241,12 @@ class SECFilingViewer(DockableWidget):
             )
 
     def _fetch_financials_callback(self, sender: int, app_data: Any, user_data: Any) -> None:
-        """Callback for the 'Fetch Financials' button."""
+        """Callback for the 'Fetch Financials' button.
+
+        Retrieves the ticker, clears the financials display area,
+        updates the status, and starts an asynchronous task via TaskManager
+        to fetch the financial summary using `sec_fetcher.get_financial_summary`.
+        """
         ticker = self._get_ticker()
         if ticker:
             self._update_status(f"Fetching financials for {ticker}...")
@@ -172,10 +259,216 @@ class SECFilingViewer(DockableWidget):
                 self.sec_fetcher.get_financial_summary(ticker=ticker)
             )
 
-    # --- Signal Handlers ---
+    def _save_fetched_data_callback(self, sender: int, app_data: Any, user_data: Any) -> None:
+        """Callback for the 'Save Fetched Data' button.
+
+        Saves the most recently successfully fetched filings, transactions,
+        and financials data for the current ticker to JSON files in data/debug_dumps/.
+        """
+        ticker = self._last_requested_ticker # Use the last ticker we attempted to fetch for
+        if not ticker:
+            self._update_status("Error: No ticker data has been fetched yet.")
+            return
+
+        import json
+        import os
+        from datetime import datetime
+
+        dump_dir = os.path.join("data", "debug_dumps")
+        os.makedirs(dump_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        saved_files = []
+
+        try:
+            # Save filings
+            if self._last_fetched_filings:
+                filename = os.path.join(dump_dir, f"{ticker}_filings_{timestamp}.json")
+                with open(filename, 'w') as f:
+                    json.dump(self._last_fetched_filings, f, indent=2)
+                saved_files.append(filename)
+
+            # Save transactions
+            if self._last_fetched_transactions:
+                filename = os.path.join(dump_dir, f"{ticker}_transactions_{timestamp}.json")
+                with open(filename, 'w') as f:
+                    json.dump(self._last_fetched_transactions, f, indent=2)
+                saved_files.append(filename)
+
+            # Save financials
+            if self._last_fetched_financials:
+                filename = os.path.join(dump_dir, f"{ticker}_financials_{timestamp}.json")
+                with open(filename, 'w') as f:
+                    json.dump(self._last_fetched_financials, f, indent=2)
+                saved_files.append(filename)
+
+            if saved_files:
+                self._update_status(f"Saved data for {ticker} to {len(saved_files)} file(s) in {dump_dir}")
+                logging.info(f"Saved data dump for {ticker}: {saved_files}")
+            else:
+                self._update_status(f"No fetched data available to save for {ticker}.")
+
+        except Exception as e:
+            error_msg = f"Error saving data dump for {ticker}: {e}"
+            self._update_status(error_msg)
+            logging.error(error_msg, exc_info=True)
+
+    # --- Generic Task Handlers ---
+
+    def _handle_task_success(self, **kwargs) -> None:
+        """Handles TASK_SUCCESS signals emitted by the TaskManager.
+
+        Checks if the task is relevant to this widget instance and the currently
+        requested ticker (or accession number for content fetches).
+        Routes the result to the appropriate internal update handler
+        (`_handle_filings_update`, `_handle_insider_tx_update`, `_handle_financials_update`,
+        or `_display_filing_content`).
+
+        Args:
+            **kwargs: Keyword arguments from the signal, expected to include
+                      `task_name` (str) and `result` (Any).
+        """
+        task_name = kwargs.get('task_name', '')
+        result = kwargs.get('result')
+
+        # Check if this task belongs to this widget instance
+        if not task_name.endswith(self.instance_id):
+            return # Ignore tasks not meant for this instance
+
+        # Extract ticker or other relevant ID based on task name format
+        ticker_from_task = None
+        accession_no_from_task = None
+
+        parts = task_name.split('_')
+        if len(parts) >= 3 and parts[0] == 'sec': # Need at least sec_TYPE_ID
+            task_type = parts[1]
+            if task_type == 'fetch' and parts[2] == 'content': # Check for sec_fetch_content_ACCNO_instanceid
+                if len(parts) >= 5:
+                    accession_no_from_task = parts[3]
+            elif task_type == 'filings': # sec_filings_TICKER_FORM_instanceid
+                if len(parts) >= 5:
+                    try:
+                        ticker_from_task = parts[2]
+                    except IndexError: pass
+            elif task_type == 'insider' and parts[2] == 'tx': # sec_insider_tx_TICKER_instanceid
+                if len(parts) >= 5:
+                    try:
+                        ticker_from_task = parts[3]
+                    except IndexError: pass
+            elif task_type == 'financials': # sec_financials_TICKER_instanceid
+                if len(parts) >= 4:
+                    try:
+                        ticker_from_task = parts[2]
+                    except IndexError: pass
+            else:
+                logging.warning(f"SECFilingViewer {self.instance_id}: Unrecognized sec task format: {task_name}")
+
+        # Log extracted identifiers for debugging
+        # logging.debug(f"Parsed task: {task_name} -> Type: {parts[1] if len(parts)>1 else 'N/A'}, Ticker: {ticker_from_task}, AccNo: {accession_no_from_task}")
+
+        # --- Handling based on task type --- #
+
+        # Handle Filing Content Fetch
+        if task_name.startswith('sec_fetch_content_') and accession_no_from_task:
+            self._update_status(f"Content loaded for {accession_no_from_task}.")
+            # Extract document name if it's part of the task name
+            doc_name_from_task = None
+            if len(parts) >= 6 and parts[1] == 'fetch' and parts[2] == 'content': # Format: sec_fetch_content_ACCNO_DOCNAME_instanceid
+                doc_name_from_task = parts[4] # Assuming doc name is the 4th part
+
+            self._display_filing_content(accession_no_from_task, result, document_name=doc_name_from_task or "Document") # result should be the content string
+            return # Handled
+
+        # Handle Filing Document List Fetch
+        if task_name.startswith('sec_list_docs_'):
+            # Extract accession number from task name: sec_list_docs_ACCNO_instanceid
+            acc_no_list_task = None
+            if len(parts) >= 4 and parts[0] == 'sec' and parts[1] == 'list' and parts[2] == 'docs':
+                 acc_no_list_task = parts[3]
+            
+            if acc_no_list_task:
+                 self._update_status(f"Document list loaded for {acc_no_list_task}.")
+                 self._display_filing_document_list(acc_no_list_task, result) # result is the list of documents
+            else:
+                 logging.warning(f"Could not parse accession number from list_docs task: {task_name}")
+            return # Handled
+
+        # --- Original Handling for Ticker-Based Tasks --- #
+
+        # Verify ticker matches the last requested one for this widget
+        if not ticker_from_task or ticker_from_task != self._last_requested_ticker:
+            logging.debug(f"SECFilingViewer {self.instance_id}: Ignoring task success for {task_name} (ticker mismatch: expected {self._last_requested_ticker}, got {ticker_from_task})")
+            return
+
+        # Route based on task type prefix
+        if task_name.startswith('sec_filings_'):
+            self._handle_filings_update(filings=result, ticker=ticker_from_task)
+        elif task_name.startswith('sec_insider_tx_'):
+            self._handle_insider_tx_update(transactions=result, ticker=ticker_from_task)
+        elif task_name.startswith('sec_financials_'):
+            self._handle_financials_update(financials=result, ticker=ticker_from_task)
+        else:
+            # Log if a task succeeded but wasn't handled (should be caught by earlier checks)
+            logging.debug(f"SECFilingViewer {self.instance_id}: Received unhandled successful task: {task_name}")
+
+    def _handle_task_error(self, **kwargs) -> None:
+        """Handles TASK_ERROR signals emitted by the TaskManager.
+
+        Checks if the task is relevant to this widget instance and the currently
+        requested ticker.
+        Updates the status bar with an error message and logs the error.
+        Optionally clears the relevant data section in the UI.
+
+        Args:
+            **kwargs: Keyword arguments from the signal, expected to include
+                      `task_name` (str) and `error` (Exception).
+        """
+        task_name = kwargs.get('task_name', '')
+        error = kwargs.get('error')
+
+        # Check if this task belongs to this widget instance
+        if not task_name.endswith(self.instance_id):
+            # logging.debug(f"SECFilingViewer {self.instance_id}: Ignoring task error {task_name} (instance mismatch)")
+            return # Ignore tasks not meant for this instance
+
+        # Extract ticker from task name (assuming format like "sec_TYPE_TICKER_[FORM_]_instanceid")
+        ticker_from_task = None
+        try:
+            parts = task_name.split('_')
+            if len(parts) >= 4 and parts[0] == 'sec':
+                 # Ticker is consistently the 3rd part (index 2)
+                 ticker_from_task = parts[2]
+        except IndexError:
+             logging.warning(f"SECFilingViewer {self.instance_id}: Could not parse ticker from error task name: {task_name}")
+             ticker_from_task = None
+
+        # Only update status if the error is for the currently relevant ticker
+        # And if we successfully extracted the ticker
+        if ticker_from_task and ticker_from_task == self._last_requested_ticker:
+            # Construct a user-friendly error message
+            error_message = f"Error fetching data for {ticker_from_task} ({parts[1] if len(parts)>1 else 'task'}): {str(error)}"
+            self._update_status(error_message)
+            logging.error(f"Task Error ({task_name}): {error}")
+            # Optionally clear the specific section that failed
+            if task_name.startswith('sec_filings_'):
+                 dpg.delete_item(self.filings_table_tag, children_only=True, slot=1)
+                 # Add error message row?
+            elif task_name.startswith('sec_insider_tx_'):
+                 dpg.delete_item(self.insider_tx_table_tag, children_only=True, slot=1)
+            elif task_name.startswith('sec_financials_'):
+                 dpg.delete_item(self.financials_display_tag, children_only=True)
+                 dpg.add_text(f"Error loading financials: {error}", parent=self.financials_display_tag, color=(255, 0, 0))
 
     def _handle_filings_update(self, **kwargs) -> None:
-        """Handles the SEC_FILINGS_UPDATE signal."""
+        """Internal handler to update the filings table with new data.
+
+        Triggered by `_handle_task_success` when a relevant 'sec_filings_...' task completes.
+        Clears the existing table content and populates it with the fetched filings.
+        Adds a "View" button for each filing to fetch its content.
+
+        Args:
+            **kwargs: Keyword arguments, expected to include `ticker` (str) and `filings` (List[Dict]).
+        """
         ticker = kwargs.get('ticker')
         filings = kwargs.get('filings', [])
 
@@ -185,6 +478,7 @@ class SECFilingViewer(DockableWidget):
 
         self._update_status(f"Successfully loaded {len(filings)} filings for {ticker}.")
         dpg.delete_item(self.filings_table_tag, children_only=True, slot=1) # Clear existing rows
+        self._last_fetched_filings = filings # Store fetched data
 
         for filing in filings:
             with dpg.table_row(parent=self.filings_table_tag):
@@ -192,15 +486,35 @@ class SECFilingViewer(DockableWidget):
                 dpg.add_text(filing.get('form', 'N/A'))
                 dpg.add_text(filing.get('filing_date', 'N/A'))
                 dpg.add_text(filing.get('report_date', 'N/A'))
-                # Add a "View" button to open the filing in a browser
-                url = filing.get('url', None)
-                if url:
-                    dpg.add_button(label="View", callback=lambda s, a, u=url: self._open_url(u))
+                # Add a "View" button to fetch and display content
+                accession_no = filing.get('accession_no')
+                primary_doc = filing.get('primary_document')
+                # Only add button if we have the necessary info
+                if accession_no and primary_doc:
+                    user_data_dict = {
+                        'accession_no': accession_no,
+                        'primary_document': primary_doc
+                    }
+                    dpg.add_button(label="View", callback=self._request_filing_content_callback, user_data=user_data_dict)
                 else:
-                    dpg.add_text("N/A")
+                    # Log if view button cannot be created due to missing info
+                    if not accession_no:
+                        logging.warning(f"Cannot create View button for filing on {filing.get('filing_date')}: Missing accession_no")
+                    if not primary_doc:
+                         logging.warning(f"Cannot create View button for filing {accession_no}: Missing primary_document")
+                    dpg.add_text("N/A") # Display N/A if button can't be created
 
     def _handle_insider_tx_update(self, **kwargs) -> None:
-        """Handles the SEC_INSIDER_TX_UPDATE signal."""
+        """Internal handler to update the insider transactions table with new data.
+
+        Triggered by `_handle_task_success` when a relevant 'sec_insider_tx_...' task completes.
+        Clears the existing table content and populates it with the fetched transactions.
+        Formats data (dates, numbers, filer names) and applies color coding to transaction types.
+        Adds a "View" button for each transaction to open the source filing URL.
+
+        Args:
+            **kwargs: Keyword arguments, expected to include `ticker` (str) and `transactions` (List[Dict]).
+        """
         ticker = kwargs.get('ticker')
         transactions = kwargs.get('transactions', [])
 
@@ -210,6 +524,7 @@ class SECFilingViewer(DockableWidget):
 
         self._update_status(f"Successfully loaded {len(transactions)} insider transactions for {ticker}.")
         dpg.delete_item(self.insider_tx_table_tag, children_only=True, slot=1) # Clear existing rows
+        self._last_fetched_transactions = transactions # Store fetched data
 
         for tx in transactions:
             with dpg.table_row(parent=self.insider_tx_table_tag):
@@ -272,12 +587,20 @@ class SECFilingViewer(DockableWidget):
                 
                 url = tx.get('form_url', None)
                 if url:
-                    dpg.add_button(label="View", callback=lambda s, a, u=url: self._open_url(u))
+                    dpg.add_button(label="View", callback=self._open_url, user_data=url)
                 else:
                     dpg.add_text("N/A")
 
     def _handle_financials_update(self, **kwargs) -> None:
-        """Handles the SEC_FINANCIALS_UPDATE signal."""
+        """Internal handler to update the financials display area with new data.
+
+        Triggered by `_handle_task_success` when a relevant 'sec_financials_...' task completes.
+        Clears the existing content and displays the fetched financial summary metrics
+        with appropriate formatting using the `_add_financial_metric` helper.
+
+        Args:
+            **kwargs: Keyword arguments, expected to include `ticker` (str) and `financials` (Optional[Dict]).
+        """
         ticker = kwargs.get('ticker')
         financials = kwargs.get('financials')
 
@@ -287,6 +610,7 @@ class SECFilingViewer(DockableWidget):
 
         self._update_status(f"Successfully loaded financials for {ticker}.")
         dpg.delete_item(self.financials_display_tag, children_only=True) # Clear previous content
+        self._last_fetched_financials = financials # Store fetched data
 
         if financials:
             # Display source filing info
@@ -312,7 +636,15 @@ class SECFilingViewer(DockableWidget):
             dpg.add_text("Financial data not available.", parent=self.financials_display_tag)
 
     def _add_financial_metric(self, label, value, parent):
-        """Helper to add a financial metric with proper formatting."""
+        """Helper method to add a formatted financial metric text element to a parent container.
+
+        Formats numerical values as currency (except EPS) or leaves them as strings.
+
+        Args:
+            label (str): The label for the metric (e.g., "Revenue").
+            value (Any): The value of the metric.
+            parent (Union[int, str]): The DPG tag/ID of the parent container.
+        """
         if isinstance(value, (int, float)):
             # Format large numbers with commas and 2 decimal places if it's a dollar amount
             formatted_value = f"${value:,.2f}" if label.lower() not in ["eps (basic)", "eps (diluted)"] else f"{value:.2f}"
@@ -320,17 +652,90 @@ class SECFilingViewer(DockableWidget):
         else:
             dpg.add_text(f"{label}: {value}", parent=parent)
     
-    def _open_url(self, url):
-        """Open a URL in the default browser."""
+    def _request_filing_content_callback(self, sender, app_data, user_data):
+        """Callback for the 'View' button in the filings table.
+
+        Starts a task to fetch the list of documents for the selected filing.
+        The result is handled by _handle_task_success, which calls
+        _display_filing_document_list.
+        """
+        if not isinstance(user_data, dict):
+            logging.error(f"_request_filing_content_callback: Invalid user_data type: {type(user_data)}")
+            self._update_status("Error: Internal data mismatch for View button.")
+            return
+
+        accession_no = user_data.get('accession_no')
+        # primary_doc = user_data.get('primary_document') # We don't need primary_doc directly anymore
+
+        # Get the current ticker from the input field
+        ticker = self._get_ticker()
+
+        if not accession_no:
+            logging.error(f"_request_filing_content_callback: Missing accession_no")
+            self._update_status("Error: Missing accession number to list documents.")
+            return
+
+        logging.debug(f"Requesting document list for {accession_no}, ticker: {ticker}")
+        self._update_status(f"Fetching document list for {accession_no}...")
+
+        # Create task ID for fetching the document list
+        task_id = f"sec_list_docs_{accession_no}_{self.instance_id}"
+
+        # Start background task to get the list of documents
+        self.task_manager.start_task(
+            task_id,
+            self.sec_fetcher.get_filing_documents_list(accession_no=accession_no, ticker=ticker)
+        )
+
+    def _request_specific_document_content_callback(self, sender, app_data, user_data):
+        """Callback for the 'View' button *within* the document list modal.
+
+        Starts a task to fetch the content of a *specific* document from a filing.
+        The result is handled by _handle_task_success, which calls
+        _display_filing_content.
+        """
+        if not isinstance(user_data, dict):
+            logging.error(f"_request_specific_document_content_callback: Invalid user_data: {user_data}")
+            return
+
+        accession_no = user_data.get('accession_no')
+        document_name = user_data.get('document_name')
+        ticker = user_data.get('ticker')
+
+        if not accession_no or not document_name:
+            logging.error(f"Missing accession_no or document_name for content fetch.")
+            # Optionally update status in the main window or the modal?
+            return
+
+        logging.debug(f"Requesting content for {accession_no}, specific doc: {document_name}, ticker: {ticker}")
+        self._update_status(f"Fetching content for {document_name} ({accession_no})...")
+
+        # Create task ID for fetching specific document content
+        task_id = f"sec_fetch_content_{accession_no}_{document_name}_{self.instance_id}"
+
+        # Start background task
+        self.task_manager.start_task(
+            task_id,
+            self.sec_fetcher.fetch_filing_document(accession_no=accession_no, primary_doc=document_name, ticker=ticker)
+        )
+
+    def _open_url(self, sender, app_data, user_data):
+        """Callback to open a URL (passed in user_data) in the default web browser.
+
+        Handles basic URL validation and attempts to add scheme if missing.
+        Updates status bar on error.
+        """
+        url = user_data # URL is passed via user_data
         import webbrowser
         try:
+            logging.debug(f"_open_url: Received user_data (URL): {url} (type: {type(url)})") # Log entry
             if not url:
-                logging.error(f"Invalid URL: URL is None or empty")
+                logging.error(f"Invalid URL: URL is None or empty in user_data")
                 self._update_status(f"Error: URL is missing. Unable to open browser.")
                 return
-                
+
             if isinstance(url, str) and url.startswith(('http://', 'https://', 'www.')):
-                logging.debug(f"Opening URL in browser: {url}")
+                logging.debug(f"_open_url: Attempting to open valid URL: {url}") # Log before opening
                 webbrowser.open(url)
             else:
                 # If URL doesn't have proper scheme, try to add it
@@ -351,30 +756,8 @@ class SECFilingViewer(DockableWidget):
                     logging.error(f"Invalid URL format: {url}")
                     self._update_status(f"Error: Invalid URL format. Unable to open browser.")
         except Exception as e:
-            logging.error(f"Error opening URL {url}: {e}")
+            logging.error(f"Error opening URL {url}: {e}", exc_info=True)
             self._update_status(f"Error opening URL: {str(e)}")
-
-    def _handle_fetch_error(self, **kwargs) -> None:
-        """Handles the SEC_DATA_FETCH_ERROR signal."""
-        ticker = kwargs.get('ticker')
-        data_type = kwargs.get('data_type')
-        error = kwargs.get('error')
-
-        # Only update status if the error corresponds to the last requested ticker
-        if dpg.does_item_exist(self.window_tag) and ticker == self._last_requested_ticker:
-            error_message = f"Error fetching {data_type} for {ticker}: {error}"
-            self._update_status(error_message)
-            logging.error(error_message)
-            # Optionally clear the specific section that failed
-            if data_type == 'filings':
-                 dpg.delete_item(self.filings_table_tag, children_only=True, slot=1)
-                 # Add error message row?
-            elif data_type == 'insider_transactions':
-                 dpg.delete_item(self.insider_tx_table_tag, children_only=True, slot=1)
-            elif data_type == 'financials':
-                 dpg.delete_item(self.financials_display_tag, children_only=True)
-                 dpg.add_text(f"Error loading financials: {error}", parent=self.financials_display_tag, color=(255, 0, 0))
-
 
     def close(self) -> None:
         """Clean up when the widget is closed."""
@@ -383,6 +766,104 @@ class SECFilingViewer(DockableWidget):
         # Assuming weak refs or automatic cleanup for now.
         logging.info(f"Closing SECFilingViewer {self.instance_id}.")
         super().close()
+
+    def _display_filing_document_list(self, accession_no: str, documents: Optional[List[Dict]]):
+        """Displays the list of documents for a filing in a modal window.
+
+        Each document has a 'View' button to fetch its specific content.
+
+        Args:
+            accession_no (str): The accession number (for modal title).
+            documents (Optional[List[Dict]]): List of document info dicts, or None if error.
+        """
+        list_modal_id = dpg.generate_uuid()
+        list_table_id = dpg.generate_uuid()
+
+        with dpg.window(label=f"Documents for Filing: {accession_no}", modal=True, show=True, id=list_modal_id,
+                          tag=f"filing_doc_list_modal_{accession_no}", width=600, height=400,
+                          on_close=lambda: dpg.delete_item(list_modal_id)):
+
+            if documents is None:
+                dpg.add_text("Error: Could not load document list.")
+                return
+            if not documents:
+                dpg.add_text("No documents found in the index for this filing.")
+                return
+
+            dpg.add_text(f"Found {len(documents)} documents:")
+            with dpg.table(tag=list_table_id, header_row=True, resizable=True, policy=dpg.mvTable_SizingStretchProp,
+                           borders_outerH=True, borders_innerV=True, borders_innerH=True, borders_outerV=True):
+                dpg.add_table_column(label="Filename")
+                dpg.add_table_column(label="Type")
+                dpg.add_table_column(label="Size (Bytes)")
+                dpg.add_table_column(label="Action")
+
+                ticker = self._last_requested_ticker # Get ticker for the context
+
+                for doc in documents:
+                    with dpg.table_row():
+                        dpg.add_text(doc.get('name', 'N/A'))
+                        dpg.add_text(doc.get('type', 'N/A'))
+                        # Format size
+                        size = doc.get('size', 'N/A')
+                        try:
+                            size_str = f"{int(size):,}" if size is not None else "N/A"
+                        except (ValueError, TypeError):
+                            size_str = str(size)
+                        dpg.add_text(size_str)
+
+                        # Button to view this specific document
+                        if doc.get('name'):
+                            view_user_data = {
+                                'accession_no': accession_no,
+                                'document_name': doc['name'],
+                                'ticker': ticker
+                            }
+                            dpg.add_button(label="View Content",
+                                           callback=self._request_specific_document_content_callback,
+                                           user_data=view_user_data)
+                        else:
+                            dpg.add_text("N/A")
+
+    def _display_filing_content(self, accession_no: str, content: Optional[str], document_name: str = "Document"):
+        """Displays fetched filing content in a modal window.
+
+        Creates a modal window with a read-only, multiline input text
+        field to show the document content.
+
+        Args:
+            accession_no (str): The accession number of the filing (used in modal title).
+            content (Optional[str]): The textual content of the filing document.
+                                   Displays an error message if None.
+            document_name (str): The name of the document (used in modal title).
+        """
+        modal_id = dpg.generate_uuid()
+        content_area_id = dpg.generate_uuid()
+
+        if not content:
+            content = "Error: Could not load document content."
+            logging.warning(f"Attempted to display empty content for {accession_no}")
+
+        # Estimate window size (adjust as needed)
+        # Crude estimation based on content length, might need refinement
+        width = 800
+        height = 600
+        if len(content) > 50000: # Very large content
+            width = 1000
+            height = 750
+
+        # Use document_name in the label if available
+        label = f"Content: {document_name} ({accession_no})"
+
+        with dpg.window(label=label, modal=True, show=True, id=modal_id,
+                          tag=f"filing_content_modal_{accession_no}_{dpg.generate_uuid()}", # Add uuid for uniqueness
+                          width=width, height=height, on_close=lambda: dpg.delete_item(modal_id)):
+            # Use InputText for potentially large, scrollable, selectable text
+            dpg.add_input_text(tag=content_area_id, default_value=content, multiline=True, readonly=True, width=-1, height=-1) # Fill window
+
+        # Auto-adjust height based on content? DPG might not support this easily for modals.
+        # dpg.configure_item(content_area_id, height=dpg.get_text_size(content, wrap_width=width-20)[1] + 40)
+        # dpg.configure_item(modal_id, height=dpg.get_item_height(content_area_id) + 60)
 
 # Example Integration (in Viewport or DashboardManager):
 # from trade_suite.gui.widgets.sec_filing_viewer import SECFilingViewer
