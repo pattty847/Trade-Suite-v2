@@ -21,7 +21,7 @@ class Viewport:
         self.config_manager = config_manager
 
         self.task_manager = TaskManager(self.data)
-        self.sec_fetcher = SECDataFetcher(emitter=self.data.emitter)
+        self.sec_fetcher = SECDataFetcher()
         
         # Dashboard manager will be created in initialize_program
         self.dashboard_manager = None

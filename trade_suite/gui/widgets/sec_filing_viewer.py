@@ -7,6 +7,7 @@ from trade_suite.data.sec_api import SECDataFetcher
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.widgets.base_widget import DockableWidget
+from trade_suite.gui import utils
 
 class SECFilingViewer(DockableWidget):
     """
@@ -40,6 +41,7 @@ class SECFilingViewer(DockableWidget):
         _last_fetched_filings (List[Dict]): Stores the last fetched filings data for debugging.
         _last_fetched_transactions (List[Dict]): Stores the last fetched transactions data for debugging.
         _last_fetched_financials (Optional[Dict]): Stores the last fetched financials data for debugging.
+        _is_loading (bool): Flag to track if a load is in progress.
     """
     WIDGET_TYPE = "SECFilingViewer"
 
@@ -87,6 +89,7 @@ class SECFilingViewer(DockableWidget):
         self._last_fetched_filings: List[Dict] = []
         self._last_fetched_transactions: List[Dict] = []
         self._last_fetched_financials: Optional[Dict] = None
+        self._is_loading: bool = False # Flag to track if a load is in progress
 
         logging.info(f"SECFilingViewer instance {self.instance_id} created.")
 
@@ -130,6 +133,7 @@ class SECFilingViewer(DockableWidget):
         with dpg.table(tag=self.insider_tx_table_tag, header_row=True, resizable=True, policy=dpg.mvTable_SizingStretchProp,
                        borders_outerH=True, borders_innerV=True, borders_innerH=True, borders_outerV=True, row_background=True):
             dpg.add_table_column(label="Filer")
+            dpg.add_table_column(label="Position")
             dpg.add_table_column(label="Date")
             dpg.add_table_column(label="Type") # TODO: Confirm keys from sec_fetcher
             dpg.add_table_column(label="Shares") # TODO: Confirm keys
@@ -209,6 +213,11 @@ class SECFilingViewer(DockableWidget):
             form_type = dpg.get_value(self.form_type_combo_tag)
 
         if ticker and form_type: # Ensure both ticker and form type are present
+            if self._is_loading:
+                self._update_status("Please wait for the current request to complete.")
+                return # Prevent concurrent loads for now
+            self._is_loading = True
+            utils.create_loading_modal(f"Fetching {form_type} filings for {ticker}...") # Show modal
             self._update_status(f"Fetching {form_type} filings for {ticker}...")
             dpg.delete_item(self.filings_table_tag, children_only=True, slot=1) # Clear table content (keep header)
             # First parameter should be task_id, second parameter is coroutine object
@@ -231,6 +240,11 @@ class SECFilingViewer(DockableWidget):
         """
         ticker = self._get_ticker()
         if ticker:
+            if self._is_loading:
+                self._update_status("Please wait for the current request to complete.")
+                return # Prevent concurrent loads
+            self._is_loading = True
+            utils.create_loading_modal(f"Fetching insider transactions for {ticker}...") # Show modal
             self._update_status(f"Fetching insider transactions for {ticker}...")
             dpg.delete_item(self.insider_tx_table_tag, children_only=True, slot=1) # Clear table content
             # First parameter should be task_id, second parameter is coroutine object
@@ -249,6 +263,11 @@ class SECFilingViewer(DockableWidget):
         """
         ticker = self._get_ticker()
         if ticker:
+            if self._is_loading:
+                self._update_status("Please wait for the current request to complete.")
+                return # Prevent concurrent loads
+            self._is_loading = True
+            utils.create_loading_modal(f"Fetching financials for {ticker}...") # Show modal
             self._update_status(f"Fetching financials for {ticker}...")
             dpg.delete_item(self.financials_display_tag, children_only=True) # Clear financials display
             dpg.add_text("Loading...", parent=self.financials_display_tag)
@@ -411,6 +430,12 @@ class SECFilingViewer(DockableWidget):
             # Log if a task succeeded but wasn't handled (should be caught by earlier checks)
             logging.debug(f"SECFilingViewer {self.instance_id}: Received unhandled successful task: {task_name}")
 
+        # --- Delete loading modal --- #
+        if self._is_loading:
+             if dpg.does_item_exist("loading_modal"): # Use the tag from utils
+                  utils.delete_popup_modal("loading_modal")
+             self._is_loading = False # Reset loading flag
+
     def _handle_task_error(self, **kwargs) -> None:
         """Handles TASK_ERROR signals emitted by the TaskManager.
 
@@ -458,6 +483,12 @@ class SECFilingViewer(DockableWidget):
             elif task_name.startswith('sec_financials_'):
                  dpg.delete_item(self.financials_display_tag, children_only=True)
                  dpg.add_text(f"Error loading financials: {error}", parent=self.financials_display_tag, color=(255, 0, 0))
+
+        # --- Delete loading modal --- #
+        if self._is_loading:
+             if dpg.does_item_exist("loading_modal"): # Use the tag from utils
+                  utils.delete_popup_modal("loading_modal")
+             self._is_loading = False # Reset loading flag
 
     def _handle_filings_update(self, **kwargs) -> None:
         """Internal handler to update the filings table with new data.
@@ -533,6 +564,10 @@ class SECFilingViewer(DockableWidget):
                 if filer and len(filer) > 25:
                     filer = filer[:22] + "..."
                 dpg.add_text(filer)
+                
+                # Add Position
+                position = tx.get('position', 'N/A')
+                dpg.add_text(position)
                 
                 # Date - format as MM/DD/YYYY if possible
                 date_str = tx.get('date', 'N/A')
@@ -675,6 +710,11 @@ class SECFilingViewer(DockableWidget):
             self._update_status("Error: Missing accession number to list documents.")
             return
 
+        if self._is_loading:
+            self._update_status("Please wait for the current request to complete.")
+            return
+        self._is_loading = True
+        utils.create_loading_modal(f"Fetching document list for {accession_no}...") # Show modal
         logging.debug(f"Requesting document list for {accession_no}, ticker: {ticker}")
         self._update_status(f"Fetching document list for {accession_no}...")
 
@@ -684,7 +724,7 @@ class SECFilingViewer(DockableWidget):
         # Start background task to get the list of documents
         self.task_manager.start_task(
             task_id,
-            self.sec_fetcher.get_filing_documents_list(accession_no=accession_no, ticker=ticker)
+            self.sec_fetcher.document_handler.get_filing_documents_list(accession_no=accession_no, ticker=ticker)
         )
 
     def _request_specific_document_content_callback(self, sender, app_data, user_data):
@@ -707,6 +747,11 @@ class SECFilingViewer(DockableWidget):
             # Optionally update status in the main window or the modal?
             return
 
+        if self._is_loading:
+            self._update_status("Please wait for the current request to complete.")
+            return
+        self._is_loading = True
+        utils.create_loading_modal(f"Fetching content for {document_name}...") # Show modal
         logging.debug(f"Requesting content for {accession_no}, specific doc: {document_name}, ticker: {ticker}")
         self._update_status(f"Fetching content for {document_name} ({accession_no})...")
 
@@ -716,7 +761,7 @@ class SECFilingViewer(DockableWidget):
         # Start background task
         self.task_manager.start_task(
             task_id,
-            self.sec_fetcher.fetch_filing_document(accession_no=accession_no, primary_doc=document_name, ticker=ticker)
+            self.sec_fetcher.document_handler.fetch_filing_document(accession_no=accession_no, primary_doc=document_name, ticker=ticker)
         )
 
     def _open_url(self, sender, app_data, user_data):

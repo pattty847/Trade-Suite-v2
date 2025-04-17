@@ -6,24 +6,24 @@ This document outlines the steps needed to clean up and finalize the codebase af
 
 ### 1. Performance Optimization (`PriceLevelWidget`)
 
-- [ ] Investigate and mitigate lag observed when adding/using `PriceLevelWidget`, especially with small tick sizes.
-    - [ ] **Strategy 1 (Easy):** Increase `update_interval` in `PriceLevelWidget` (e.g., 0.1 or 0.2 seconds) to reduce UI update frequency.
-    - [ ] **Strategy 2 (Medium):** Modify `_process_and_display_orderbook` to only call `dpg.set_value` / `dpg.configure_item` for cells whose *value or color* has actually changed since the last update.
-    - [ ] **Strategy 3 (Harder):** Implement data source throttling in `data_source.py` for `ORDER_BOOK_UPDATE` signals.
-- [ ] Profile application with multiple widgets (especially `PriceLevelWidget`) open to identify other potential bottlenecks.
+- [X] Investigate and mitigate lag observed when adding/using `PriceLevelWidget`, especially with small tick sizes.
+    - [X] **Strategy 1 (Easy):** Increase `update_interval` in `PriceLevelWidget` (e.g., 0.1 or 0.2 seconds) to reduce UI update frequency.
+    - [X] **Strategy 2 (Medium):** Modify `_process_and_display_orderbook` to only call `dpg.set_value` / `dpg.configure_item` for cells whose *value or color* has actually changed since the last update.
+    - [X] **Strategy 3 (Harder):** Implement data source throttling in `data_source.py` for `ORDER_BOOK_UPDATE` signals.
+- [X] Profile application with multiple widgets (especially `PriceLevelWidget`) open to identify other potential bottlenecks.
 
 ### 2. Default Layout (`factory_layout.ini`)
 
-- [ ] Review the current default layout defined in `config/factory_layout.ini`.
+- [X] Review the current default layout defined in `config/factory_layout.ini`.
 - [ ] Arrange widgets in a desired default configuration within the running application.
 - [ ] Copy the resulting `config/user_layout.ini` to `config/factory_layout.ini` to set the new default.
 - [ ] Test the reset layout functionality (`--reset-layout` flag or `File` -> `Reset Layout`) to ensure the new factory default loads correctly.
 
 ### 3. Entry Point Refactoring
 
-- [ ] Rename `test_widgets_launch.py` to `app.py` or another appropriate name reflecting its role as the main application runner.
-- [ ] Update `main.py` to properly import and call the main function from the renamed entry point file.
-- [ ] Ensure command-line arguments (e.g., `--reset-layout`, `--level`) are handled correctly in the renamed entry point.
+- [X] Rename `test_widgets_launch.py` to `app.py` or another appropriate name reflecting its role as the main application runner.
+- [X] Update `main.py` to properly import and call the main function from the renamed entry point file.
+- [X Ensure command-line arguments (e.g., `--reset-layout`, `--level`) are handled correctly in the renamed entry point.
 
 ### 4. Final Testing & Bug Fixes
 
@@ -54,9 +54,9 @@ This document outlines the steps needed to clean up and finalize the codebase af
 
 ### 5. Code Duplication and Refactoring
 
-- [ ] Review `DashboardProgram` - can parts of its logic (dialogs, stream coordination) be moved into `Viewport` or `DashboardManager`?
-- [ ] Refactor shared functionality (e.g., default symbol/timeframe logic) into utility classes/functions if applicable.
-- [ ] Clean up any temporary workarounds or TODOs identified during refactoring.
+- [X] Review `DashboardProgram` - can parts of its logic (dialogs, stream coordination) be moved into `Viewport` or `DashboardManager`?
+- [X] Refactor shared functionality (e.g., default symbol/timeframe logic) into utility classes/functions if applicable.
+- [X] Clean up any temporary workarounds or TODOs identified during refactoring.
 
 ### 6. Update In-Code Documentation & README
 

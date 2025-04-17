@@ -100,6 +100,29 @@ class Form4Processor:
             owner_cik = root.findtext('.//reportingOwner/reportingOwnerId/rptOwnerCik', default='N/A')
             owner_name = root.findtext('.//reportingOwner/reportingOwnerId/rptOwnerName', default='N/A')
 
+            # Extract owner relationship
+            relationship_node = root.find('.//reportingOwner/reportingOwnerRelationship')
+            owner_positions = []
+            officer_title = None
+            if relationship_node is not None:
+                if relationship_node.findtext('isDirector', default='0').strip() in ['1', 'true']:
+                    owner_positions.append('Director')
+                if relationship_node.findtext('isOfficer', default='0').strip() in ['1', 'true']:
+                    owner_positions.append('Officer')
+                    officer_title = relationship_node.findtext('officerTitle', default='').strip()
+                if relationship_node.findtext('isTenPercentOwner', default='0').strip() in ['1', 'true']:
+                    owner_positions.append('10% Owner')
+                if relationship_node.findtext('isOther', default='0').strip() in ['1', 'true']:
+                    owner_positions.append('Other')
+            
+            # Format the position string
+            owner_position_str = ', '.join(owner_positions)
+            if officer_title and 'Officer' in owner_positions:
+                 # Replace 'Officer' with 'Officer (Title)' if title exists
+                 owner_position_str = owner_position_str.replace('Officer', f'Officer ({officer_title})', 1)
+            elif not owner_position_str:
+                 owner_position_str = 'N/A' # Default if no flags are set
+
             # Process Non-Derivative Transactions
             for tx in root.findall('.//nonDerivativeTransaction'):
                 try:
@@ -140,7 +163,8 @@ class Form4Processor:
                         'value': shares * price if shares is not None and price is not None else 0.0,
                         'shares_owned_after': shares_owned_after,
                         'direct_indirect': direct_indirect,
-                        'is_derivative': False
+                        'is_derivative': False,
+                        'owner_position': owner_position_str
                     }
                     transactions.append(transaction)
                 except Exception as e:
@@ -192,7 +216,8 @@ class Form4Processor:
                         'underlying_shares': underlying_shares,
                         'shares_owned_after': shares_owned_after,
                         'direct_indirect': direct_indirect,
-                        'is_derivative': True
+                        'is_derivative': True,
+                        'owner_position': owner_position_str
                     }
                     transactions.append(transaction)
                 except Exception as e:
@@ -308,6 +333,7 @@ class Form4Processor:
             for tx in parsed_transactions:
                 ui_transaction = {
                     'filer': tx.get('owner_name', 'N/A'),
+                    'position': tx.get('owner_position', 'N/A'),
                     'date': tx.get('transaction_date', 'N/A'),
                     'type': tx.get('transaction_type', 'Unknown'),
                     'shares': tx.get('shares'),
