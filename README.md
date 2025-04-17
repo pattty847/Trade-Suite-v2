@@ -1,6 +1,13 @@
 # TradeSuite - A Multi-Exchange Cryptocurrency Trading Platform
 
-![TradeSuite Screenshot](https://github.com/pattty847/Trade-Suite-v2/assets/23511285/2f5e732d-87ba-4132-b66e-7dd71e643393)
+![Screenshot 2025-04-10 155148](https://github.com/user-attachments/assets/2cc68be5-f07e-4484-9d7f-5351b1d2b695)
+
+## (IN THE WORKS)
+![image](https://github.com/user-attachments/assets/af3ef9f6-31de-4793-a48b-59c5e78897e3)
+
+## Architecture
+![image](https://github.com/user-attachments/assets/4d6c7474-0fcc-4ca7-891c-be9fe1077737)
+
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -36,7 +43,8 @@ TradeSuite is a multi-exchange cryptocurrency trading platform built using DearP
 
 - Python 3.10+ 
 - InfluxDB (local or cloud instance)
-- CCXT Pro license (for professional use)
+- Crypto Exchange key (for trading)
+- SEC EDGAR API name and email (for their API requirements)
 
 ### Installation
 
@@ -203,6 +211,8 @@ Please make sure to follow our [contribution guidelines](CONTRIBUTING.md).
 TradeSuite is released under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## For Developers
+
+![image](https://github.com/user-attachments/assets/157c17e5-b3ec-4433-91ab-fba92765f868)
 
 ### Packaging the Application
 
