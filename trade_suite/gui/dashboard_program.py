@@ -4,7 +4,7 @@ import dearpygui.demo as demo
 
 from trade_suite.config import ConfigManager
 from trade_suite.data.data_source import Data
-from trade_suite.data.sec_data import SECDataFetcher
+from trade_suite.data.sec_api import SECDataFetcher
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.utils import searcher, center_window
@@ -22,6 +22,8 @@ class DashboardProgram:
     """
     Main program class that uses the dockable widgets system.
     This replaces the original Program class with a more flexible dashboard approach.
+    TODO: As the file grows, it should be refactored into multiple files, breaking down the dialog creation/handling 
+    logic into separate UI components or helper classes.
     """
 
     def __init__(

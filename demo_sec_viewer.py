@@ -23,17 +23,17 @@ if not os.environ.get("SEC_API_USER_AGENT"):
 # Ensure the correct asyncio event loop policy is set for Windows
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+elif sys.platform == 'linux':
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+elif sys.platform == 'macos':
+    asyncio.set_event_loop_policy(asyncio.MacOSSelectorEventLoopPolicy())
+    
 
 # Import our components
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.data.sec_api import SECDataFetcher
 from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.widgets.sec_filing_viewer import SECFilingViewer
-
-# Create dump directory if it doesn't exist
-DUMP_DIR = "sec_data_dump"
-if not os.path.exists(DUMP_DIR):
-    os.makedirs(DUMP_DIR)
 
 class DemoDataContainer:
     """Simple container to hold the emitter for the TaskManager in the demo."""

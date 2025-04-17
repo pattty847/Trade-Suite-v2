@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import argparse
+
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -17,7 +18,10 @@ os.makedirs('logs', exist_ok=True)
 
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
+elif sys.platform == 'linux':
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+elif sys.platform == 'macos':
+    asyncio.set_event_loop_policy(asyncio.MacOSSelectorEventLoopPolicy())
 
 def _setup_logging(level=logging.INFO):
     """Configure logging to both console and file with timestamps."""

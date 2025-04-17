@@ -1,248 +1,237 @@
 import os
 import logging
 import json
+import asyncio # Added asyncio
 from datetime import datetime
+import sys
 from trade_suite.data.sec_api import SECDataFetcher
 from dotenv import load_dotenv
 import pandas as pd # Added for CSV saving
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 load_dotenv()   
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', # Added logger name
     handlers=[
-        logging.FileHandler("sec_data_exploration.log"), # Changed log file name
+        logging.FileHandler("sec_api_test.log"), # Renamed log file
         logging.StreamHandler()
     ]
 )
+logger = logging.getLogger(__name__) # Added logger instance
 
-# Ensure the output directory exists
-EXPLORATION_DIR = "data/exploration_output"
-os.makedirs(EXPLORATION_DIR, exist_ok=True)
+# Ensure the output directory exists - Changed to sec_data_dump
+OUTPUT_DIR = "sec_data_dump"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def save_json(data, filename):
     """Helper function to save dictionary data to a JSON file."""
-    filepath = os.path.join(EXPLORATION_DIR, filename)
+    filepath = os.path.join(OUTPUT_DIR, filename)
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        logging.info(f"Successfully saved data to {filepath}")
+            # Handle cases where data might not be serializable directly (e.g., set)
+            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        logger.info(f"Successfully saved JSON data to {filepath}")
     except Exception as e:
-        logging.error(f"Error saving JSON to {filepath}: {e}")
+        logger.error(f"Error saving JSON to {filepath}: {e}")
 
 def save_text(content, filename):
     """Helper function to save text content to a file."""
-    filepath = os.path.join(EXPLORATION_DIR, filename)
+    filepath = os.path.join(OUTPUT_DIR, filename)
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
-        logging.info(f"Successfully saved text content to {filepath}")
+        logger.info(f"Successfully saved text content to {filepath}")
     except Exception as e:
-        logging.error(f"Error saving text to {filepath}: {e}")
+        logger.error(f"Error saving text to {filepath}: {e}")
 
 def save_dataframe_csv(df, filename):
     """Helper function to save a pandas DataFrame to a CSV file."""
-    filepath = os.path.join(EXPLORATION_DIR, filename)
+    if df is None or df.empty:
+        logger.warning(f"DataFrame is empty or None, skipping save for {filename}")
+        return
+    filepath = os.path.join(OUTPUT_DIR, filename)
     try:
         df.to_csv(filepath, index=False)
-        logging.info(f"Successfully saved DataFrame to {filepath}")
+        logger.info(f"Successfully saved DataFrame to {filepath}")
     except Exception as e:
-        logging.error(f"Error saving DataFrame to {filepath}: {e}")
+        logger.error(f"Error saving DataFrame to {filepath}: {e}")
 
 def explore_and_save_data(ticker, days_back=365):
     """Fetches various data points for a ticker and saves them for analysis."""
     ticker = ticker.upper()
-    logging.info(f"--- Starting data exploration for {ticker} ---")
+    logger.info(f"--- Starting data exploration for {ticker} ---")
 
     # Create SEC data fetcher
     user_agent = os.getenv('SEC_API_USER_AGENT', 'YourAppName (youremail@example.com)') # Provide a default if not set
     if not user_agent or user_agent == 'YourAppName (youremail@example.com)':
-         logging.warning("Using default/placeholder User-Agent. Please set SEC_API_USER_AGENT environment variable.")
+         logger.warning("Using default/placeholder User-Agent. Please set SEC_API_USER_AGENT environment variable.")
     fetcher = SECDataFetcher(user_agent=user_agent)
 
     if not fetcher.api_valid:
-        logging.error("SEC API not accessible. Exiting exploration.")
+        logger.error("SEC API not accessible. Exiting exploration.")
         return
 
     # 1. Fetch and save raw company submissions
-    logging.info(f"Fetching raw submissions for {ticker}...")
+    logger.info(f"Fetching raw submissions for {ticker}...")
     submissions = fetcher.get_company_submissions(ticker, use_cache=False) # Force fetch for exploration
     if submissions:
         save_json(submissions, f"{ticker}_submissions_raw.json")
     else:
-        logging.warning(f"Could not fetch submissions for {ticker}.")
+        logger.warning(f"Could not fetch submissions for {ticker}.")
 
     # Fetch filings lists (Form 4, 10-K, 10-Q)
     form_types_to_fetch = {"4": 90, "10-K": 365*2, "10-Q": 365} # Use specific days_back
     filings_data = {}
 
     for form_type, lookback in form_types_to_fetch.items():
-        logging.info(f"Fetching {form_type} filings list for {ticker} (last {lookback} days)...")
+        logger.info(f"Fetching {form_type} filings list for {ticker} (last {lookback} days)...")
         filings = fetcher.get_filings_by_form(ticker, form_type, days_back=lookback, use_cache=False) # Force fetch
         filings_data[form_type] = filings
         if filings:
             save_json(filings, f"{ticker}_{form_type}_filings_list.json")
-            logging.info(f"Found {len(filings)} {form_type} filings.")
+            logger.info(f"Found {len(filings)} {form_type} filings.")
 
             # Fetch and save the primary document of the *most recent* filing
             most_recent_filing = filings[0] # Assumes list is sorted descending by date
             accession_no = most_recent_filing.get('accessionNo')
             primary_doc_name = most_recent_filing.get('primaryDocument')
             if accession_no and primary_doc_name:
-                logging.info(f"Fetching primary document for {form_type} {accession_no} ({primary_doc_name})...")
+                logger.info(f"Fetching primary document for {form_type} {accession_no} ({primary_doc_name})...")
                 doc_content = fetcher.fetch_filing_document(accession_no, primary_doc_name)
                 if doc_content:
                     # Save with appropriate extension if possible
                     file_ext = os.path.splitext(primary_doc_name)[1] or ".html" # Default to .html
                     save_text(doc_content, f"{ticker}_{form_type}_{accession_no}{file_ext}")
                 else:
-                    logging.warning(f"Could not fetch document for {accession_no}")
+                    logger.warning(f"Could not fetch document for {accession_no}")
         else:
-            logging.warning(f"No {form_type} filings found for {ticker} in the lookback period.")
+            logger.warning(f"No {form_type} filings found for {ticker} in the lookback period.")
 
     # Fetch, parse, and save Form 4 transactions
-    logging.info(f"Fetching and parsing Form 4 transactions for {ticker} (last {form_types_to_fetch['4']} days)...")
+    logger.info(f"Fetching and parsing Form 4 transactions for {ticker} (last {form_types_to_fetch['4']} days)...")
     transactions_df = fetcher.get_recent_insider_transactions(ticker, days_back=form_types_to_fetch['4'], use_cache=False)
     if not transactions_df.empty:
         save_dataframe_csv(transactions_df, f"{ticker}_form4_transactions.csv")
     else:
-        logging.warning(f"No parsable Form 4 transactions found for {ticker}.")
+        logger.warning(f"No parsable Form 4 transactions found for {ticker}.")
 
-    logging.info(f"--- Data exploration finished for {ticker} ---")
-    logging.info(f"Check the '{EXPLORATION_DIR}' directory for saved files.")
+    logger.info(f"--- Data exploration finished for {ticker} ---")
+    logger.info(f"Check the '{OUTPUT_DIR}' directory for saved files.")
 
-def test_edgar_api():
-    """Test the EDGAR API functionality using SECDataFetcher."""
-    logging.info("--- Starting EDGAR API Test --- ")
+async def test_edgar_api_refactored(ticker="AAPL"):
+    """Test the refactored EDGAR API functionality using SECDataFetcher."""
+    logger.info(f"--- Starting Refactored EDGAR API Test for {ticker} --- ")
     # Initialize the fetcher
-    user_agent = os.getenv('SEC_API_USER_AGENT', 'YourAppName (youremail@example.com)') # Provide a default
-    if not user_agent or user_agent == 'YourAppName (youremail@example.com)':
-         logging.warning("Using default/placeholder User-Agent. Please set SEC_API_USER_AGENT environment variable.")
+    user_agent = os.getenv('SEC_API_USER_AGENT')
+    if not user_agent:
+         logger.warning("SEC_API_USER_AGENT environment variable not set. Using default rate limiting, but requests might be slower or blocked.")
+         # Use a generic user agent if none is provided, but log warning
+         user_agent = "TradeSuiteTester/1.0 (test@example.com)"
+
     fetcher = SECDataFetcher(user_agent=user_agent)
 
-    if not fetcher.api_valid:
-        logging.error("SEC API not accessible. Exiting test.")
+    # --- Test getting CIK ---
+    logger.info(f"[TEST] Getting CIK for {ticker}...")
+    cik = await fetcher.get_cik_for_ticker(ticker)
+    if cik:
+        logger.info(f"SUCCESS: CIK for {ticker}: {cik}")
+    else:
+        logger.error(f"FAILURE: Failed to get CIK for {ticker}. Aborting further tests.")
+        await fetcher.close() # Close client session
         return
 
-    # Test getting CIK for a ticker
-    ticker = "AAPL"
-    logging.info(f"Getting CIK for {ticker}...")
-    cik = fetcher.get_cik_for_ticker(ticker)
-    if cik:
-        logging.info(f"CIK for {ticker}: {cik}")
+    # --- Test getting Company Info ---
+    logger.info(f"[TEST] Getting Company Info for {ticker}...")
+    # Usually cached, force fetch for testing? Let's use cache for now.
+    company_info = await fetcher.get_company_info(ticker, use_cache=True)
+    if company_info:
+        logger.info(f"SUCCESS: Got company info for {company_info.get('name', ticker)}.")
+        save_json(company_info, f"{ticker}_company_info.json")
     else:
-        logging.error(f"Failed to get CIK for {ticker}. Aborting further tests for this ticker.")
-        return # Stop if CIK lookup fails
+        logger.warning(f"WARNING: Failed to get company info for {ticker}.") # Don't abort test
 
-    # Test fetching a recent 10-K form using fetch_form_direct
-    logging.info(f"\nFetching recent 10-K for {ticker} using fetch_form_direct...")
-    forms = fetcher.fetch_form_direct(ticker, "10-K", count=1)
-    if forms:
-        form = forms[0]
-        logging.info(f"Found 10-K filed on {form['filing_date']} (Acc: {form['accession_number']}) Document: {form['primary_document']}")
+    # --- Test Fetching Specific Filings Lists ---
+    filing_tests = {
+        "10-K": 730, # 2 years
+        "10-Q": 365, # 1 year
+        "8-K": 180,  # 6 months
+        "4": 90      # 3 months (standard for insider tx)
+    }
 
-        # Download the document using download_form_document
-        accession_number = form.get('accession_number')
-        document_name = form.get('primary_document')
-
-        if accession_number and document_name:
-            logging.info(f"\nDownloading document: {document_name} using download_form_document...")
-            doc_content = fetcher.download_form_document(
-                accession_number,
-                document_name
-            )
-
-            if doc_content:
-                logging.info(f"Document size: {len(doc_content)} bytes")
-
-                # Save the document using helper
-                # Determine a reasonable extension
-                file_ext = os.path.splitext(document_name)[1] or ".html"
-                save_filename = f"{ticker}_10K_{form['filing_date']}{file_ext}"
-                save_text(doc_content, save_filename)
-            else:
-                logging.error("Failed to download document using download_form_document")
+    for form_type, days_back in filing_tests.items():
+        logger.info(f"[TEST] Fetching {form_type} filings list for {ticker} (last {days_back} days)...")
+        # Force fetch to test API, not just cache reads
+        filings = await fetcher.get_filings_by_form(ticker, form_type, days_back=days_back, use_cache=False)
+        if filings:
+            logger.info(f"SUCCESS: Found {len(filings)} {form_type} filings.")
+            save_json(filings, f"{ticker}_{form_type}_{days_back}d_filings_list.json")
+            # Log first few filing details for quick check
+            for i, f in enumerate(filings[:3]):
+                 logger.info(f"  - Filing {i+1}: Date={f.get('filing_date')}, AccNo={f.get('accession_no')}")
+        elif isinstance(filings, list) and not filings:
+             logger.info(f"SUCCESS (API): Found 0 {form_type} filings in the lookback period.")
+             # Save empty list to indicate test ran
+             save_json([], f"{ticker}_{form_type}_{days_back}d_filings_list.json")
         else:
-            logging.warning("Missing accession number or document name, cannot download.")
+            logger.error(f"FAILURE: Failed to get {form_type} filings list (returned type: {type(filings)}).")
+
+    # --- Test Fetching Recent Insider Transactions ---
+    insider_days_back = 90
+    logger.info(f"[TEST] Fetching and parsing Form 4 transactions for {ticker} (last {insider_days_back} days)...")
+    # Force fetch = False here, as it inherently fetches filings and parses docs if needed
+    transactions_list = await fetcher.get_recent_insider_transactions(
+        ticker, days_back=insider_days_back, use_cache=True, filing_limit=10 # Limit processing for test speed
+    )
+    if isinstance(transactions_list, list):
+         logger.info(f"SUCCESS: Parsed {len(transactions_list)} Form 4 transactions.")
+         # Convert list of dicts to DataFrame for saving
+         if transactions_list:
+              transactions_df = pd.DataFrame(transactions_list)
+              save_dataframe_csv(transactions_df, f"{ticker}_form4_transactions_{insider_days_back}d.csv")
+              logger.info(f"  - Example Transaction: {transactions_list[0]}")
+         else:
+              logger.info("  - No transactions found in the specified period/limit.")
+              # Save empty CSV to indicate test ran
+              save_dataframe_csv(pd.DataFrame(), f"{ticker}_form4_transactions_{insider_days_back}d.csv")
     else:
-        logging.warning(f"No 10-K forms found for {ticker} via fetch_form_direct")
+        logger.error(f"FAILURE: get_recent_insider_transactions returned type {type(transactions_list)}, expected list.")
 
-    # +++ Fetch recent Form 4 XML examples +++
-    logging.info(f"\nFetching recent Form 4 filings for {ticker} to get XML examples...")
-    form4_filings = fetcher.fetch_form_direct(ticker, "4", count=2)
-    if form4_filings:
-        logging.info(f"Found {len(form4_filings)} recent Form 4 filings.")
-        for i, filing in enumerate(form4_filings):
-            accession_no = filing.get('accession_number')
-            if accession_no:
-                logging.info(f"Downloading Form 4 XML for filing {i+1}: {accession_no}...")
-                xml_content = fetcher.download_form_xml(accession_no)
-                if xml_content:
-                    xml_filename = f"{ticker}_form4_{accession_no}.xml"
-                    save_text(xml_content, xml_filename) # Use existing helper
-                    logging.info(f"Saved Form 4 XML example: {xml_filename}")
 
-                    # +++ Test the new XML parser +++
-                    logging.info(f"Parsing {xml_filename} using the new XML parser...")
-                    parsed_transactions = fetcher.parse_form4_xml(xml_content)
-                    if parsed_transactions:
-                        logging.info(f"Successfully parsed {len(parsed_transactions)} transactions from {xml_filename}.")
-                        # Log first transaction as example
-                        logging.info(f"Example parsed transaction: {parsed_transactions[0]}") 
-                        # Optionally save parsed data
-                        parsed_filename = f"{ticker}_form4_{accession_no}_parsed.json"
-                        save_json(parsed_transactions, parsed_filename) # Use existing helper
-                    else:
-                        logging.error(f"Failed to parse transactions from {xml_filename} using the new parser.")
-                    # +++ End Test the new XML parser +++
-                else:
-                    logging.warning(f"Could not download XML for {accession_no}.")
-            else:
-                logging.warning(f"Form 4 filing {i+1} missing accession number.")
+    # --- Test Fetching Financial Summary ---
+    logger.info(f"[TEST] Fetching financial summary for {ticker}...")
+    # Force fetch to test processing, not just cache read
+    financial_summary = await fetcher.get_financial_summary(ticker, use_cache=False)
+    if financial_summary:
+        logger.info(f"SUCCESS: Generated financial summary for {ticker}.")
+        save_json(financial_summary, f"{ticker}_financial_summary.json")
+        # Log a few summary items
+        logger.info(f"  - Revenue: {financial_summary.get('Revenue')}")
+        logger.info(f"  - Net Income: {financial_summary.get('NetIncomeLoss')}")
+        logger.info(f"  - EPS Basic: {financial_summary.get('EarningsPerShareBasic')}")
     else:
-        logging.warning(f"No recent Form 4 filings found for {ticker}.")
-    # +++ End Fetch recent Form 4 XML examples +++
+        logger.error(f"FAILURE: Failed to generate financial summary for {ticker}.")
 
-    # Fetch Company Facts (as before)
-    logging.info(f"\nFetching company facts for {ticker}...")
-    company_facts = fetcher.get_company_facts(ticker)
-    if company_facts:
-        logging.info(f"Successfully fetched company facts for {company_facts.get('entityName', ticker)}.")
-        save_filename = f"{ticker}_company_facts.json"
-        save_json(company_facts, save_filename)
 
-        # +++ Fetch Financial Summary with Ratios +++
-        logging.info(f"\nFetching financial summary (including calculated ratios) for {ticker}...")
-        financial_summary = fetcher.get_financial_summary(ticker, use_cache=False) # Use cache=False to ensure ratio calc runs
-        if financial_summary:
-            summary_filename = f"{ticker}_financial_summary.json"
-            save_json(financial_summary, summary_filename)
-            logging.info(f"Saved financial summary to {summary_filename}")
-            
-            # Log the calculated ratios
-            ratios = financial_summary.get('calculated_ratios', {})
-            if ratios:
-                logging.info("Calculated Ratios:")
-                for name, data in ratios.items():
-                    value_str = f"{data.get('value'):.4f}" if data.get('value') is not None else "N/A"
-                    logging.info(f"  - {name}: {value_str} (Unit: {data.get('unit')}, Period: {data.get('end_date')}, Error: {data.get('error')})")
-            else:
-                logging.info("No ratios could be calculated (likely missing data or mismatched periods).")
-        else:
-            logging.error(f"Failed to generate financial summary for {ticker}.")
-        # +++ End Fetch Financial Summary +++
+    # --- Cleanup ---
+    await fetcher.close() # Close the HTTP client session
+    logger.info(f"--- Refactored EDGAR API Test Finished for {ticker} ---")
+    logger.info(f"Check the '{OUTPUT_DIR}' directory for saved files.")
 
-    else:
-        logging.error(f"Failed to fetch company facts for {ticker}. Cannot generate summary.")
+async def main():
+    """Main async function to run tests."""
+    # Test with a primary ticker
+    await test_edgar_api_refactored(ticker="AAPL")
 
-    logging.info("--- EDGAR API Test Finished ---")
-
-def main():
-    """Main function to run the EDGAR API test."""
-    test_edgar_api()
+    # Optionally test another ticker
+    # await test_edgar_api_refactored(ticker="MSFT")
 
 if __name__ == "__main__":
-    # Ensure you have a .env file with SEC_API_USER_AGENT="YourAppName (youremail@example.com)"
-    main()
+    # Ensure you have a .env file with SEC_API_USER_AGENT="Your Name (your.email@example.com)"
+    logger.info("Starting SEC API Test Script...")
+    asyncio.run(main())
+    logger.info("SEC API Test Script finished.")

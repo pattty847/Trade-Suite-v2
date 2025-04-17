@@ -1,0 +1,40 @@
+# SEC API Refactoring TODO
+
+- [x] **Phase 1: `SecHttpClient`**
+    - [x] Create `trade_suite/data/sec/http_client.py`.
+    - [x] Move relevant attributes (`user_agent`, `headers`, `request_interval`, `last_request_time`) and methods (`_get_session`, `_make_request`, `_test_api_access`, `close`) from `SECDataFetcher` to `SecHttpClient`.
+    - [x] Ensure `SecHttpClient` handles `aiohttp.ClientSession` correctly.
+    - [x] Adjust imports and dependencies.
+- [x] **Phase 2: `SecCacheManager`**
+    - [x] Create `trade_suite/data/sec/cache_manager.py`.
+    - [x] Move `cache_dir`, `_ensure_directories`, and all `_load_*_from_cache`/`_save_*_to_cache` methods to `SecCacheManager`.
+    - [x] Refactor cache path generation for consistency.
+    - [x] Adjust imports and dependencies.
+- [x] **Phase 3: `FilingDocumentHandler`**
+    - [x] Create `trade_suite/data/sec/document_handler.py`.
+    - [x] Move `get_filing_documents_list`, `download_form_document`, `download_form_xml`, `fetch_filing_document`, and `download_all_form_documents` to `FilingDocumentHandler`.
+    - [x] Pass `SecHttpClient` instance and CIK lookup capability.
+    - [x] Refactor CIK handling.
+    - [x] Consider `asyncio.gather` for `download_all_form_documents`.
+    - [x] Adjust imports and dependencies.
+- [x] **Phase 4: `Form4Processor`**
+    - [x] Create `trade_suite/data/sec/form4_processor.py`.
+    - [x] Move `parse_form4_xml`, `process_form4_filing`, `get_recent_insider_transactions`, `analyze_insider_transactions`, and constants (`TRANSACTION_CODE_MAP`, `ACQUISITION_CODES`, `DISPOSITION_CODES`) to `Form4Processor`.
+    - [x] Pass dependencies (main fetcher, `FilingDocumentHandler`, pandas).
+    - [x] Adjust imports and dependencies.
+- [x] **Phase 5: `FinancialDataProcessor`**
+    - [x] Create `trade_suite/data/sec/financial_processor.py`.
+    - [x] Move `_get_latest_fact_value`, `get_financial_summary`, `_calculate_ratios`, and `KEY_FINANCIAL_SUMMARY_METRICS` constant to `FinancialDataProcessor`.
+    - [x] Pass dependencies (main fetcher).
+    - [x] Adjust imports and dependencies.
+- [x] **Phase 6: Refactor `SECDataFetcher`**
+    - [x] Modify `trade_suite/data/sec_api.py`.
+    - [x] Initialize and inject new handlers/processors.
+    - [x] Keep core orchestrator methods (`get_cik_for_ticker`, `get_company_info`, `get_company_submissions`, `get_company_facts`, `get_filings_by_form` wrappers).
+    - [x] Delegate calls to appropriate components.
+    - [x] Remove moved/deprecated methods and unused imports.
+    - [x] Update imports.
+- [ ] **Phase 7: Cleanup**
+    - [ ] Review all files for imports, types, and connections.
+    - [ ] Ensure `await` is used correctly.
+    - [ ] Finalize constant placement (e.g., `FORM_TYPES`). 

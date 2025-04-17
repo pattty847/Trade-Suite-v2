@@ -9,6 +9,9 @@ trade_suite/architecture.drawio
 project_to_text.py
 docs/TODO.md
 docs/UI_IMPROVEMENTS.md
+scripts/extract_docs.py
+sec_data_dump/
+sec_api_test.log
 
 # Environment variables (never commit these)
 .env
