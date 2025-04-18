@@ -249,6 +249,29 @@ class TaskManager:
                 fut.result()
                 logging.info(f"Candles loaded. Starting trade and orderbook streams for {symbol} on {exchange}.")
                 
+                # Create a CandleFactory to process trades into candles
+                from trade_suite.data.candle_factory import CandleFactory
+                config_manager = self.data.config_manager if hasattr(self.data, 'config_manager') else {}
+                exchange_settings = config_manager.get_setting(exchange) if hasattr(config_manager, 'get_setting') else {}
+                if not exchange_settings:
+                    exchange_settings = {'last_symbol': symbol}
+                
+                # Create a candle factory with the correct tab ID
+                candle_factory = CandleFactory(
+                    exchange=exchange,
+                    tab=tab,
+                    emitter=self.data.emitter,
+                    task_manager=self,
+                    data=self.data,
+                    exchange_settings=exchange_settings,
+                    timeframe_str=timeframe
+                )
+                
+                # Store it in a dictionary for potential later reference
+                self.data.candle_factories = getattr(self.data, 'candle_factories', {})
+                self.data.candle_factories[tab] = candle_factory
+                logging.info(f"Created CandleFactory for tab {tab} and timeframe {timeframe}")
+                
                 # Now start the trade and orderbook streams
                 self.start_task(
                     trades_task,

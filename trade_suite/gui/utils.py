@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import threading
 import dearpygui.dearpygui as dpg
+from typing import Dict, Any
 
 
 def timeframe_to_seconds(timeframe_str):
@@ -165,3 +166,47 @@ def searcher(searcher, result, search_list):
         modified_list.extend(search_list)
 
     dpg.configure_item(result, items=modified_list)
+
+
+def timeframe_to_dpg_time_unit(timeframe: str) -> int:
+    """
+    Convert a trading timeframe string to the appropriate DearPyGui time unit constant.
+    
+    Args:
+        timeframe: A string representing the timeframe (e.g., '1m', '5m', '1h', '4h', '1d')
+        
+    Returns:
+        The corresponding DearPyGui time unit constant
+        
+    Examples:
+        >>> timeframe_to_dpg_time_unit('1m')
+        mvTimeUnit_Min
+        >>> timeframe_to_dpg_time_unit('1h')
+        mvTimeUnit_Hr
+    """
+    # Strip trailing whitespace and convert to lowercase for consistency
+    tf = timeframe.strip().lower()
+    
+    # Extract the unit part (m, h, d, etc.)
+    # Typically the format is a number followed by a unit
+    # First extract just the unit (last character or characters)
+    unit = ''.join(c for c in tf if not c.isdigit())
+    
+    # Parse the timeframe based on unit
+    if unit == 'm':
+        return dpg.mvTimeUnit_Min
+    elif unit == 'h':
+        return dpg.mvTimeUnit_Hr
+    elif unit == 'd':
+        return dpg.mvTimeUnit_Day
+    elif unit == 'w':
+        return dpg.mvTimeUnit_Day  # Weeks not directly supported, fallback to days
+    elif unit == 'mo':
+        return dpg.mvTimeUnit_Mo
+    elif unit == 'y':
+        return dpg.mvTimeUnit_Yr
+    elif unit == 's':
+        return dpg.mvTimeUnit_S
+    else:
+        # Default to minutes if unknown
+        return dpg.mvTimeUnit_Min

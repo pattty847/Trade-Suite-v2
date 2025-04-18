@@ -8,6 +8,7 @@ from datetime import datetime # Added for status bar update
 
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.widgets.base_widget import DockableWidget
+from trade_suite.gui.utils import timeframe_to_dpg_time_unit
 
 
 class ChartWidget(DockableWidget):
@@ -43,6 +44,12 @@ class ChartWidget(DockableWidget):
             # Append timeframe to instance ID for uniqueness if multiple timeframes allowed
             instance_id = f"{exchange}_{symbol}_{timeframe}".lower().replace("/", "")
             
+        # IMPORTANT: The window_tag property from DockableWidget base class is used as the widget's unique identifier
+        # This tag is used to:
+        # 1. Reference the DPG window item
+        # 2. Connect the widget to data streams via the TaskManager (as 'tab' parameter)
+        # 3. Route signals from emitters to the correct widget instance
+        # The id format is "widget_chart_[instance_id]" from the DockableWidget class
         super().__init__(
             title=f"Chart - {exchange.upper()} {symbol} ({timeframe})",
             widget_type="chart",
@@ -109,8 +116,9 @@ class ChartWidget(DockableWidget):
             )
             
             dpg.add_menu_item(
-                label="Fit Now",
-                callback=self._fit_chart
+                label="Fit Now (F)",
+                callback=self._fit_chart,
+                shortcut="F"
             )
         
         # Indicators Menu
@@ -130,6 +138,14 @@ class ChartWidget(DockableWidget):
             dpg.add_text(f"{self.symbol}") # Display symbol
             # Placeholder for current price
             dpg.add_text(" | Price:", tag=self.price_tag)
+            dpg.add_spacer(width=20)
+            
+            # Add a fit button for quick access
+            dpg.add_button(
+                label="Fit Chart",
+                callback=self._fit_chart,
+                width=80
+            )
         
         # Chart with subplots
         with dpg.subplots(
@@ -148,7 +164,7 @@ class ChartWidget(DockableWidget):
                 # X Axis (hidden ticks/labels, linked)
                 self.x_axis_tag = dpg.add_plot_axis(
                     dpg.mvXAxis,
-                    time=True, # Use time scale
+                    scale=dpg.mvPlotScale_Time, # Use time scale
                     no_tick_marks=True,
                     no_tick_labels=True,
                     tag=f"{self.window_tag}_xaxis_price" # Unique tag
@@ -159,7 +175,7 @@ class ChartWidget(DockableWidget):
                     self.candle_series_tag = dpg.add_candle_series(
                         dates=[], opens=[], closes=[], lows=[], highs=[],
                         label=self.symbol,
-                        # time_unit=dpg.mvTimeUnit_Min # Infer from data usually better
+                        time_unit=timeframe_to_dpg_time_unit(self.timeframe)
                     )
                     # Indicator series will be added here dynamically
             
@@ -298,10 +314,7 @@ class ChartWidget(DockableWidget):
              except Exception as e:
                  logging.warning(f"Error clearing status bar for {self.window_tag}: {e}")
 
-
-        # --- Auto-fit Axes ---
-        if self.auto_fit_enabled:
-            self._fit_chart()
+        # We no longer auto-fit on every update, just on initial load and manual requests
     
     def _on_new_candles(self, tab, exchange, candles):
         """Handler for NEW_CANDLES signal (initial load)."""
@@ -309,13 +322,29 @@ class ChartWidget(DockableWidget):
         if tab == self.window_tag and exchange == self.exchange:
              logging.info(f"Chart {self.window_tag} received NEW_CANDLES")
              self.update(candles)
+             # Auto-fit only on initial load, not on real-time updates
+             if self.auto_fit_enabled:
+                 self._fit_chart()
     
     def _on_updated_candles(self, tab, exchange, candles):
         """Handler for UPDATED_CANDLES signal (real-time updates)."""
         # Filter events specific to this widget instance
         if tab == self.window_tag and exchange == self.exchange:
-             # logging.debug(f"Chart {self.window_tag} received UPDATED_CANDLES") # Too noisy for info
+             logging.debug(f"Chart {self.window_tag} received UPDATED_CANDLES - shape: {candles.shape if isinstance(candles, pd.DataFrame) else 'Not DataFrame'}")
+             
+             # Add more diagnostic logging
+             if isinstance(candles, pd.DataFrame) and not candles.empty:
+                 last_candle = candles.iloc[-1]
+                 logging.debug(f"Last candle timestamp: {datetime.fromtimestamp(last_candle['dates'])} - close: {last_candle['closes']}")
+             
              self.update(candles)
+             # Don't auto-fit on updates to avoid constant rescaling
+        elif tab == self.window_tag:
+             # This log would catch mismatches in exchange
+             logging.warning(f"Chart {self.window_tag} filtered out UPDATED_CANDLES - expected exchange {self.exchange} but got {exchange}")
+        elif exchange == self.exchange:
+             # This log would catch mismatches in tab
+             logging.warning(f"Chart {self.window_tag} filtered out UPDATED_CANDLES - expected tab {self.window_tag} but got {tab}")
     
     # --- Indicator Methods ---
     
@@ -406,6 +435,14 @@ class ChartWidget(DockableWidget):
             # Clear existing data and series
             self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
             self._clear_indicator_series()
+            
+            # Reset the candle series with the new time unit
+            if dpg.does_item_exist(self.candle_series_tag):
+                dpg.configure_item(
+                    self.candle_series_tag,
+                    time_unit=timeframe_to_dpg_time_unit(new_timeframe)
+                )
+                
             self._update_chart()
 
             # Signal upstream to change the data stream

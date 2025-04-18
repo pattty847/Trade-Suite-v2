@@ -2,6 +2,7 @@ import logging
 import pandas as pd
 import time
 from typing import Dict, List, Optional, Tuple
+from datetime import datetime
 
 from trade_suite.gui.utils import timeframe_to_seconds
 
@@ -138,10 +139,16 @@ class ChartProcessor:
             Updated OHLCV DataFrame if changes were made, None otherwise
         """
         if not trade_batch:
+            logging.warning("ChartProcessor received empty trade batch")
             return None
             
         # Sort trades by timestamp to ensure proper processing
         trade_batch.sort(key=lambda x: x["timestamp"])
+        
+        logging.debug(f"ChartProcessor processing batch of {len(trade_batch)} trades for {self.symbol} - timeframe: {self.timeframe}")
+        first_timestamp = datetime.fromtimestamp(trade_batch[0]['timestamp']/1000).strftime('%Y-%m-%d %H:%M:%S')
+        last_timestamp = datetime.fromtimestamp(trade_batch[-1]['timestamp']/1000).strftime('%Y-%m-%d %H:%M:%S')
+        logging.debug(f"Trade batch time range: {first_timestamp} to {last_timestamp}")
         
         # Process each trade
         updated = False
@@ -150,7 +157,14 @@ class ChartProcessor:
             if result is not None:
                 updated = True
                 
-        return self.ohlcv if updated else None
+        if updated:
+            if not self.ohlcv.empty:
+                last_candle = self.ohlcv.iloc[-1]
+                logging.debug(f"ChartProcessor updated candle - timestamp: {datetime.fromtimestamp(last_candle['dates']).strftime('%Y-%m-%d %H:%M:%S')}, close: {last_candle['closes']}")
+            return self.ohlcv
+        else:
+            logging.warning(f"ChartProcessor: No candles were updated from {len(trade_batch)} trades for {self.symbol}")
+            return None
     
     def try_resample(self, new_timeframe: str) -> Tuple[bool, Optional[pd.DataFrame]]:
         """

@@ -5,6 +5,7 @@ import asyncio
 import logging
 from trade_suite.data.data_source import Data
 from typing import Dict, List
+from datetime import datetime
 
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.task_manager import TaskManager
@@ -98,7 +99,13 @@ class CandleFactory:
             self.processor.set_symbol(new_symbol, price_precision)
 
     def _on_new_trade(self, tab, exchange, trade_data):
+        # Always log what tab we received, regardless of if it matches our tab
+        logging.debug(f"CandleFactory (my tab: {self.tab}) received NEW_TRADE signal for tab: {tab}, exchange: {exchange}")
+        
         if tab == self.tab:
+            # Log trade receipt
+            logging.debug(f"CandleFactory for {self.tab} received trade: {trade_data.get('symbol')} @ {trade_data.get('price')} - Time: {datetime.fromtimestamp(trade_data.get('timestamp')/1000).strftime('%Y-%m-%d %H:%M:%S')}")
+            
             # Add to queue
             self._trade_queue.append(trade_data)
             current_time = time.time()
@@ -107,27 +114,39 @@ class CandleFactory:
             if (len(self._trade_queue) >= self.max_trades_per_candle_update or
                 (self.last_update_time is not None and 
                  current_time - self.last_update_time >= self.processor.timeframe_seconds)):
+                logging.debug(f"CandleFactory for {self.tab} processing trade batch - queue size: {len(self._trade_queue)}")
                 self._process_trade_batch()
+            else:
+                logging.debug(f"CandleFactory for {self.tab} not processing yet - queue size: {len(self._trade_queue)}, last update: {datetime.fromtimestamp(self.last_update_time).strftime('%Y-%m-%d %H:%M:%S') if self.last_update_time else 'Never'}")
+        else:
+            # Log mismatches for debugging
+            logging.warning(f"CandleFactory tab mismatch - expected: {self.tab}, got: {tab}")
 
     def _process_trade_batch(self):
         if not self._trade_queue:
+            logging.debug(f"CandleFactory for {self.tab} tried to process empty trade queue")
             return
             
         # Get trades and clear queue
         batch_trades = list(self._trade_queue)
         self._trade_queue.clear()
         
+        logging.debug(f"CandleFactory for {self.tab} processing {len(batch_trades)} trades")
+        
         # Process the batch using the processor
         updated_candles = self.processor.process_trade_batch(batch_trades)
         
         # If candles were updated, emit the update
         if updated_candles is not None:
+            logging.debug(f"CandleFactory for {self.tab} emitting UPDATED_CANDLES signal - shape: {updated_candles.shape}")
             self.emitter.emit(
                 Signals.UPDATED_CANDLES,
                 tab=self.tab,
                 exchange=self.exchange,
                 candles=updated_candles,
             )
+        else:
+            logging.warning(f"CandleFactory for {self.tab} - processor returned None for candle updates after processing {len(batch_trades)} trades")
             
         self.last_update_time = time.time()
 

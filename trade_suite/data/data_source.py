@@ -119,6 +119,7 @@ class Data(CCXTInterface):
 
                 if trades:
                     logging.debug(f"[{tab}] Emitting NEW_TRADE signal...") # Changed from INFO to DEBUG
+                    # Ensure we explicitly pass the tab parameter to match what CandleFactory expects
                     self.emitter.emit(
                         Signals.NEW_TRADE,
                         tab=tab,
