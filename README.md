@@ -170,7 +170,7 @@ python -m trade_suite --reset-layout
 ## Implemented Features
 
 - Basic Real-Time Candlestick Charting Interface: Implemented using DearPyGUI and CCXT PRO.
-- Multiple Tabs Feature: Support for numerous instances of the same exchange.
+- Widget based UI components with docking and persistance between sessions.
 - Real-Time Candlestick Updates and Indicators: Continuous updating of candlestick charts with relevant trading indicators.
 - Object-Oriented Design: Ensures ease of scalability and further development.
 - ArgParser for Command-Line Entry: To facilitate easier and more flexible program startup through the command line.
@@ -184,7 +184,6 @@ python -m trade_suite --reset-layout
 - Expansion of Technical Indicators: Adding more indicators for comprehensive technical analysis.
 - Order Interface Development: To manage and execute trade orders directly from the platform.
 - User Authentication and Security: Implementing secure login and data protection measures.
-- Mobile Compatibility: Adapting the platform for use on mobile devices.
 - Historical Data Analysis Features: Integrating tools for back-testing strategies with historical data.
 - Customizable UI Elements: Allowing users to personalize the interface to suit their preferences.
 - Integration with Additional Exchanges: Expanding the range of supported cryptocurrency exchanges.

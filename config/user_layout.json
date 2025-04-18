@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "widgets": [
+    {
+      "widget_type": "chart",
+      "instance_id": "coinbase_btcusd_1h",
+      "tag": "widget_chart_coinbase_btcusd_1h",
+      "title": "Chart - COINBASE BTC/USD (1h)",
+      "width": 800,
+      "height": 500,
+      "exchange": "coinbase",
+      "symbol": "BTC/USD",
+      "timeframe": "1h",
+      "auto_fit_enabled": true,
+      "show_ema": false,
+      "ema_spans": [
+        10,
+        25,
+        50,
+        100,
+        200
+      ],
+      "widget_id": "coinbase_chart"
+    },
+    {
+      "widget_type": "orderbook",
+      "instance_id": "coinbase_btcusd",
+      "tag": "widget_orderbook_coinbase_btcusd",
+      "title": "Orderbook - COINBASE BTC/USD",
+      "width": 400,
+      "height": 500,
+      "widget_id": "coinbase_orderbook"
+    },
+    {
+      "widget_type": "trading",
+      "instance_id": "coinbase_btcusd",
+      "tag": "widget_trading_coinbase_btcusd",
+      "title": "Trading - COINBASE BTC/USD",
+      "width": 1200,
+      "height": 250,
+      "widget_id": "coinbase_trading"
+    }
+  ]
+}
