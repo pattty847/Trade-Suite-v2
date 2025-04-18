@@ -50,26 +50,45 @@ class DashboardManager:
     
     def initialize_layout(self, reset: bool = False) -> None:
         """
-        Initialize the layout system.
-        
+        Initialize the layout system using the configure_app method primarily.
+
         Args:
             reset: If True, reset to the default layout
         """
-        # If reset requested or user layout doesn't exist, use default
+        # Handle reset: remove user layout if requested
         if reset and os.path.exists(self.user_layout):
             os.remove(self.user_layout)
-            
-        # If the user layout doesn't exist, start with default
-        load_default = not os.path.exists(self.user_layout) and os.path.exists(self.default_layout)
-        
-        if load_default:
-            logging.info(f"User layout not found, loading default: {self.default_layout}")
-            # Configure app to load the default layout initially
-            dpg.configure_app(init_file=self.default_layout, load_init_file=True)
-            
-        # Configure DPG for docking and persistence to user layout
-        logging.info(f"Initializing layout with persistence to: {self.user_layout}")
-        dpg.configure_app(docking=True, docking_space=True, init_file=self.user_layout)
+            logging.info(f"Reset requested, removed user layout: {self.user_layout}")
+
+        # Determine which layout file to load initially
+        file_to_load = None
+        load_default_layout = False
+
+        if os.path.exists(self.user_layout):
+            file_to_load = self.user_layout
+            logging.info(f"User layout exists. Will load: {file_to_load}")
+        elif os.path.exists(self.default_layout):
+            file_to_load = self.default_layout
+            load_default_layout = True  # Mark that we loaded the default
+            logging.info(f"User layout not found. Will load default layout: {file_to_load}")
+        else:
+            logging.info("No existing layout file found. Will use default window arrangements.")
+
+        # Configure DPG for docking and load the determined layout file.
+        # init_file is set to the file we want to LOAD initially.
+        # The save target might be adjusted afterwards if we loaded the default.
+        dpg.configure_app(
+            docking=True,
+            docking_space=True,
+            init_file=file_to_load if file_to_load else self.user_layout, # Load file if exists, else set default save target
+            load_init_file=file_to_load is not None # Load only if a file was found
+        )
+        logging.info(f"Configured app. Initial load target: {file_to_load if file_to_load else 'None'}. Save target initially set to: {file_to_load if file_to_load else self.user_layout}")
+
+        # IMPORTANT: If we loaded the DEFAULT layout, we need to redirect SAVES to the USER layout file.
+        if load_default_layout:
+            dpg.configure_app(init_file=self.user_layout)
+            logging.info(f"Redirected save target to user layout file: {self.user_layout}")
     
     def add_widget(self, widget_id: str, widget: DockableWidget) -> int:
         """

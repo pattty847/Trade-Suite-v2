@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import dearpygui.dearpygui as dpg
 
@@ -24,7 +24,7 @@ class Viewport:
         self.sec_fetcher = SECDataFetcher()
         
         # Dashboard manager will be created in initialize_program
-        self.dashboard_manager = None
+        self.dashboard_manager: Optional[DashboardManager] = None
         
         # Program will be created in initialize_program
         self.program = None
@@ -46,16 +46,34 @@ class Viewport:
         # Setup dearpygui
         dpg.create_context()
         
-        # Configure docking
-        default_layout = "config/factory_layout.ini"
-        user_layout = "config/user_layout.ini"
-        
-        # If the user layout does not exist yet, prime it with the factory layout
-        if not os.path.exists(user_layout) and os.path.exists(default_layout):
-            dpg.load_init_file(default_layout)
-        
-        # Configure app with docking enabled and layout persistence
-        dpg.configure_app(docking=True, docking_space=True, init_file=user_layout)
+        # Font loading
+        try:
+            with dpg.font_registry():
+                # Load font, adjust size for density (e.g., 13 or 14)
+                # Make sure the path is correct relative to your execution directory
+                default_font = dpg.add_font("fonts/Roboto_Mono/static/RobotoMono-Regular.ttf", 14)
+            # Set as default font
+            dpg.bind_font(default_font)
+            logging.info("Successfully loaded and bound font: RobotoMono-Regular.ttf")
+        except Exception as e:
+            logging.error(f"Failed to load or bind font: {e}", exc_info=True)
+            # Fallback or indicate error - maybe don't bind if it fails
+
+        # --- Initialize Dashboard Manager and Layout EARLY --- 
+        # This MUST happen after create_context and before create_viewport
+        self.dashboard_manager = DashboardManager(
+            emitter=self.data.emitter,
+            default_layout_file="config/factory_layout.ini",
+            user_layout_file="config/user_layout.ini",
+        )
+        self.dashboard_manager.initialize_layout() # Calls configure_app internally
+
+        # --- Removed conflicting layout code from here ---
+        # default_layout = "config/factory_layout.ini"
+        # user_layout = "config/user_layout.ini"
+        # if not os.path.exists(user_layout) and os.path.exists(default_layout):
+        #     dpg.load_init_file(default_layout)
+        # dpg.configure_app(docking=True, docking_space=True, init_file=user_layout)
         
         self.load_theme()
         return self
@@ -168,6 +186,10 @@ class Viewport:
         """
         logging.info("Setting up DearPyGUI loop, viewport, and primary window...")
 
+        # Initialize the program BEFORE creating viewport to ensure windows are created
+        # in the correct order for layout persistence
+        self.initialize_program()
+        
         dpg.create_viewport(title="Trading Suite v2", width=1200, height=720)
         
         # Add viewport menu bar (attached to viewport, not to any window)
@@ -197,26 +219,26 @@ class Viewport:
         
         dpg.setup_dearpygui()
         dpg.show_viewport()
-        dpg.set_frame_callback(
-            1, lambda: self.initialize_program()
-        )  # not called until after start_dearpyui() has been called
+        
+        # Maximize viewport for better docking experience
+        dpg.maximize_viewport()
+        
+        # Remove the frame callback since we're initializing before viewport creation
+        # dpg.set_frame_callback(
+        #     1, lambda: self.initialize_program()
+        # )  # not called until after start_dearpyui() has been called
 
         logging.info("Setup complete. Launching DPG.")
 
         # Use manual render loop instead of dpg.start_dearpygui()
         # This allows us to process the signal queue on every frame
         try:
-            initialized = False
             while dpg.is_dearpygui_running():
                 # Process the signal queue before rendering each frame
                 self.data.emitter.process_signal_queue()
                 
                 # Render the frame
                 dpg.render_dearpygui_frame()
-                
-                # Check if we've initialized yet (first frame callback will handle this)
-                if not initialized and dpg.get_frame_count() > 0:
-                    initialized = True
         except Exception as e:
             logging.error(f"Error in main render loop: {e}", exc_info=True)
 
@@ -274,23 +296,32 @@ class Viewport:
         # This will initialize all UI components and register their callback
         logging.info(f"Setting up the program classes and subclasses.")
 
+        # --- Dashboard manager moved to __enter__ ---
         # Create dashboard manager 
-        self.dashboard_manager = DashboardManager(
-            emitter=self.data.emitter,
-            default_layout_file="config/factory_layout.ini",
-            user_layout_file="config/user_layout.ini",
-        )
+        # self.dashboard_manager = DashboardManager(
+        #     emitter=self.data.emitter,
+        #     default_layout_file="config/factory_layout.ini",
+        #     user_layout_file="config/user_layout.ini",
+        # )
         
+        # --- Initialize layout moved to __enter__ ---
         # Initialize the dashboard layout
-        self.dashboard_manager.initialize_layout()
+        # self.dashboard_manager.initialize_layout()
             
         # Create and initialize the program with the dashboard manager
+        # Ensure dashboard_manager was created in __enter__
+        if not self.dashboard_manager:
+            logging.error("DashboardManager was not initialized in __enter__!")
+            # Handle error appropriately - maybe raise an exception or stop
+            dpg.stop_dearpygui()
+            return
+            
         self.program = DashboardProgram(
             parent=None,  # No parent window anymore as we're not using a primary window
             data=self.data,
             task_manager=self.task_manager,
             config_manager=self.config_manager,
-            dashboard_manager=self.dashboard_manager,
+            dashboard_manager=self.dashboard_manager, # Use the one created in __enter__
             sec_fetcher=self.sec_fetcher
         )
         self.program.initialize()
