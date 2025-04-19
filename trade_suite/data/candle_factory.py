@@ -4,36 +4,37 @@ import pandas as pd
 import asyncio
 import logging
 from trade_suite.data.data_source import Data
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
+import numpy as np
 
 from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.utils import timeframe_to_seconds
-from trade_suite.analysis.chart_processor import ChartProcessor
+
+# Guard the TaskManager import for type hinting only
+if TYPE_CHECKING:
+    from trade_suite.gui.task_manager import TaskManager
 
 
 class CandleFactory:
     def __init__(
         self,
-        exchange,
-        tab,
+        exchange: str,
         emitter: SignalEmitter,
-        task_manager: TaskManager,
+        task_manager: 'TaskManager', # Type hint using TaskManager
         data: Data,
-        exchange_settings,
-        timeframe_str,
+        symbol: str, # Added symbol parameter
+        timeframe_str: str,
     ) -> None:
         self.exchange = exchange
-        self.tab = tab
         self.emitter = emitter
         self.task_manager = task_manager
         self.data = data
-        self.exchange_settings = exchange_settings
         self.timeframe_str = timeframe_str
+        self.timeframe_seconds = timeframe_to_seconds(timeframe_str)
         
-        # Get default symbol to initialize the processor
-        self.symbol = exchange_settings.get("last_symbol", "BTC/USD")
+        # Set symbol directly from argument
+        self.symbol = symbol
         
         # Get market info for price precision, if available
         price_precision = 0.00001  # Default value
@@ -44,14 +45,13 @@ class CandleFactory:
         except Exception as e:
             logging.warning(f"Could not get price precision for {self.symbol}: {e}")
             
-        # Initialize the chart processor
-        self.processor = ChartProcessor(
-            exchange=self.exchange,
-            symbol=self.symbol,
-            timeframe=timeframe_str,
-            price_precision=price_precision
+        # Initialize empty OHLCV dataframe
+        self.ohlcv = pd.DataFrame(
+            columns=["dates", "opens", "highs", "lows", "closes", "volumes"]
         )
-        
+        self.last_candle_timestamp = None
+        self.price_precision = price_precision # Store precision if needed later
+
         # Queue for batching trades
         self._trade_queue = deque()
         self.max_trades_per_candle_update = 5
@@ -62,49 +62,17 @@ class CandleFactory:
     def _register_event_listeners(self):
         event_mappings = {
             Signals.NEW_TRADE: self._on_new_trade,
-            Signals.NEW_CANDLES: self._on_new_candles,
-            Signals.TIMEFRAME_CHANGED: self._on_timeframe_changed,
-            Signals.SYMBOL_CHANGED: self._on_symbol_changed,
         }
         for signal, handler in event_mappings.items():
             self.emitter.register(signal, handler)
 
-    def _on_new_candles(self, tab, exchange, candles):
-        if isinstance(candles, pd.DataFrame) and tab == self.tab:
-            # Use the processor to process the candles
-            processed_candles = self.processor.process_candles(candles)
-            
-            # No need to emit; this is a response to receiving candles
-    
-    def _on_timeframe_changed(self, exchange, tab, new_timeframe):
-        if tab == self.tab:
-            # Update the timeframe in the processor
-            self.timeframe_str = new_timeframe
-            self.processor.set_timeframe(new_timeframe)
-
-    def _on_symbol_changed(self, exchange, tab, new_symbol):
-        if tab == self.tab and exchange == self.exchange:
-            self.symbol = new_symbol
-            
-            # Get price precision for the new symbol
-            price_precision = None
-            try:
-                market_info = self.data.exchange_list[self.exchange].market(new_symbol)
-                if market_info and "precision" in market_info:
-                    price_precision = market_info["precision"].get("price")
-            except Exception as e:
-                logging.warning(f"Could not get price precision for {new_symbol}: {e}")
-            
-            # Update the processor with the new symbol
-            self.processor.set_symbol(new_symbol, price_precision)
-
-    def _on_new_trade(self, tab, exchange, trade_data):
-        # Always log what tab we received, regardless of if it matches our tab
-        logging.debug(f"CandleFactory (my tab: {self.tab}) received NEW_TRADE signal for tab: {tab}, exchange: {exchange}")
-        
-        if tab == self.tab:
-            # Log trade receipt
-            logging.debug(f"CandleFactory for {self.tab} received trade: {trade_data.get('symbol')} @ {trade_data.get('price')} - Time: {datetime.fromtimestamp(trade_data.get('timestamp')/1000).strftime('%Y-%m-%d %H:%M:%S')}")
+    def _on_new_trade(self, exchange: str, trade_data: dict):
+        """Handles incoming trade data, queues it, and triggers batch processing."""
+        trade_symbol = trade_data.get('symbol')
+        # Filter based on the factory's configured exchange and symbol
+        if exchange == self.exchange and trade_symbol == self.symbol:
+            # Log trade receipt for this factory instance
+            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) received trade: {trade_symbol} @ {trade_data.get('price')} - Time: {datetime.fromtimestamp(trade_data.get('timestamp')/1000).strftime('%Y-%m-%d %H:%M:%S')}")
             
             # Add to queue
             self._trade_queue.append(trade_data)
@@ -113,64 +81,280 @@ class CandleFactory:
             # Check if we should process the queued trades
             if (len(self._trade_queue) >= self.max_trades_per_candle_update or
                 (self.last_update_time is not None and 
-                 current_time - self.last_update_time >= self.processor.timeframe_seconds)):
-                logging.debug(f"CandleFactory for {self.tab} processing trade batch - queue size: {len(self._trade_queue)}")
+                 current_time - self.last_update_time >= self.timeframe_seconds)):
+                logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) processing trade batch - queue size: {len(self._trade_queue)}")
                 self._process_trade_batch()
-            else:
-                logging.debug(f"CandleFactory for {self.tab} not processing yet - queue size: {len(self._trade_queue)}, last update: {datetime.fromtimestamp(self.last_update_time).strftime('%Y-%m-%d %H:%M:%S') if self.last_update_time else 'Never'}")
-        else:
-            # Log mismatches for debugging
-            logging.warning(f"CandleFactory tab mismatch - expected: {self.tab}, got: {tab}")
+        # else:
+            # Log if the trade wasn't for this factory instance (optional, can be noisy)
+            # logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) ignored trade for {exchange}/{trade_symbol}")
+            
 
     def _process_trade_batch(self):
+        """Processes queued trades and emits updated candle data."""
         if not self._trade_queue:
-            logging.debug(f"CandleFactory for {self.tab} tried to process empty trade queue")
+            # logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) tried to process empty trade queue") # Can be noisy
             return
             
         # Get trades and clear queue
         batch_trades = list(self._trade_queue)
         self._trade_queue.clear()
         
-        logging.debug(f"CandleFactory for {self.tab} processing {len(batch_trades)} trades")
+        logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) processing {len(batch_trades)} trades")
         
-        # Process the batch using the processor
-        updated_candles = self.processor.process_trade_batch(batch_trades)
-        
-        # If candles were updated, emit the update
-        if updated_candles is not None:
-            logging.debug(f"CandleFactory for {self.tab} emitting UPDATED_CANDLES signal - shape: {updated_candles.shape}")
+        # --- Start: Migrated Logic from ChartProcessor.process_trade_batch ---
+        if not batch_trades:
+            # logging.warning(f"CandleFactory received empty trade batch for {self.symbol}") # Already logged upstream
+            return
+
+        # Sort trades by timestamp to ensure proper processing
+        batch_trades.sort(key=lambda x: x["timestamp"])
+
+        # Process each trade and track if any update occurred
+        updated = False
+        for trade in batch_trades:
+            if self._process_trade(trade): # Call the internal processing method
+                 updated = True
+
+        updated_candles = self.ohlcv if updated else None # Return the internal df if updated
+        # --- End: Migrated Logic ---
+
+        # If candles were updated, emit the update with full market identifiers
+        if updated_candles is not None and not updated_candles.empty:
+            # Emit the updated candle (or the whole series if needed, but usually just the last one)
+            last_candle = self.ohlcv.iloc[-1:] # Get last row as DataFrame
+            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) emitting UPDATED_CANDLES signal - shape: {last_candle.shape}")
+            # Log the actual data being emitted
+            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) Emitting Candle Data:\n{last_candle.to_string()}")
             self.emitter.emit(
                 Signals.UPDATED_CANDLES,
-                tab=self.tab,
                 exchange=self.exchange,
-                candles=updated_candles,
+                symbol=self.symbol,
+                timeframe=self.timeframe_str,
+                candles=last_candle,
             )
-        else:
-            logging.warning(f"CandleFactory for {self.tab} - processor returned None for candle updates after processing {len(batch_trades)} trades")
+        # else: # Log if no update occurred (optional)
+            # logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) - processor returned no candle updates after processing {len(batch_trades)} trades")
             
         self.last_update_time = time.time()
 
+    def _process_trade(self, trade_data: Dict) -> bool:
+        """
+        Process a single trade and update the internal OHLCV data if needed.
+
+        Args:
+            trade_data: Dictionary containing trade information
+
+        Returns:
+            True if candle was updated, False otherwise
+        """
+        timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
+        price = trade_data["price"]
+        volume = trade_data["amount"]
+
+        # Adjust timestamp to the candle boundary
+        adjusted_timestamp = timestamp - (timestamp % self.timeframe_seconds)
+
+        # Initialize last candle timestamp if not set
+        if self.last_candle_timestamp is None and not self.ohlcv.empty:
+            self.last_candle_timestamp = self.ohlcv["dates"].iloc[-1]
+        elif self.last_candle_timestamp is None:
+            # If OHLCV is empty and no last timestamp, this is the very first trade
+            logging.info(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) processing first trade.")
+            self.last_candle_timestamp = adjusted_timestamp # Start from this trade's candle boundary
+
+        # Check if this trade belongs to a new candle
+        # Use >= for safety, although > should be sufficient if timestamps are precise
+        if adjusted_timestamp >= self.last_candle_timestamp + self.timeframe_seconds:
+            # Start a new candle
+            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) starting new candle at {datetime.fromtimestamp(self.last_candle_timestamp + self.timeframe_seconds)}")
+            new_candle = {
+                "dates": self.last_candle_timestamp + self.timeframe_seconds,
+                "opens": price,
+                "highs": price,
+                "lows": price,
+                "closes": price,
+                "volumes": volume,
+            }
+            # Add new candle to the dataframe
+            new_candle_df = pd.DataFrame([new_candle])
+            self.ohlcv = pd.concat([self.ohlcv, new_candle_df], ignore_index=True)
+            self.last_candle_timestamp += self.timeframe_seconds
+            return True # Candle data changed
+
+        elif not self.ohlcv.empty and adjusted_timestamp == self.last_candle_timestamp:
+            # Update the current (last) candle if the trade falls within its boundary
+            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) updating current candle.")
+            last_idx = self.ohlcv.index[-1]
+            self.ohlcv.at[last_idx, "highs"] = max(
+                self.ohlcv.at[last_idx, "highs"], price
+            )
+            self.ohlcv.at[last_idx, "lows"] = min(
+                self.ohlcv.at[last_idx, "lows"], price
+            )
+            self.ohlcv.at[last_idx, "closes"] = price
+            self.ohlcv.at[last_idx, "volumes"] += volume
+            return True # Candle data changed
+
+        elif self.ohlcv.empty:
+            # Initialize the first candle if ohlcv is empty
+            logging.info(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initializing first candle.")
+            new_candle = {
+                "dates": adjusted_timestamp,
+                "opens": price,
+                "highs": price,
+                "lows": price,
+                "closes": price,
+                "volumes": volume,
+            }
+            # Convert to DataFrame
+            new_candle_df = pd.DataFrame([new_candle])
+            self.ohlcv = new_candle_df
+            self.last_candle_timestamp = adjusted_timestamp
+            return True # Candle data changed
+
+        else:
+             # Trade might be older than the last candle or have other issues, ignore for now
+             logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) ignoring trade timestamp {timestamp} relative to last candle {self.last_candle_timestamp}")
+             return False
+
     def try_resample(self, new_timeframe: str, active_exchange):
-        # Use the processor to attempt resampling
-        success, resampled_data = self.processor.try_resample(new_timeframe)
-        
-        if success and resampled_data is not None:
-            # Emit an event to update the candles
+        """Attempts to resample existing candle data to a new timeframe."""
+        # --- Start: Migrated Logic from ChartProcessor.try_resample ---
+        new_timeframe_seconds = timeframe_to_seconds(new_timeframe)
+        success = False
+        resampled_data = None
+
+        # Can only resample to larger timeframes if data exists
+        if new_timeframe_seconds <= self.timeframe_seconds or self.ohlcv.empty:
+            logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}) cannot resample from {self.timeframe_str} to {new_timeframe} (or no data).")
+            # Still update internal timeframe if needed, but report failure
+            # self.timeframe_str = new_timeframe # Decided against this - let ChartWidget manage this
+            # self.timeframe_seconds = new_timeframe_seconds
+            success = False
+            resampled_data = None
+        else:
+            try:
+                logging.info(f"CandleFactory ({self.exchange}/{self.symbol}) attempting resample from {self.timeframe_str} to {new_timeframe}")
+                df_copy = self.ohlcv.copy()
+
+                # Convert timestamps to pandas datetime
+                if "dates" in df_copy.columns:
+                    df_copy["dates_dt"] = pd.to_datetime(df_copy["dates"], unit='s')
+                    df_copy.set_index("dates_dt", inplace=True)
+
+                    # Resample to the new timeframe
+                    rule = self.__timeframe_to_pandas_rule(new_timeframe)
+                    resampled = pd.DataFrame()
+
+                    # Apply resampling rules for OHLCV
+                    resampled["opens"] = df_copy["opens"].resample(rule).first()
+                    resampled["highs"] = df_copy["highs"].resample(rule).max()
+                    resampled["lows"] = df_copy["lows"].resample(rule).min()
+                    resampled["closes"] = df_copy["closes"].resample(rule).last()
+                    resampled["volumes"] = df_copy["volumes"].resample(rule).sum()
+
+                    # Drop rows where all OHLCV values are NaN (can happen with empty intervals)
+                    resampled.dropna(subset=["opens", "highs", "lows", "closes"], how='all', inplace=True)
+
+                    if not resampled.empty:
+                        # Convert timestamps back to seconds
+                        resampled["dates"] = resampled.index.astype('int64') // 10**9
+
+                        # Reset index to get dates as a column
+                        resampled_data = resampled.reset_index(drop=True)[["dates", "opens", "highs", "lows", "closes", "volumes"]] # Ensure column order
+
+                        # Update internal state ONLY if resampling succeeded
+                        self.ohlcv = resampled_data.copy() # Store the resampled data
+                        self.timeframe_str = new_timeframe
+                        self.timeframe_seconds = new_timeframe_seconds
+                        self.last_candle_timestamp = self.ohlcv["dates"].iloc[-1] # Update last timestamp
+                        success = True
+                        logging.info(f"CandleFactory ({self.exchange}/{self.symbol}) successfully resampled {len(self.ohlcv)} candles to {new_timeframe}")
+                    else:
+                         logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}) resampling to {new_timeframe} resulted in empty DataFrame.")
+                         success = False
+                         resampled_data = None
+
+            except Exception as e:
+                 logging.error(f"CandleFactory ({self.exchange}/{self.symbol}) failed during resampling to {new_timeframe}: {e}", exc_info=True)
+                 success = False
+                 resampled_data = None
+        # --- End: Migrated Logic ---
+
+        if success and resampled_data is not None and not resampled_data.empty:
+            logging.info(f"CandleFactory ({self.exchange}/{self.symbol}) successfully resampled to {new_timeframe}")
+            # Emit an event to update the candles with full market identifiers
             self.emitter.emit(
                 Signals.UPDATED_CANDLES,
-                tab=self.tab,
-                exchange=active_exchange,
+                exchange=self.exchange,
+                symbol=self.symbol,
+                timeframe=self.timeframe_str,
                 candles=resampled_data,
             )
             
-            # Update the timeframe string
+            # Update the timeframe string internally *after* emitting with the new timeframe
             self.timeframe_str = new_timeframe
             
             return True
         else:
-            # If resampling was not successful, just update the timeframe
-            self.timeframe_str = new_timeframe
+            logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}) failed to resample to {new_timeframe}")
+            # If resampling was not successful, just update the internal timeframe
+            self.timeframe_str = new_timeframe # Still update internal state
+            # Do not emit candles if resampling failed
             return False
+
+    def __timeframe_to_pandas_rule(self, timeframe: str) -> str:
+        """Converts a timeframe string (e.g., '1m', '1h') to a pandas resampling rule string."""
+        if timeframe.endswith('m'):
+            return timeframe[:-1] + 'T'  # Use 'T' for minutes
+        elif timeframe.endswith('h'):
+            return timeframe[:-1] + 'H'
+        elif timeframe.endswith('d'):
+            return timeframe[:-1] + 'D'
+        elif timeframe.endswith('w'):
+            return timeframe[:-1] + 'W'
+        else:
+            # Default or raise error? Let's default to minutes for safety
+            logging.warning(f"Could not convert timeframe '{timeframe}' to pandas rule, defaulting to 'T'.")
+            return 'T'
+
+    def get_candle_data(self) -> pd.DataFrame:
+        """Returns the current internal OHLCV DataFrame."""
+        return self.ohlcv.copy() # Return a copy to prevent external modification
 
     def set_trade_batch(self, sender, app_data, user_data):
         self.max_trades_per_candle_update = app_data
+
+    def set_initial_data(self, initial_candles_df: pd.DataFrame):
+        """Sets the initial historical data for the factory."""
+        if initial_candles_df is not None and not initial_candles_df.empty:
+            # Ensure correct dtypes, especially for dates (assuming seconds since epoch)
+            try:
+                df_copy = initial_candles_df.copy()
+                if 'dates' in df_copy.columns:
+                    if not pd.api.types.is_numeric_dtype(df_copy['dates']):
+                        if pd.api.types.is_datetime64_any_dtype(df_copy['dates']):
+                             df_copy['dates'] = df_copy['dates'].view(np.int64) // 10**9
+                        else:
+                             df_copy['dates'] = pd.to_datetime(df_copy['dates'], errors='coerce').view(np.int64) // 10**9
+                    # Handle potential milliseconds
+                    if df_copy['dates'].max() > time.time() * 2:
+                        df_copy['dates'] = df_copy['dates'] / 1000
+                    
+                    # Drop rows with invalid dates after conversion
+                    df_copy.dropna(subset=['dates'], inplace=True)
+                else:
+                    logging.error(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initial data missing 'dates' column.")
+                    return
+
+                if not df_copy.empty:
+                     self.ohlcv = df_copy.reset_index(drop=True) # Ensure clean index
+                     self.last_candle_timestamp = self.ohlcv["dates"].iloc[-1]
+                     logging.info(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initialized with {len(self.ohlcv)} historical candles. Last timestamp: {self.last_candle_timestamp}")
+                else:
+                     logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initial data was empty after date processing.")
+
+            except Exception as e:
+                logging.error(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) failed to set initial data: {e}", exc_info=True)
+        else:
+             logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) received empty initial data.")

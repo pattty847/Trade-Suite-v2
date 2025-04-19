@@ -1,11 +1,15 @@
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 import dearpygui.dearpygui as dpg
 
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.widgets.base_widget import DockableWidget
+
+# Forward declaration for type hinting
+if TYPE_CHECKING:
+    from trade_suite.gui.task_manager import TaskManager
 
 
 class PriceLevelWidget(DockableWidget):
@@ -16,6 +20,7 @@ class PriceLevelWidget(DockableWidget):
     def __init__(
         self,
         emitter: SignalEmitter,
+        task_manager: 'TaskManager', # Added TaskManager
         exchange: str,
         symbol: str,
         instance_id: Optional[str] = None,
@@ -29,6 +34,7 @@ class PriceLevelWidget(DockableWidget):
 
         Args:
             emitter: Signal emitter
+            task_manager: Task manager instance
             exchange: Exchange name (e.g., 'coinbase')
             symbol: Trading pair (e.g., 'BTC/USD')
             instance_id: Optional unique instance identifier
@@ -45,6 +51,7 @@ class PriceLevelWidget(DockableWidget):
             title=f"Levels - {exchange.upper()} {symbol}",
             widget_type="price_level", # Use a distinct type
             emitter=emitter,
+            task_manager=task_manager, # Pass task_manager to base
             instance_id=instance_id,
             width=width,
             height=height,
@@ -75,6 +82,15 @@ class PriceLevelWidget(DockableWidget):
         # Dictionary to store the last color/value for each cell for optimization
         self.last_colors = {}
         self.last_values = {} # Store last text value set for optimization
+
+    def get_requirements(self) -> Dict[str, Any]:
+        """Define the data requirements for the PriceLevelWidget."""
+        # Needs order book data
+        return {
+            "type": "orderbook",
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+        }
 
     def build_content(self) -> None:
         """Build the price level widget's content."""
@@ -136,13 +152,19 @@ class PriceLevelWidget(DockableWidget):
     def register_handlers(self) -> None:
         """Register event handlers for signals."""
         self.emitter.register(Signals.ORDER_BOOK_UPDATE, self._on_order_book_update)
-        self.emitter.register(Signals.SYMBOL_CHANGED, self._on_symbol_change)
 
-    def _on_order_book_update(self, tab, exchange, orderbook):
+    def _on_order_book_update(self, exchange: str, orderbook: dict):
         """Process an order book update signal."""
-        # Ignore updates for other exchanges or if not yet created
-        if exchange != self.exchange or not self.is_created:
+        # Check if this update is for the correct market and widget is ready
+        orderbook_symbol = orderbook.get('symbol')
+        if not self.is_created or exchange != self.exchange or orderbook_symbol != self.symbol:
+            # Log for debugging, might remove later
+            # if self.is_created:
+            #     logging.debug(f"PLWidget {self.window_tag} ignoring update for {exchange}/{orderbook_symbol}")
             return
+        
+        # Log for debugging, might remove later
+        # logging.debug(f"PLWidget {self.window_tag} processing update for {self.exchange}/{self.symbol}")
 
         # Always store the latest orderbook data (even if we skip rendering)
         self.last_orderbook = orderbook
@@ -313,32 +335,8 @@ class PriceLevelWidget(DockableWidget):
         if self.last_orderbook:
             self._process_and_display_orderbook(self.last_orderbook)
 
-    def _on_symbol_change(self, exchange, tab, new_symbol):
-        """Handle symbol change events."""
-        # Check if this event is relevant to this widget instance
-        if exchange == self.exchange and tab == self.window_tag:
-            logging.info(f"Symbol change for {self.window_tag} to {new_symbol}")
-            self.symbol = new_symbol
-
-            # Update window title
-            new_title = f"Levels - {self.exchange.upper()} {self.symbol}"
-            if dpg.does_item_exist(self.window_tag):
-                dpg.set_item_label(self.window_tag, new_title)
-
-            # Clear last known orderbook and table display
-            self.last_orderbook = None
-            self.last_colors.clear() # Clear color cache
-            self.last_values.clear() # Clear value cache
-
-            # Clear all cells immediately
-            for price_cell, qty_cell in self.ask_cells + self.bid_cells:
-                if dpg.does_item_exist(price_cell):
-                    dpg.set_value(price_cell, "")
-                if dpg.does_item_exist(qty_cell):
-                    dpg.set_value(qty_cell, "")
-            if self.spread_cell and dpg.does_item_exist(self.spread_cell):
-                dpg.set_value(self.spread_cell, "Spread: --")
-
-            # Note: We might need to trigger a fetch for the new symbol's orderbook
-            # This is usually handled by the logic that initiated the symbol change (e.g., DashboardProgram)
-            # by stopping old streams and starting new ones. This widget just reacts to the change. 
+    def close(self) -> None:
+        """Clean up price level specific resources before closing."""
+        logging.info(f"Closing PriceLevelWidget: {self.window_tag}")
+        # Add any specific cleanup here before calling base class close
+        super().close() # Call base class close to handle unsubscription and DPG item deletion 

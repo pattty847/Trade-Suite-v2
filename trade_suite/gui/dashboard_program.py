@@ -68,7 +68,6 @@ class DashboardProgram:
 
     def _register_event_handlers(self):
         """Register event handlers for signals."""
-        self.emitter.register(Signals.SYMBOL_CHANGED, self._on_symbol_changed)
         self.emitter.register(Signals.CREATE_EXCHANGE_TAB, self._on_create_exchange)
         self.emitter.register(Signals.NEW_CHART_REQUESTED, self._show_new_chart_dialog)
         self.emitter.register(Signals.NEW_ORDERBOOK_REQUESTED, self._show_new_orderbook_dialog)
@@ -115,6 +114,7 @@ class DashboardProgram:
         # Create chart widget
         chart_widget = ChartWidget(
             emitter=self.emitter,
+            task_manager=self.task_manager,
             exchange=exchange,
             symbol=default_symbol,
             timeframe=default_timeframe,
@@ -124,6 +124,7 @@ class DashboardProgram:
         # Create orderbook widget
         orderbook_widget = OrderbookWidget(
             emitter=self.emitter,
+            task_manager=self.task_manager,
             exchange=exchange,
             symbol=default_symbol,
         )
@@ -132,6 +133,7 @@ class DashboardProgram:
         # Create trading widget
         trading_widget = TradingWidget(
             emitter=self.emitter,
+            task_manager=self.task_manager,
             exchange=exchange,
             symbol=default_symbol,
         )
@@ -151,51 +153,12 @@ class DashboardProgram:
             'trading': trading_widget,
         }
         
-        # Start data streams
-        self._start_data_streams_for_exchange(exchange, default_symbol, default_timeframe)
+        # Data streams are now automatically started via widget subscription (task_manager.subscribe)
+        # when widget.create() is called inside dashboard_manager.add_widget()
+        # No need to call _start_data_streams_for_exchange anymore.
         
         logging.info(f"Created widgets for exchange: {exchange}")
 
-    def _start_data_streams_for_exchange(self, exchange, symbol, timeframe):
-        """Start data streams for an exchange."""
-        # TODO: How do we identify the chart widget, send data there, as well as duplicate widgets listening to the same data?
-        # Create a unique ID for the chart widget's tab
-        chart_widget = self.widgets[exchange]['chart']
-        tab_id = chart_widget.window_tag
-        
-        # Start the stream for the chart
-        self.task_manager.start_stream_for_chart(
-            tab=tab_id,
-            exchange=exchange,
-            symbol=symbol,
-            timeframe=timeframe,
-        )
-        
-        logging.info(f"Started data streams for {exchange} {symbol} {timeframe}")
-
-    def _on_symbol_changed(self, exchange, tab, new_symbol):
-        """Handle symbol change events between widgets."""
-        # Check if this is a widget for one of our exchanges
-        for widget_exchange, widgets in self.widgets.items():
-            if widget_exchange == exchange:
-                # Get the widget that originated the change
-                originating_widget = None
-                for widget_name, widget in widgets.items():
-                    if widget.window_tag == tab:
-                        originating_widget = widget
-                        break
-                
-                # Propagate to other widgets for the same exchange
-                if originating_widget:
-                    for widget_name, widget in widgets.items():
-                        if widget.window_tag != tab:  # Don't re-emit to the originator
-                            self.emitter.emit(
-                                Signals.SYMBOL_CHANGED,
-                                exchange=exchange,
-                                tab=widget.window_tag,
-                                new_symbol=new_symbol
-                            )
-    
     def _get_default_symbol(self, exchange):
         """Get the default symbol for an exchange."""
         if exchange not in self.data.exchange_list:
@@ -268,32 +231,42 @@ class DashboardProgram:
                 symbol = dpg.get_value(combo_symbol)
                 timeframe = dpg.get_value(combo_timeframe)
                 
-                # Create unique ID for the widget
-                widget_id = f"chart_{exchange}_{symbol}_{timeframe}".lower().replace("/", "")
+                # Generate base instance ID
+                base_instance_id = f"{exchange}_{symbol}_{timeframe}".lower().replace("/", "_") # Use underscore for clarity
+                
+                # Check for duplicates and find unique ID
+                counter = 1
+                unique_instance_id = base_instance_id
+                while any(isinstance(w, ChartWidget) and w.instance_id == unique_instance_id 
+                          for w in self.dashboard_manager.widgets.values()):
+                    counter += 1
+                    unique_instance_id = f"{base_instance_id}_{counter}"
+                    
+                logging.info(f"Generating ChartWidget with instance_id: {unique_instance_id}")
                 
                 # Create the chart widget
                 chart_widget = ChartWidget(
                     emitter=self.emitter,
+                    task_manager=self.task_manager,
                     exchange=exchange,
                     symbol=symbol,
                     timeframe=timeframe,
+                    instance_id=unique_instance_id # Pass the unique ID
                 )
-                self.dashboard_manager.add_widget(widget_id, chart_widget)
-                
-                # Start data stream for the new chart
-                self.task_manager.start_stream_for_chart(
-                    tab=chart_widget.window_tag,
-                    exchange=exchange,
-                    symbol=symbol,
-                    timeframe=timeframe,
-                )
+                # Use the unique instance ID for adding to manager as well
+                self.dashboard_manager.add_widget(unique_instance_id, chart_widget)
                 
                 # Close the dialog
-                dpg.delete_item(dpg.last_item())
+                # Assume the parent of the button group is the modal window
+                modal_window = dpg.get_item_parent(dpg.last_item()) 
+                if dpg.does_item_exist(modal_window):
+                    dpg.delete_item(modal_window)
+                else: # Fallback if structure is different
+                    dpg.delete_item(dpg.top_container_stack())
             
             with dpg.group(horizontal=True):
-                dpg.add_button(label="Create", callback=create_chart)
-                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.current_item_parent()))
+                dpg.add_button(label="Create", callback=create_chart, width=75)
+                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.get_item_parent(dpg.last_item())), width=75)
     
     def _show_new_orderbook_dialog(self):
         """Show dialog to create a new orderbook widget."""
@@ -325,42 +298,38 @@ class DashboardProgram:
                 exchange = dpg.get_value(combo_exchange)
                 symbol = dpg.get_value(combo_symbol)
                 
-                # Create unique ID for the widget
-                widget_id = f"orderbook_{exchange}_{symbol}".lower().replace("/", "")
+                # Generate a unique ID to allow multiple instances
+                base_instance_id = f"{exchange}_{symbol}".lower().replace("/", "_")
+                counter = 1
+                unique_instance_id = base_instance_id
+                while any(isinstance(w, OrderbookWidget) and w.instance_id == unique_instance_id 
+                          for w in self.dashboard_manager.widgets.values()):
+                    counter += 1
+                    unique_instance_id = f"{base_instance_id}_{counter}"
+                logging.info(f"Generating OrderbookWidget with instance_id: {unique_instance_id}")
                 
-                # Create the orderbook widget
+                # Create widget
                 orderbook_widget = OrderbookWidget(
                     emitter=self.emitter,
+                    task_manager=self.task_manager, # Pass task_manager
                     exchange=exchange,
                     symbol=symbol,
+                    instance_id=unique_instance_id
                 )
-                self.dashboard_manager.add_widget(widget_id, orderbook_widget)
-                
-                # Start orderbook stream ONLY IF NOT ALREADY RUNNING
-                # Use a consistent stream ID format
-                stream_id = f"orderbook_{exchange}_{symbol}"
-                if not self.task_manager.is_stream_running(stream_id):
-                    logging.info(f"Starting orderbook stream {stream_id} for widget {orderbook_widget.window_tag}")
-                    # Use the specific widget tag in the stream task name for potential finer control later?
-                    # Maybe keep it generic for now: f"orderbook_{exchange}_{symbol}"
-                    self.task_manager.start_task(
-                        stream_id,
-                        self.data.watch_orderbook(orderbook_widget.window_tag, exchange, symbol)
-                    )
-                else:
-                    logging.info(f"Orderbook stream {stream_id} already running. New widget {orderbook_widget.window_tag} will use existing stream.")
+                # Add to dashboard manager
+                self.dashboard_manager.add_widget(unique_instance_id, orderbook_widget)
                 
                 # Close the dialog
-                # Need to delete the modal window itself, not just the button's parent group
-                dpg.delete_item(combo_symbol) # Assuming combo_symbol is unique to this dialog instance
-                parent_window = dpg.get_item_parent(combo_symbol) # Get the modal window tag
-                if dpg.does_item_exist(parent_window):
-                    dpg.delete_item(parent_window)
+                modal_window = dpg.get_item_parent(dpg.last_item()) 
+                if dpg.does_item_exist(modal_window):
+                    dpg.delete_item(modal_window)
+                else: 
+                    dpg.delete_item(dpg.top_container_stack())
+                logging.info(f"Created new Orderbook widget: {unique_instance_id}")
             
             with dpg.group(horizontal=True):
-                dpg.add_button(label="Create", callback=create_orderbook)
-                # Properly reference the modal window for cancel
-                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.get_item_parent(dpg.last_item())))
+                dpg.add_button(label="Create", callback=create_orderbook, width=75)
+                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.get_item_parent(dpg.last_item())), width=75)
     
     def _show_new_trading_dialog(self):
         """Show dialog to create a new trading widget."""
@@ -392,23 +361,37 @@ class DashboardProgram:
                 exchange = dpg.get_value(combo_exchange)
                 symbol = dpg.get_value(combo_symbol)
                 
-                # Create unique ID for the widget
-                widget_id = f"trading_{exchange}_{symbol}".lower().replace("/", "")
+                # Generate a unique ID to allow multiple instances
+                base_instance_id = f"{exchange}_{symbol}".lower().replace("/", "_")
+                counter = 1
+                unique_instance_id = base_instance_id
+                while any(isinstance(w, TradingWidget) and w.instance_id == unique_instance_id 
+                          for w in self.dashboard_manager.widgets.values()):
+                    counter += 1
+                    unique_instance_id = f"{base_instance_id}_{counter}"
+                logging.info(f"Generating TradingWidget with instance_id: {unique_instance_id}")
                 
-                # Create the trading widget
+                # Create widget
                 trading_widget = TradingWidget(
                     emitter=self.emitter,
+                    task_manager=self.task_manager, # Pass task_manager
                     exchange=exchange,
                     symbol=symbol,
+                    instance_id=unique_instance_id
                 )
-                self.dashboard_manager.add_widget(widget_id, trading_widget)
+                self.dashboard_manager.add_widget(unique_instance_id, trading_widget)
                 
                 # Close the dialog
-                dpg.delete_item(dpg.last_item())
+                modal_window = dpg.get_item_parent(dpg.last_item()) 
+                if dpg.does_item_exist(modal_window):
+                    dpg.delete_item(modal_window)
+                else: 
+                    dpg.delete_item(dpg.top_container_stack())
+                logging.info(f"Created new Trading Panel widget: {unique_instance_id}")
             
             with dpg.group(horizontal=True):
-                dpg.add_button(label="Create", callback=create_trading_panel)
-                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.current_item_parent()))
+                dpg.add_button(label="Create", callback=create_trading_panel, width=75)
+                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item(dpg.get_item_parent(dpg.last_item())), width=75)
     
     def _show_new_price_level_dialog(self):
         """Show a modal dialog to create a new price level widget."""
@@ -475,37 +458,32 @@ class DashboardProgram:
 
                     if exchange and symbol:
                         # Generate a unique ID for the widget instance
-                        widget_id = f"{exchange}_{symbol}_pricelevel_{dpg.generate_uuid()}".lower().replace("/", "")
+                        # Generate a unique ID to allow multiple instances
+                        base_instance_id = f"{exchange}_{symbol}_pricelevel".lower().replace("/", "_")
+                        counter = 1
+                        unique_instance_id = base_instance_id
+                        while any(isinstance(w, PriceLevelWidget) and w.instance_id == unique_instance_id
+                                  for w in self.dashboard_manager.widgets.values()):
+                            counter += 1
+                            unique_instance_id = f"{base_instance_id}_{counter}"
+                        logging.info(f"Generating PriceLevelWidget with instance_id: {unique_instance_id}")
+                        
                         try:
                             new_widget = PriceLevelWidget(
                                 emitter=self.emitter,
+                                task_manager=self.task_manager, # Pass task_manager
                                 exchange=exchange,
                                 symbol=symbol,
-                                instance_id=widget_id,
+                                instance_id=unique_instance_id,
                                 default_tick_size=tick_size,
                                 max_depth=max_depth
                             )
-                            self.dashboard_manager.add_widget(widget_id, new_widget)
+                            self.dashboard_manager.add_widget(unique_instance_id, new_widget)
 
-                            # Start order book stream only if not already running
-                            stream_id = f"orderbook_{exchange}_{symbol}" # Consistent ID
-                            if not self.task_manager.is_stream_running(stream_id):
-                                logging.info(f"Starting orderbook stream {stream_id} for PriceLevelWidget {new_widget.window_tag}")
-                                # The PriceLevelWidget listens for ORDER_BOOK_UPDATE signals
-                                # We need to start the generic watch_orderbook stream
-                                # Pass a unique tag (e.g., the widget tag) so the data source knows where it originated?
-                                # For now, let's assume the data source emits generically and widgets filter.
-                                self.task_manager.start_task(
-                                    stream_id, # Use the generic stream ID
-                                    self.data.watch_orderbook(tab=new_widget.window_tag, exchange=exchange, symbol=symbol)
-                                )
-                            else:
-                                logging.info(f"Orderbook stream {stream_id} already running. PriceLevelWidget {new_widget.window_tag} will use existing stream.")
-
-                            logging.info(f"Created new price level widget: {widget_id}")
+                            logging.info(f"Created new price level widget: {unique_instance_id}")
                             dpg.delete_item(modal_id) # Close the dialog
                         except Exception as e:
-                            logging.error(f"Failed to create PriceLevelWidget {widget_id}: {e}", exc_info=True)
+                            logging.error(f"Failed to create PriceLevelWidget {unique_instance_id}: {e}", exc_info=True)
                     else:
                         logging.warning("Cannot create Price Level widget: missing exchange or symbol.")
 
@@ -549,20 +527,19 @@ class DashboardProgram:
     def _handle_new_sec_viewer_request(self):
         """Handles the request to create a new SEC Filing Viewer widget."""
         self._sec_viewer_count += 1
-        instance_id = f"instance_{self._sec_viewer_count}"
-        widget_id = f"sec_filing_viewer_{instance_id}"
+        instance_id = f"sec_viewer_{self._sec_viewer_count}"
         
-        logging.info(f"Creating new SEC Filing Viewer with ID: {widget_id}")
+        logging.info(f"Creating new SEC Filing Viewer with ID: {instance_id}")
         
         sec_viewer = SECFilingViewer(
             emitter=self.emitter,
-            sec_fetcher=self.sec_fetcher,
             task_manager=self.task_manager,
-            instance_id=instance_id
+            instance_id=instance_id,
+            sec_fetcher=self.sec_fetcher
         )
         
         # Add the widget using the dashboard manager
         # It will be created and shown automatically if not part of the saved layout
-        self.dashboard_manager.add_widget(widget_id, sec_viewer)
+        self.dashboard_manager.add_widget(instance_id, sec_viewer)
         # Explicitly show it if needed, or let docking handle it
         # sec_viewer.show() 

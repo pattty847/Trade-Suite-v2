@@ -1,6 +1,6 @@
-# Data Flow Refactoring Plan
+# Data Flow Refactoring Plan - **COMPLETED**
 
-## 0. Background Context & Key Components
+## 0. Background Context & Key Components **[COMPLETED]**
 
 This document outlines the necessary refactoring steps to fix the data flow architecture in the Trade Suite application. The core problem is that data streams (like trades and order books) and processed data (like candles) are tightly coupled to specific UI widget instances via a `tab` parameter (which corresponds to the widget's unique `window_tag`). This prevents multiple widgets from efficiently sharing and displaying the same underlying market data.
 
@@ -32,7 +32,7 @@ Fixtures / Recorded Data: Store sample trade sequences or candle DataFrames in f
 Setting up a test framework (like pytest) and adopting these strategies early will save massive amounts of time and frustration compared to purely manual testing. We can build confidence in each refactored piece as we go.
 
 
-## 1. Detailed Summary of Issues
+## 1. Detailed Summary of Issues **[ADDRESSED by Refactor]**
 
 The current data flow architecture suffers from several issues stemming from a tight coupling between data streams/signals and specific UI widget instances (`window_tag`/`tab`), preventing efficient data sharing and causing unexpected behavior when multiple widgets display the same market.
 
@@ -86,212 +86,82 @@ The current data flow architecture suffers from several issues stemming from a t
     *   *Problem:* Although DPG doesn't crash, the second widget object exists but has no corresponding UI window. This leads to user confusion and potentially inconsistent state in `DashboardManager`.
     *   *Files Affected:* `gui/dashboard_program.py` (manual add dialogs), `gui/widgets/chart_widget.py`, `gui/widgets/orderbook_widget.py`, `gui/widgets/base_widget.py` (`create`)
 
-## 2. Target Architecture & Ideal Data Flow
+## 2. Target Architecture & Ideal Data Flow **[IMPLEMENTED]**
 
-The goal is to decouple data streams and signals from specific UI widgets, enabling efficient sharing and subscription based on the *data source* (exchange, symbol, timeframe), managed centrally by `TaskManager` using reference counting.
+The goal was to decouple data streams and signals from specific UI widgets, enabling efficient sharing and subscription based on the *data source* (exchange, symbol, timeframe), managed centrally by `TaskManager` using reference counting. **This architecture has now been successfully implemented.**
 
-**Conceptual Flow:**
+**Conceptual Flow (Implemented):**
 
-1.  **Widget Creation:** UI requests a new widget (e.g., Chart for BTC/USD 1h). `DashboardProgram` ensures a unique `instance_id` (e.g., `coinbase_btcusd_1h_2`). Widget stores its configuration (`exchange`, `symbol`, `timeframe`).
-2.  **Subscription Request:** Widget initialization (or `DashboardManager` after adding) calls `TaskManager.subscribe(widget_instance, requirements={'type': 'candles', 'exchange': '...', 'symbol': ..., 'timeframe': ...})`.
-3.  **Resource Management & Stream Starting (`TaskManager`):**
-    *   Receives subscription request. Determines required resources (e.g., `trades_CB_BTCUSD` stream, `CF(CB, BTC/USD, 1h)` factory).
-    *   Increments reference count for each required resource.
-    *   **If resource count goes 0 -> 1:**
-        *   Starts the required stream (`Data.watch_*`) using a generic task ID (`trades_exchange_symbol`, `orderbook_exchange_symbol`), **without `tab`**. Ensures stream task is not already running. `Data.watch_*` puts raw data tagged with `exchange`/`symbol` onto `TaskManager.data_queue`.
-        *   Creates the required `CandleFactory(exchange, symbol, timeframe)` if it doesn't exist in `self.candle_factories` (keyed by `(exchange, symbol, timeframe)`). The factory subscribes itself to `NEW_TRADE`.
-    *   If required, fetches initial historical candles (`_fetch_candles_with_queue`), putting data tagged with `exchange`, `symbol`, `timeframe` onto `data_queue`.
-4.  **Generic Signal Emission (`TaskManager`):**
-    *   `_process_data_queue` retrieves items (raw trades, order books, initial candles) tagged with market identifiers.
-    *   Calls `_update_ui_with_*` methods (signatures updated to use market identifiers, not `tab`).
-    *   These methods emit generic signals via `emitter.emit`:
-        *   `NEW_TRADE` (payload: `exchange`, `trade_data`)
-        *   `ORDER_BOOK_UPDATE` (payload: `exchange`, `orderbook`) - *Note: Signal name corrected.*
-        *   `NEW_CANDLES` (payload: `exchange`, `symbol`, `timeframe`, `candles`)
-    *   **Crucially, no `tab` parameter is used in signal emissions.**
-5.  **Centralized Candle Processing (`CandleFactory`):**
-    *   The specific `CandleFactory(exchange, symbol, timeframe)` instance receives generic `NEW_TRADE` signals.
-    *   Its `_on_new_trade` handler filters based on `if exchange == self.exchange and trade_data.get('symbol') == self.symbol:`.
-    *   If matched, it processes the trade directly against its internal candle DataFrame state.
-    *   If the DataFrame is updated, it emits a generic `UPDATED_CANDLES` signal (payload: `exchange`, `symbol`, `timeframe`, `candles`).
-6.  **Widget Subscription & Filtering:**
-    *   All widgets (`ChartWidget`, `OrderbookWidget`, etc.) register listeners for the relevant generic signals (`ORDER_BOOK_UPDATE`, `NEW_TRADE`, `NEW_CANDLES`, `UPDATED_CANDLES`).
-    *   Their handler methods (`_on_*`) receive parameters like `exchange`, `symbol`, `timeframe`, etc. (NO `tab`).
-    *   Each handler filters the incoming signal based on whether the signal's identifiers match the widget's *own* configuration (e.g., `if exchange == self.exchange and symbol == self.symbol and timeframe == self.timeframe:`).
-    *   If the data matches, the widget updates its UI.
-7.  **Widget Closure / Config Change:**
-    *   User closes widget window / Widget changes symbol/timeframe.
-    *   Cleanup logic (e.g., `DockableWidget.on_close` callback via `DashboardManager`) calls `TaskManager.unsubscribe(widget_instance)`. For config change, widget also calls `TaskManager.subscribe` with new requirements.
-    *   `TaskManager.unsubscribe` decrements reference counts for resources used by the widget.
-    *   **If resource count drops to 0:** `TaskManager` stops the stream task and removes the `CandleFactory` instance.
+1.  **Widget Creation:** UI requests a new widget. `DashboardProgram` ensures a unique `instance_id`. Widget stores its config.
+2.  **Subscription Request:** Widget calls `TaskManager.subscribe` with its requirements.
+3.  **Resource Management & Stream Starting (`TaskManager`):** TaskManager determines resources, increments ref counts. Starts streams/creates factories on 0->1 transitions using generic IDs/keys. Fetches initial data.
+4.  **Generic Signal Emission (`TaskManager`):** Processes queue items, emits generic signals (`NEW_TRADE`, `ORDER_BOOK_UPDATE`, `NEW_CANDLES`) with market identifiers, no `tab`.
+5.  **Centralized Candle Processing (`CandleFactory`):** Central instances (per market/timeframe) filter generic `NEW_TRADE`, process, emit generic `UPDATED_CANDLES` (single candle update).
+6.  **Widget Subscription & Filtering:** Widgets listen to generic signals, filter based on their own config, update UI.
+7.  **Widget Closure / Config Change:** Widget calls `TaskManager.unsubscribe`. TaskManager decrements counts, cleans up resources (stops streams, deletes factories) when count reaches 0.
 
-**Ideal Signal Payloads (Keywords):**
+**Ideal Signal Payloads (Implemented Keywords):**
 
-*   `ORDER_BOOK_UPDATE`: `exchange: str`, `orderbook: dict` (containing `symbol`, `bids`, `asks`, etc.)
-*   `NEW_TRADE`: `exchange: str`, `trade_data: dict` (containing `symbol`, `price`, `amount`, `timestamp`, etc.)
-*   `NEW_CANDLES`: `exchange: str`, `symbol: str`, `timeframe: str`, `candles: pd.DataFrame` (initial bulk history)
-*   `UPDATED_CANDLES`: `exchange: str`, `symbol: str`, `timeframe: str`, `candles: pd.DataFrame` (live updates from factory)
+*   `ORDER_BOOK_UPDATE`: `exchange: str`, `orderbook: dict`
+*   `NEW_TRADE`: `exchange: str`, `trade_data: dict`
+*   `NEW_CANDLES`: `exchange: str`, `symbol: str`, `timeframe: str`, `candles: pd.DataFrame`
+*   `UPDATED_CANDLES`: `exchange: str`, `symbol: str`, `timeframe: str`, `candles: pd.DataFrame` (single candle row)
 
-## 3. Detailed Implementation Roadmap
+## 3. Detailed Implementation Roadmap - **COMPLETED**
 
-This roadmap breaks the refactor into manageable steps. Each step should ideally result in a testable intermediate state.
+This roadmap was followed to achieve the refactoring.
 
-**Phase 1: Signal Correction and Basic Decoupling (Order Books)**
+**Phase 1: Signal Correction and Basic Decoupling (Order Books) **[COMPLETED]**
 
-*   **Step 1.1: Fix Order Book Signal Mismatch:**
-    *   **Rationale:** Corrects the typo preventing order book widgets from receiving any signal updates.
-    *   **Action:** In `gui/task_manager.py`, locate the `_update_ui_with_orderbook` method. Change the `emit` call from `self.data.emitter.emit(Signals.NEW_ORDERBOOK, ...)` to `self.data.emitter.emit(Signals.ORDER_BOOK_UPDATE, ...)`.
-    *   **Files:** `gui/task_manager.py`
-    *   **Verification:** Check logs or UI behavior to confirm order book widgets *start* receiving signal calls (though filtering might still be wrong).
+*   **Step 1.1: Fix Order Book Signal Mismatch:** **[COMPLETED]**
+*   **Step 1.2: Standardize Order Book Signal Payload & Stream Call:** **[COMPLETED]**
+*   **Step 1.3: Update Order Book Widget Handlers:** **[COMPLETED]**
 
-*   **Step 1.2: Standardize Order Book Signal Payload & Stream Call:**
-    *   **Rationale:** Removes the widget-specific `tab` from the signal payload and the underlying stream initiation, preparing for generic handling.
-    *   **Action 1 (TaskManager):** In `gui/task_manager.py`, `_update_ui_with_orderbook`, modify the `emit` call:
-        *   Change `self.data.emitter.emit(Signals.ORDER_BOOK_UPDATE, tab, exchange, orderbook)` to `self.data.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange, orderbook=orderbook)`.
-    *   **Action 2 (Data Queue):** In `gui/task_manager.py`, `_process_data_queue`, ensure the call to `_update_ui_with_orderbook` passes `exchange=data.get('exchange')` and `orderbook=data.get('orderbook')`. The `tab` from `data.get('tab')` should no longer be passed.
-    *   **Action 3 (Data Source):** In `data/data_source.py`, `watch_orderbook`:
-        *   Remove the `tab` parameter from the function signature.
-        *   Locate the point where data is put onto the `TaskManager`'s queue (this might happen indirectly via `TaskManager.start_task` wrapping the coroutine or directly if `watch_orderbook` itself queues). Ensure the queued item contains `{'type': 'orderbook', 'exchange': exchange, 'orderbook': latest_orderbook}` and **no `tab`**. *Self-correction: `watch_orderbook` is called by `TaskManager`, which puts data on the queue via `_process_data_queue` -> `_update_ui_with_orderbook`. The key is to modify `TaskManager.start_stream_for_chart` / `start_task` / `wrapped_watch_orderbook` and the manual order book creation in `DashboardProgram` to *not* pass the `tab` parameter to `Data.watch_orderbook` if it's only used for queuing/signaling.* Let's simplify: Ensure the `wrapped_watch_orderbook` in `TaskManager` (and the direct call in `DashboardProgram._show_new_orderbook_dialog`) calls `await self.data.watch_orderbook(exchange=exchange, symbol=symbol)` (removing `tab`). Adjust `Data.watch_orderbook` signature accordingly. The queuing mechanism in `TaskManager` already extracts `exchange` and `orderbook`.
-    *   **Files:** `gui/task_manager.py`, `data/data_source.py`, `gui/dashboard_program.py`
-    *   **Verification:** Check logs for `ORDER_BOOK_UPDATE` signals being emitted without the `tab` parameter. Ensure `watch_orderbook` runs without errors after signature change.
+**Phase 2: Decouple Trade and Candle Flow **[COMPLETED]**
 
-*   **Step 1.3: Update Order Book Widget Handlers:**
-    *   **Rationale:** Makes widgets filter incoming generic signals based on their own market configuration.
-    *   **Action (OrderbookWidget):** In `gui/widgets/orderbook_widget.py`, modify `_on_order_book_update`:
-        *   Change signature from `def _on_order_book_update(self, tab, exchange, orderbook):` to `def _on_order_book_update(self, exchange: str, orderbook: dict):`.
-        *   Change filtering logic. Replace any initial check involving `tab` or just `exchange` with `if exchange != self.exchange or orderbook.get('symbol') != self.symbol: return`.
-    *   **Action (PriceLevelWidget):** In `gui/widgets/price_level_widget.py`, modify `_on_order_book_update` similarly:
-        *   Change signature from `def _on_order_book_update(self, tab, exchange, orderbook):` to `def _on_order_book_update(self, exchange: str, orderbook: dict):`.
-        *   Change filtering logic. Replace `if exchange != self.exchange or not self.is_created:` with `if not self.is_created or exchange != self.exchange or orderbook.get('symbol') != self.symbol: return`.
-    *   **Files:** `gui/widgets/orderbook_widget.py`, `gui/widgets/price_level_widget.py`
-    *   **Goal:** Order book widgets filter data based on the market they display. Multiple order books for the same market should now update correctly from the single shared stream.
-    *   **Verification:** Create two `OrderbookWidget` instances for the same market. Verify both update simultaneously. Check logs in the handlers to see filtering logic working.
+*   **Step 2.1: Standardize Trade Signal Payload & Stream Call:** **[COMPLETED]**
+*   **Step 2.2: Update Trading Widget Handler:** **[COMPLETED]**
+*   **Step 2.3: Refactor TaskManager Trade Stream Start (Add Check):** **[COMPLETED]**
+*   **Step 2.4: Centralize CandleFactory Management:** **[COMPLETED]**
+*   **Step 2.5: Adapt CandleFactory Processing (Filtering & Emission):** **[COMPLETED]**
+*   **Step 2.6: Standardize Candle Signal Payloads (`NEW_CANDLES`):** **[COMPLETED]**
+*   **Step 2.7: Update Chart Widget Handlers:** **[COMPLETED]**
 
-**Phase 2: Decouple Trade and Candle Flow**
+**Phase 3: Subscription, Cleanup, and Finalizing **[COMPLETED]**
 
-*   **Step 2.1: Standardize Trade Signal Payload & Stream Call:**
-    *   **Rationale:** Removes `tab` from `NEW_TRADE` signal and underlying stream call, analogous to Step 1.2 for order books.
-    *   **Action 1 (TaskManager Emit):** In `gui/task_manager.py`, `_update_ui_with_trades`, modify the `emit` call:
-        *   Change `self.data.emitter.emit(Signals.NEW_TRADE, tab, exchange, trades)` to `self.data.emitter.emit(Signals.NEW_TRADE, exchange=exchange, trade_data=trades)`. (Assuming `trades` here is the single trade dictionary `trade_data`). If `trades` is a list, emit `trade_data=trades[0]` or loop. Let's assume it's `trade_data`. Check actual `trades` type passed. *Correction: Log shows `trade_data=trades[0]` in `data_source.py`, but `_update_ui_with_trades` receives `trades`. Let's assume `trades` is the dict.* Modify to `self.data.emitter.emit(Signals.NEW_TRADE, exchange=exchange, trade_data=trades)`.
-    *   **Action 2 (Data Queue):** In `gui/task_manager.py`, `_process_data_queue`, ensure the call to `_update_ui_with_trades` passes `exchange=data.get('exchange')` and `trade_data=data.get('trades')`. No `tab`.
-    *   **Action 3 (Data Source):** In `data/data_source.py`, `watch_trades`:
-        *   Remove the `tab` parameter from the function signature.
-        *   Ensure the queued item (likely via `TaskManager`'s wrapper) contains `{'type': 'trades', 'exchange': exchange, 'trades': trade_data}` (or the single trade dict) and **no `tab`**. Similar to 1.2, modify `TaskManager.start_stream_for_chart`'s `wrapped_watch_trades` to call `await self.data.watch_trades(exchange=exchange, symbol=symbol, ...)` (removing `tab`). Adjust `Data.watch_trades` signature.
-    *   **Files:** `gui/task_manager.py`, `data/data_source.py`
-    *   **Verification:** Check logs for `NEW_TRADE` signals emitted without `tab`. Ensure `watch_trades` runs without errors.
+*   **Step 3.1: Implement Subscription & Resource Management in TaskManager:** **[COMPLETED]**
+*   **Step 3.2: Integrate Subscription with Widget Lifecycle:** **[COMPLETED]**
+*   **Step 3.3: Refactor Configuration Changes (Symbol/Timeframe):** **[COMPLETED]**
+*   **Step 3.4: Address Duplicate Widget Creation:** **[COMPLETED]**
+*   **Step 3.5: Review and Remove Obsolete `tab` Usage:** **[COMPLETED]**
+*   **Step 3.6: Remove/Repurpose `ChartProcessor`:** **[COMPLETED]** (Removed `ChartProcessor` entirely)
+*   **Step 3.7: Testing:** **[NEXT STEP - See Section 4]**
 
-*   **Step 2.2: Update Trading Widget Handler:**
-    *   **Rationale:** Makes `TradingWidget` filter generic trades based on its market.
-    *   **Action:** In `gui/widgets/trading_widget.py`, modify `_on_new_trade`:
-        *   Change signature to `def _on_new_trade(self, exchange: str, trade_data: dict):`.
-        *   Implement filtering: `trade_symbol = trade_data.get('symbol')
-if exchange != self.exchange or trade_symbol != self.symbol: return`.
-    *   **Files:** `gui/widgets/trading_widget.py`
-    *   **Verification:** Open multiple `TradingWidget` instances. Verify each only displays trades for its configured market.
+## 4. Refactoring Conclusion & Next Steps
 
-*   **Step 2.3: Refactor TaskManager Trade Stream Start (Add Check):**
-    *   **Rationale:** Prevents the trade stream from being stopped and restarted unnecessarily, enabling sharing.
-    *   **Action:** In `gui/task_manager.py`, `start_stream_for_chart`:
-        *   Locate the line defining `trades_task = f"trades_{exchange}_{symbol}"`.
-        *   **Before** the `self.start_task(trades_task, ...)` call for trades, **add** the check: `if not self.is_stream_running(trades_task):`. Indent the `start_task` call and any related logging under this `if`.
-        *   Ensure the `wrapped_watch_trades` coroutine (defined within `start_stream_for_chart`) no longer uses the `tab` variable when calling `self.data.watch_trades` (as done in Step 2.1).
-    *   **Files:** `gui/task_manager.py`
-    *   **Verification:** Add logging inside the `if not self.is_stream_running(trades_task):` block. Create two charts for the same market. Verify the log message "Starting trade stream..." appears only once for that market. Check that the trade stream task is not stopped/restarted in logs when the second chart is added.
+**Status:** The data flow refactoring outlined in this plan has been successfully completed. The application now utilizes a decoupled architecture where data streams and processing are managed centrally by `TaskManager` and `CandleFactory`, enabling efficient sharing of resources between widgets. Widgets subscribe to generic signals and filter based on their own configuration.
 
-*   **Step 2.4: Centralize CandleFactory Management:**
-    *   **Rationale:** Creates a single source of truth for candle data per market/timeframe, eliminating redundant processing.
-    *   **Action 1 (TaskManager/Data):** Decide where to store the central factories. `TaskManager` seems appropriate. Add a dictionary attribute `self.candle_factories = {}` in `TaskManager.__init__`. The key will be `(exchange, symbol, timeframe)`.
-    *   **Action 2 (TaskManager Logic):** In `TaskManager.start_stream_for_chart`:
-        *   Remove the line `self.data.candle_factories[tab] = candle_factory`.
-        *   Define `factory_key = (exchange, symbol, timeframe)`.
-        *   Add check: `if factory_key not in self.candle_factories:`
-        *   Inside the `if`, move the `CandleFactory` instantiation. **Crucially, remove the `tab=tab` argument** from the constructor call: `candle_factory = CandleFactory(exchange=exchange, emitter=self.data.emitter, ..., timeframe_str=timeframe)`. Adjust `CandleFactory.__init__` signature in the next step.
-        *   Store the new factory: `self.candle_factories[factory_key] = candle_factory`.
-        *   Add logging for factory creation/reuse.
-    *   **Action 3 (CandleFactory Constructor):** In `data/candle_factory.py`, `__init__`:
-        *   Remove the `tab` parameter from the signature.
-        *   Remove the line `self.tab = tab`.
-    *   **Files:** `gui/task_manager.py`, `data/candle_factory.py`
-    *   **Verification:** Add logging for `CandleFactory` creation in `TaskManager`. Create two charts for the same market/timeframe. Verify the factory is created only once. Create a chart for a different timeframe and verify a *new* factory is created.
+**Verification:** Manual testing and detailed logging analysis confirm that:
+*   Multiple widgets for the same market (e.g., 1h and 5m charts for BTC/USD) share the same underlying data streams (`watch_trades`).
+*   Separate `CandleFactory` instances are correctly created and managed per unique market/timeframe combination.
+*   Reference counting correctly prevents duplicate stream tasks and cleans up resources when widgets are closed or reconfigured.
+*   Data flows correctly from streams -> TaskManager -> Factories/Widgets via generic signals.
 
-*   **Step 2.5: Adapt CandleFactory Processing (Filtering & Emission):**
-    *   **Rationale:** Makes the central `CandleFactory` listen to generic trades, filter correctly, and emit generic candle updates.
-    *   **Action 1 (Filtering):** In `data/candle_factory.py`, `_on_new_trade`:
-        *   Remove the `tab` parameter from the signature.
-        *   Change the filtering logic from `if tab == self.tab:` to `if exchange == self.exchange and trade_data.get('symbol') == self.symbol:`. Adjust logging messages that refer to `self.tab`.
-    *   **Action 2 (Emission):** In `data/candle_factory.py`, `_process_trade_batch` and `try_resample`:
-        *   Modify the `self.emitter.emit(Signals.UPDATED_CANDLES, ...)` calls.
-        *   Remove the `tab=self.tab` parameter.
-        *   Ensure `exchange=self.exchange`, `symbol=self.symbol`, `timeframe=self.timeframe_str` (or equivalent) are included as keyword arguments. Example: `self.emitter.emit(Signals.UPDATED_CANDLES, exchange=self.exchange, symbol=self.symbol, timeframe=self.timeframe_str, candles=updated_candles)`.
-    *   **Files:** `data/candle_factory.py`
-    *   **Verification:** Check logs for `CandleFactory` confirming it filters trades correctly based on its `exchange`/`symbol`. Check logs for `UPDATED_CANDLES` emission, ensuring `tab` is absent and `exchange`, `symbol`, `timeframe` are present.
+**Immediate Next Step: Comprehensive Testing**
 
-*   **Step 2.6: Standardize Candle Signal Payloads (`NEW_CANDLES`):**
-    *   **Rationale:** Ensures the initial candle load signal is also generic.
-    *   **Action 1 (TaskManager Emit):** In `gui/task_manager.py`, `_update_ui_with_candles`:
-        *   Modify the `emit` call: `self.data.emitter.emit(Signals.NEW_CANDLES, tab, exchange, candles)` to `self.data.emitter.emit(Signals.NEW_CANDLES, exchange=exchange, symbol=symbol, timeframe=timeframe, candles=candles)`.
-        *   **IMPORTANT:** The `symbol` and `timeframe` are not directly available here. The `candles` data likely originates from `_fetch_candles_with_queue`. The queued item needs to be augmented to include `symbol` and `timeframe`. Modify `_fetch_candles_with_queue` to put `{'type': 'candles', 'tab': tab, 'exchange': ..., 'symbol': symbols[0], 'timeframe': timeframes[0], 'candles': ...}` onto the queue.
-        *   Modify `_process_data_queue` to extract `symbol` and `timeframe` from the `data` dict and pass them to `_update_ui_with_candles`.
-        *   Modify `_update_ui_with_candles` signature to accept `symbol` and `timeframe`.
-    *   **Files:** `gui/task_manager.py`
-    *   **Verification:** Check logs for `NEW_CANDLES` emission, ensuring `tab` is absent and `exchange`, `symbol`, `timeframe` are present.
+While manual testing indicates success, the complexity of the data flow necessitates robust automated testing, as originally outlined in Section 0 (`Testing Strategy`). This is critical to ensure reliability and catch potential edge cases or race conditions missed during development.
 
-*   **Step 2.7: Update Chart Widget Handlers:**
-    *   **Rationale:** Makes charts filter generic initial (`NEW_CANDLES`) and updated (`UPDATED_CANDLES`) candle signals based on their market/timeframe.
-    *   **Action (`_on_new_candles`):** In `gui/widgets/chart_widget.py`:
-        *   Change signature from `def _on_new_candles(self, tab, exchange, candles):` to `def _on_new_candles(self, exchange: str, symbol: str, timeframe: str, candles: pd.DataFrame):`.
-        *   Change filtering logic from `if tab == self.window_tag and exchange == self.exchange:` to `if exchange == self.exchange and symbol == self.symbol and timeframe == self.timeframe:`.
-    *   **Action (`_on_updated_candles`):** In `gui/widgets/chart_widget.py`:
-        *   Change signature from `def _on_updated_candles(self, tab, exchange, candles):` to `def _on_updated_candles(self, exchange: str, symbol: str, timeframe: str, candles: pd.DataFrame):`.
-        *   Change filtering logic from `if tab == self.window_tag and exchange == self.exchange:` to `if exchange == self.exchange and symbol == self.symbol and timeframe == self.timeframe:`. Adjust logging.
-    *   **Files:** `gui/widgets/chart_widget.py`
-    *   **Verification:** Create two charts for the same market/timeframe. Verify both receive initial candles (`NEW_CANDLES`) and subsequent updates (`UPDATED_CANDLES`) simultaneously from the single shared `CandleFactory`. Create charts for different timeframes/symbols and verify they only update from their respective data.
+**Recommended Testing Focus:**
+1.  **Unit Tests:**
+    *   `CandleFactory`: Verify candle calculation logic with various trade sequences (including edge cases like trades exactly on boundaries, out-of-order trades if possible, large volume trades).
+    *   `TaskManager`: Test `subscribe`/`unsubscribe` logic thoroughly, mocking stream/factory start/stop, and asserting correct reference counts and resource lifecycle function calls.
+    *   Widget Handlers: Test the filtering logic in `_on_*` methods of all relevant widgets.
+2.  **Integration Tests:**
+    *   Test the core flow: `Widget -> subscribe -> TaskManager -> Factory/Stream -> TaskManager -> emit -> Factory/Widget -> update` using mocked components where appropriate (especially network/DPG).
+    *   Test configuration changes (symbol/timeframe) and widget closure, verifying resource cleanup (`unsubscribe` leading to stream stop/factory deletion when ref count hits 0).
 
-**Phase 3: Subscription, Cleanup, and Finalizing**
+**Future Action: Architecture Documentation**
 
-*   **Step 3.1: Implement Subscription & Resource Management in TaskManager:**
-    *   **Action:**
-        *   Add `self.stream_ref_counts = defaultdict(int)` and `self.factory_ref_counts = defaultdict(int)` to `TaskManager.__init__`. Also `self.widget_subscriptions = defaultdict(set)`.
-        *   Implement `TaskManager.subscribe(self, widget, requirements: dict)`:
-            *   Parse `requirements` (type, exchange, symbol, timeframe).
-            *   Determine needed resources (e.g., `'trades_exch_sym'`, `'cf_exch_sym_tf'`).
-            *   Store `widget` reference mapped to its requirements/resources.
-            *   For each needed resource: increment ref count. If count becomes 1, start stream (using `start_task` internally, checking `is_stream_running`) or create `CandleFactory` (storing in `self.candle_factories`). Trigger initial candle fetch (`_get_candles_for_market`) if needed.
-        *   Implement `TaskManager.unsubscribe(self, widget)`:
-            *   Find resources used by `widget` from `self.widget_subscriptions`.
-            *   Remove widget subscription mapping.
-            *   For each resource: decrement ref count. If count becomes 0, stop stream (`stop_task`) or delete factory (from `self.candle_factories`).
-    *   **Files:** `gui/task_manager.py`
+Once testing provides sufficient confidence, a separate architecture document should be created. This document will formally describe the *new*, implemented data flow, serving as a reference for future development and maintenance. It should include diagrams illustrating the component interactions and data pathways.
 
-*   **Step 3.2: Integrate Subscription with Widget Lifecycle:**
-    *   **Action:**
-        *   In `DockableWidget` base class or individual widget `__init__` / `setup`, call `task_manager.subscribe(self, self.get_requirements())`.
-        *   Ensure `DashboardManager` (when handling widget closure via DPG callbacks) calls `task_manager.unsubscribe(widget)`.
-    *   **Files:** `gui/widgets/base_widget.py`, `gui/widgets/*_widget.py`, `gui/dashboard_manager.py`
-
-*   **Step 3.3: Refactor Configuration Changes (Symbol/Timeframe):**
-    *   **Action:**
-        *   Remove `_on_symbol_changed` from `DashboardProgram`.
-        *   In `ChartWidget` (and others if applicable), modify UI callbacks for symbol/timeframe changes:
-            1.  Call `self.task_manager.unsubscribe(self)`.
-            2.  Update `self.symbol` / `self.timeframe`.
-            3.  Call `self.task_manager.subscribe(self, self.get_requirements())`.
-            4.  Clear old data / request refresh if necessary.
-    *   **Files:** `gui/widgets/chart_widget.py`, `gui/dashboard_program.py` (remove handler)
-
-*   **Step 3.4: Address Duplicate Widget Creation:**
-    *   **Action:** In `gui/dashboard_program.py` (or wherever manual widgets are created), before instantiating, check `DashboardManager` for existing widgets with the *exact same configuration*. If found, generate a unique suffix and pass a unique `instance_id` (e.g., `f"{exchange}_{symbol}_{timeframe}_2"`) to the constructor.
-    *   **Files:** `gui/dashboard_program.py`
-
-*   **Step 3.5: Review and Remove Obsolete `tab` Usage:**
-    *   **Action:** Perform global search for `tab`. Remove its usage entirely from signal payloads, function arguments, and internal logic related to data routing or configuration changes. Replace config change signaling with direct calls or passing widget instances if necessary.
-    *   **Files:** Potentially many.
-
-*   **Step 3.6: Remove/Repurpose `ChartProcessor`:**
-    *   **Action:** Delete `data/chart_processor.py` if it's no longer needed. Remove its instantiation and usage from `CandleFactory` and potentially `TaskManager`.
-    *   **Files:** `data/candle_factory.py`, `gui/task_manager.py`, `data/chart_processor.py` (delete)
-
-*   **Step 3.7: Testing:**
-    *   **Action:** Comprehensive testing as described in the original plan, focusing on shared streams, independent timeframes, dynamic widget add/close/reconfigure, and resource cleanup.
-
-This updated plan provides a more detailed and robust roadmap for the refactor. 
+**Well done on completing this significant refactor!**

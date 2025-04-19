@@ -2,31 +2,42 @@ import asyncio
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Any, Callable
+from typing import Dict, List, Any, Callable, Set, Tuple
 import time
+from collections import defaultdict
+import pandas as pd
 
 import dearpygui.dearpygui as dpg
 
 from trade_suite.data.data_source import Data
 from trade_suite.gui.signals import Signals
 from trade_suite.gui.utils import calculate_since, create_loading_modal, create_timed_popup
+from trade_suite.data.candle_factory import CandleFactory
 
 
 class TaskManager:
     def __init__(self, data: Data):
         self.data = data
-        self.tasks = {}
-        self.tabs = {}
+        self.tasks: Dict[str, asyncio.Task] = {}
         self.visible_tab = None
-        self.loop = None
-        self.thread = None
+        self.loop: asyncio.AbstractEventLoop = None
+        self.thread: threading.Thread = None
         self.running = True
+        
+        # Centralized factory storage (keyed by (exchange, symbol, timeframe))
+        self.candle_factories: Dict[Tuple[str, str, str], CandleFactory] = {}
+        
+        # Reference counting and subscription tracking
+        self.stream_ref_counts: Dict[str, int] = defaultdict(int)
+        self.factory_ref_counts: Dict[Tuple[str, str, str], int] = defaultdict(int)
+        # Maps widget instance to a set of resource keys (stream or factory) it requires
+        self.widget_subscriptions: Dict[Any, Set[str | Tuple[str, str, str]]] = defaultdict(set)
         
         # Add a queue for thread-safe communication
         self.data_queue = asyncio.Queue()
         self.executor = ThreadPoolExecutor(max_workers=1)
         
-        # Lock for thread synchronization
+        # Lock for thread synchronization (primarily for accessing shared resources like factories/counts)
         self.lock = threading.Lock()
         
         # Start the event loop in a separate thread
@@ -56,84 +67,76 @@ class TaskManager:
         self.loop.run_forever()
 
     async def _process_data_queue(self):
-        """
-        Process data from the queue in a thread-safe manner.
-        This ensures that data is properly synchronized between threads.
-        """
+        """Process items from the data queue"""
         while self.running:
             try:
-                # Get data from the queue with a timeout
-                data = await asyncio.wait_for(self.data_queue.get(), timeout=0.1)
-                
-                # Process the data based on its type
-                if data.get('type') == 'candles':
-                    # Use the executor to safely update the UI
-                    await self.loop.run_in_executor(
-                        self.executor, 
-                        self._update_ui_with_candles, 
-                        data.get('tab'), 
-                        data.get('exchange'), 
-                        data.get('candles')
-                    )
-                elif data.get('type') == 'trades':
-                    await self.loop.run_in_executor(
-                        self.executor, 
-                        self._update_ui_with_trades, 
-                        data.get('tab'), 
-                        data.get('exchange'), 
-                        data.get('trades')
-                    )
-                elif data.get('type') == 'orderbook':
-                    await self.loop.run_in_executor(
-                        self.executor, 
-                        self._update_ui_with_orderbook, 
-                        data.get('tab'), 
-                        data.get('exchange'), 
-                        data.get('orderbook')
-                    )
-                
-                # Mark the task as done
-                self.data_queue.task_done()
+                # Block until an item is available or a timeout occurs
+                data = await asyncio.wait_for(self.data_queue.get(), timeout=1.0)
+                if data:
+                    data_type = data.get("type")
+                    if data_type == "candles":
+                        # Extract candle data including symbol and timeframe
+                        exchange = data.get("exchange")
+                        symbol = data.get("symbol")
+                        timeframe = data.get("timeframe")
+                        candles = data.get("candles")
+                        # Update UI with candle data using keywords, no tab
+                        self._update_ui_with_candles(
+                            exchange=exchange,
+                            symbol=symbol,
+                            timeframe=timeframe,
+                            candles=candles
+                        )
+                    elif data_type == "trades":
+                        # Extract trade data
+                        exchange = data.get("exchange")
+                        trade_data = data.get("trades") # Assuming 'trades' is the single trade dict
+                        # Update UI with trade data using keywords, no tab
+                        self._update_ui_with_trades(exchange=exchange, trade_data=trade_data)
+                    elif data_type == "orderbook":
+                        # Extract orderbook data
+                        exchange = data.get("exchange")
+                        orderbook = data.get("orderbook")
+                        # Update UI with orderbook data using keywords
+                        self._update_ui_with_orderbook(exchange=exchange, orderbook=orderbook)
+
+                    self.data_queue.task_done()
             except asyncio.TimeoutError:
-                # No data in the queue, continue
+                # No item received within the timeout, continue loop
                 continue
             except Exception as e:
                 logging.error(f"Error processing data queue: {e}")
 
-    def _update_ui_with_candles(self, tab, exchange, candles):
-        """Thread-safe method to update UI with candles data"""
-        with self.lock:
-            # Emit the signal to update the UI
-            self.data.emitter.emit(Signals.NEW_CANDLES, tab, exchange, candles)
+    def _update_ui_with_candles(self, exchange, symbol, timeframe, candles):
+        """Thread-safe method to update UI with initial/bulk candles data"""
+        logging.debug(f"TaskManager emitting NEW_CANDLES for {exchange}/{symbol}/{timeframe}")
+        self.data.emitter.emit(
+            Signals.NEW_CANDLES,
+            exchange=exchange,
+            symbol=symbol,     # Added symbol
+            timeframe=timeframe, # Added timeframe
+            candles=candles
+        )
 
-    def _update_ui_with_trades(self, tab, exchange, trades):
+    def _update_ui_with_trades(self, exchange, trade_data):
         """Thread-safe method to update UI with trades data"""
-        with self.lock:
-            # Emit the signal to update the UI
-            self.data.emitter.emit(Signals.NEW_TRADE, tab, exchange, trades)
+        self.data.emitter.emit(Signals.NEW_TRADE, exchange=exchange, trade_data=trade_data)
 
-    def _update_ui_with_orderbook(self, tab, exchange, orderbook):
+    def _update_ui_with_orderbook(self, exchange, orderbook):
         """Thread-safe method to update UI with orderbook data"""
-        with self.lock:
-            # Emit the signal to update the UI
-            self.data.emitter.emit(Signals.NEW_ORDERBOOK, tab, exchange, orderbook)
+        self.data.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange, orderbook=orderbook)
 
     def start_task(self, name: str, coro):
         """
-        The start_task function is used to start a new task in the event loop.
-        It creates a task and stores it in the tasks dictionary.
-
-        :param self: Access the class instance
-        :param name: Identify the task
-        :param coro: Specify the coroutine to run
-        :return: None
-        :doc-author: Trelent
+        Starts a new task in the event loop if it's not already running.
+        Handles task creation, storage, and completion callback setup.
+        Does NOT stop existing task with the same name anymore. Check before calling if restart is needed.
         """
-        if name in self.tasks:
-            self.stop_task(name)
-
         task = self.create_task(name, coro)
-        self.tasks[name] = task
+        if task: # Only store if task creation was successful
+            self.tasks[name] = task
+        else:
+             logging.warning(f"Failed to create or schedule task '{name}'")
 
     def create_task(self, name: str, coro):
         """
@@ -158,208 +161,249 @@ class TaskManager:
                 logging.error(f"Error in task '{name}': {e}", exc_info=True)
                 return None, e # Return no result and the error
 
-        task = self.loop.create_task(wrapped_coro())
-        task.add_done_callback(lambda t: self._on_task_complete(name, t))
+        task = asyncio.run_coroutine_threadsafe(wrapped_coro(), self.loop)
         return task
 
-    def start_stream_for_chart(self, tab, exchange, symbol, timeframe):
+    def _get_resource_keys(self, requirements: dict) -> List[str | Tuple[str, str, str]]:
+        """Helper to determine resource keys from widget requirements."""
+        keys = []
+        req_type = requirements.get("type")
+        exchange = requirements.get("exchange")
+        symbol = requirements.get("symbol")
+        timeframe = requirements.get("timeframe")
+
+        if not exchange or not symbol:
+            logging.warning(f"Missing exchange or symbol in requirements: {requirements}")
+            return keys
+
+        if req_type == 'candles':
+            if not timeframe:
+                 logging.warning(f"Missing timeframe for candles requirement: {requirements}")
+                 return keys
+            # Candles require a factory and the underlying trade stream
+            factory_key = (exchange, symbol, timeframe)
+            trade_stream_key = f"trades_{exchange}_{symbol}"
+            keys.append(factory_key)
+            keys.append(trade_stream_key)
+        elif req_type == 'trades':
+            trade_stream_key = f"trades_{exchange}_{symbol}"
+            keys.append(trade_stream_key)
+        elif req_type == 'orderbook':
+            orderbook_stream_key = f"orderbook_{exchange}_{symbol}"
+            keys.append(orderbook_stream_key)
+        else:
+            logging.warning(f"Unknown requirement type: {req_type}")
+
+        return keys
+
+    def subscribe(self, widget, requirements: dict):
         """
-        The start_stream_for_chart function starts the data streams for a chart.
-        It starts the trades and orderbook streams for the specified exchange and symbol.
-
-        The function also calls get_candles_for_market which emits candles to listeners.
-
-        :param self: Bind the method to an object
-        :param tab: Identify the tab that is being used
-        :param exchange: Specify which exchange we want to get data from
-        :param symbol: Determine which market to get data for
-        :param timeframe: Determine the interval of time to be used for the chart
-        :return: A list of tasks
-        :doc-author: Trelent
+        Subscribes a widget to data based on requirements.
+        Manages resource reference counting and starts/creates resources if needed.
         """
+        with self.lock: # Ensure thread safety when modifying counts/factories/tasks
+            resource_keys = self._get_resource_keys(requirements)
+            if not resource_keys:
+                logging.error(f"Could not determine resources for widget {widget} with requirements {requirements}")
+                return
 
-        # We want to stop the old tab's tasks when requesting a new stream
-        # TODO: Fix this, we do not want to stop old streams, especially if another widget is listening to the same data
-        # This is from the old tab based architecture, we should use a more flexible approach for the new dashboard based architecture
-        # where widgets can subscribe to data directly from the data source if there are already streams running, start new streams if not
-        if tab in self.tabs:
-            for task in self.tabs[tab]:
-                self.stop_task(task)
+            widget_id = id(widget) # Use widget id as key for simplicity
+            logging.info(f"Subscribing widget {widget_id} with requirements {requirements}. Resources: {resource_keys}")
+            self.widget_subscriptions[widget_id].update(resource_keys)
 
-        # This will emit the candles to listeners and return a future
-        candles_future = self._get_candles_for_market(
-            tab, exchange, symbol, timeframe
-        ) 
-        
-        # TODO: We need to start the trades and orderbook streams for the chart that widgets can subscribe to
-        # Task ID for trades stream (usually specific to the chart/tab)
-        trades_task = f"trades_{exchange}_{symbol}"
-        # Task ID for the shared orderbook stream (generic)
-        orderbook_task = f"orderbook_{exchange}_{symbol}"
+            needs_initial_candles = False
+            initial_candle_details = {}
 
-        # Create wrapped coroutines that use the queue for thread-safe communication
+            for key in resource_keys:
+                if isinstance(key, tuple): # Factory key (exchange, symbol, timeframe)
+                    exchange, symbol, timeframe = key
+                    self.factory_ref_counts[key] += 1
+                    logging.debug(f"Factory ref count for {key} incremented to {self.factory_ref_counts[key]}")
+                    if self.factory_ref_counts[key] == 1:
+                        # Create CandleFactory if it doesn't exist
+                        if key not in self.candle_factories:
+                            logging.info(f"Creating new CandleFactory for key: {key}")
+                            # Ensure required arguments are passed
+                            ccxt_exchange = self.data.exchange_list.get(exchange)
+                            if not ccxt_exchange:
+                                logging.error(f"CCXT exchange object not found for '{exchange}' in TaskManager. Cannot fetch initial candles.")
+                                return
+                            candle_factory = CandleFactory(
+                                exchange=exchange,
+                                symbol=symbol, # Added symbol to constructor if needed
+                                timeframe_str=timeframe,
+                                emitter=self.data.emitter,
+                                task_manager=self, # Pass the TaskManager instance
+                                data=self.data # Pass the Data instance
+                            )
+                            self.candle_factories[key] = candle_factory
+                            # Mark that initial candles are needed for this new factory
+                            needs_initial_candles = True
+                            initial_candle_details = {'exchange': exchange, 'symbol': symbol, 'timeframe': timeframe}
+                            logging.info(f"CandleFactory created and stored for {key}.")
+                        else:
+                            logging.info(f"CandleFactory already exists for {key}")
+                
+                elif isinstance(key, str): # Stream key
+                    self.stream_ref_counts[key] += 1
+                    logging.debug(f"Stream ref count for {key} incremented to {self.stream_ref_counts[key]}")
+                    if self.stream_ref_counts[key] == 1:
+                        logging.info(f"Starting stream for key: {key}")
+                        # Determine stream type and start
+                        if key.startswith("trades_"):
+                            _, exch, sym = key.split("_", 2)
+                            coro = self._get_watch_trades_coro(exch, sym)
+                            if coro:
+                                self.start_task(key, coro)
+                            else:
+                                logging.error(f"Could not create trade stream coroutine for {key}")
+                                self.stream_ref_counts[key] -= 1 # Rollback count
+                                self.widget_subscriptions[widget_id].remove(key) # Remove from widget sub
+
+                        elif key.startswith("orderbook_"):
+                             _, exch, sym = key.split("_", 2)
+                             coro = self._get_watch_orderbook_coro(exch, sym)
+                             if coro:
+                                 self.start_task(key, coro)
+                             else:
+                                 logging.error(f"Could not create orderbook stream coroutine for {key}")
+                                 self.stream_ref_counts[key] -= 1 # Rollback count
+                                 self.widget_subscriptions[widget_id].remove(key) # Remove from widget sub
+            
+            # Trigger initial candle fetch outside the loop if a new factory was created
+            if needs_initial_candles and initial_candle_details:
+                 logging.info(f"Triggering initial candle fetch for {initial_candle_details}")
+                 # Use run_coroutine_threadsafe as this might be called from UI thread
+                 asyncio.run_coroutine_threadsafe(
+                     self._fetch_initial_candles_for_factory(**initial_candle_details),
+                     self.loop
+                 )
+
+    def unsubscribe(self, widget):
+        """
+        Unsubscribes a widget, decrementing resource counts and cleaning up if necessary.
+        """
+        with self.lock: # Ensure thread safety
+            widget_id = id(widget)
+            if widget_id not in self.widget_subscriptions:
+                 logging.warning(f"Widget {widget_id} not found in subscriptions during unsubscribe.")
+                 return
+
+            resource_keys = self.widget_subscriptions.pop(widget_id)
+            logging.info(f"Unsubscribing widget {widget_id}. Resources: {resource_keys}")
+
+            for key in resource_keys:
+                if isinstance(key, tuple): # Factory key
+                    if key in self.factory_ref_counts:
+                        self.factory_ref_counts[key] -= 1
+                        logging.debug(f"Factory ref count for {key} decremented to {self.factory_ref_counts[key]}")
+                        if self.factory_ref_counts[key] == 0:
+                             logging.info(f"Reference count is 0. Deleting CandleFactory for key: {key}")
+                             if key in self.candle_factories:
+                                 # Add potential cleanup logic for the factory itself if needed
+                                 del self.candle_factories[key]
+                                 logging.info(f"CandleFactory deleted for {key}.")
+                             del self.factory_ref_counts[key] # Remove from counts dict
+                    else:
+                         logging.warning(f"Factory key {key} not found in ref counts during unsubscribe.")
+
+                elif isinstance(key, str): # Stream key
+                    if key in self.stream_ref_counts:
+                        self.stream_ref_counts[key] -= 1
+                        logging.debug(f"Stream ref count for {key} decremented to {self.stream_ref_counts[key]}")
+                        if self.stream_ref_counts[key] == 0:
+                             logging.info(f"Reference count is 0. Stopping stream task: {key}")
+                             self.stop_task(key) # Stop the stream task
+                             del self.stream_ref_counts[key] # Remove from counts dict
+                    else:
+                         logging.warning(f"Stream key {key} not found in ref counts during unsubscribe.")
+
+    # Helper methods to create stream coroutines
+    def _get_watch_trades_coro(self, exchange: str, symbol: str):
+        """Returns the coroutine for watching trades."""
         async def wrapped_watch_trades():
             try:
-                # The watch_trades method already has its own while loop
+                # Assumes watch_trades puts data on the queue internally now, or handles signals
+                # Removed tab parameter
                 await self.data.watch_trades(
-                    tab=tab, exchange=exchange, symbol=symbol, track_stats=True
+                    exchange=exchange, symbol=symbol, track_stats=True
                 )
+            except asyncio.CancelledError:
+                 logging.info(f"Trade stream task trades_{exchange}_{symbol} cancelled.")
+                 raise # Re-raise
             except Exception as e:
-                logging.error(f"Error in trades stream: {e}")
+                 logging.error(f"Error in trade stream {exchange}/{symbol}: {e}", exc_info=True)
+        return wrapped_watch_trades() # Return the coroutine object itself
 
+    def _get_watch_orderbook_coro(self, exchange: str, symbol: str):
+        """Returns the coroutine for watching orderbook."""
         async def wrapped_watch_orderbook():
             try:
-                # The watch_orderbook method already has its own while loop
+                # Assumes watch_orderbook puts data on the queue internally now
+                # Removed tab parameter
                 await self.data.watch_orderbook(
-                    tab=tab,
                     exchange=exchange,
                     symbol=symbol,
                 )
+            except asyncio.CancelledError:
+                 logging.info(f"Orderbook stream task orderbook_{exchange}_{symbol} cancelled.")
+                 raise # Re-raise
             except Exception as e:
-                logging.error(f"Error in orderbook stream: {e}")
-        
-        # Modified: Only start trade and orderbook streams after candles are fetched
-        def start_streams_after_candles(fut):
-            try:
-                # Get the result of the future to ensure candles have been fetched
-                fut.result()
-                logging.info(f"Candles loaded. Starting trade and orderbook streams for {symbol} on {exchange}.")
-                
-                # Create a CandleFactory to process trades into candles
-                from trade_suite.data.candle_factory import CandleFactory
-                config_manager = self.data.config_manager if hasattr(self.data, 'config_manager') else {}
-                exchange_settings = config_manager.get_setting(exchange) if hasattr(config_manager, 'get_setting') else {}
-                if not exchange_settings:
-                    exchange_settings = {'last_symbol': symbol}
-                
-                # Create a candle factory with the correct tab ID
-                candle_factory = CandleFactory(
-                    exchange=exchange,
-                    tab=tab,
-                    emitter=self.data.emitter,
-                    task_manager=self,
-                    data=self.data,
-                    exchange_settings=exchange_settings,
-                    timeframe_str=timeframe
-                )
-                
-                # Store it in a dictionary for potential later reference
-                self.data.candle_factories = getattr(self.data, 'candle_factories', {})
-                self.data.candle_factories[tab] = candle_factory
-                logging.info(f"Created CandleFactory for tab {tab} and timeframe {timeframe}")
-                
-                # Now start the trade and orderbook streams
-                self.start_task(
-                    trades_task,
-                    coro=wrapped_watch_trades(),
-                )
-                
-                # Start orderbook task using the GENERIC ID
-                # It might already be running if another widget requested it,
-                # start_task handles overwriting/cancelling the old one if necessary,
-                # but ideally we check is_stream_running first.
-                # For simplicity here, we rely on start_task idempotency.
-                # A more robust solution might check first.
-                if not self.is_stream_running(orderbook_task):
-                    logging.info(f"Starting shared orderbook stream: {orderbook_task}")
-                    self.start_task(
-                        orderbook_task,
-                        coro=wrapped_watch_orderbook(),
-                    )
-                else:
-                    logging.info(f"Shared orderbook stream {orderbook_task} already running.")
-                
-                # Add BOTH task IDs to the tab's tracking list
-                self.tabs[tab] = [trades_task, orderbook_task]
-            except Exception as e:
-                logging.error(f"Error starting streams after candles: {e}")
-        
-        # Add the callback to start streams only after candles are fetched
-        candles_future.add_done_callback(start_streams_after_candles)
+                 logging.error(f"Error in orderbook stream {exchange}/{symbol}: {e}", exc_info=True)
+        return wrapped_watch_orderbook() # Return the coroutine object itself
 
-    def _get_candles_for_market(self, tab, exchange, symbol, timeframe):
-        """
-        The get_candles_for_market function is used to fetch candles for a given market.
-
-        :param self: Access the class instance
-        :param tab: Identify which tab the data is being fetched for
-        :param exchange: Specify which exchange to get the data from
-        :param symbol: Get the candles for a specific symbol
-        :param timeframe: Determine the timeframe of the candles
-        :return: The following:
-        :doc-author: Trelent
-        """
-        # TODO: Make number of candles variable
-        since = calculate_since(
-            self.data.exchange_list[exchange], timeframe, num_candles=500
-        )
-
-        # Use a simpler approach that doesn't cause GIL issues
-        print(f"Fetching candles for {exchange} {symbol} {timeframe}...")
+    async def _fetch_initial_candles_for_factory(self, exchange: str, symbol: str, timeframe: str):
+        """Fetches initial candles and puts them onto the data queue."""
+        logging.info(f"Fetching initial candles for {exchange}/{symbol}/{timeframe}")
         
-        # Create a future to run the coroutine
-        future = asyncio.run_coroutine_threadsafe(
-            self._fetch_candles_with_queue(
-                tab=tab,
-                exchanges=[exchange],
-                symbols=[symbol],
-                timeframes=[timeframe],
-                since=since,
-                write_to_db=False,
-            ),
-            self.loop
-        )
-        
-        # Add a callback to handle task completion
-        def on_task_complete(fut):
-            try:
-                # Get the result of the future
-                result = fut.result()
-                print(f"Candles fetched for {exchange} {symbol} {timeframe}")
-                return result
-            except Exception as e:
-                # Log the error
-                logging.error(f"Error fetching candles: {e}")
-                print(f"Error fetching candles: {e}")
-                # Re-raise the exception
-                raise
-        
-        # Add a callback to handle task completion
-        future.add_done_callback(on_task_complete)
-        
-        # Return the future
-        return future
-
-    async def _fetch_candles_with_queue(self, tab, exchanges, symbols, timeframes, since, write_to_db=False):
-        """
-        Fetch candles and put them in the queue for thread-safe processing
-        """
-        candles_data = await self.data.fetch_candles(
-            tab=tab,
-            exchanges=exchanges,
-            symbols=symbols,
-            timeframes=timeframes,
-            since=since,
-            write_to_db=write_to_db,
-        )
-        
-        # Extract the specific candles we want to emit (similar to what data_source.py did)
-        if len(exchanges) == len(symbols) == len(timeframes) == 1 and candles_data:
-            first_exchange = next(iter(candles_data))
-            key = self.data._generate_cache_key(first_exchange, symbols[0], timeframes[0])
+        # Get the actual CCXT exchange object from Data
+        ccxt_exchange = self.data.exchange_list.get(exchange)
+        if not ccxt_exchange:
+             logging.error(f"CCXT exchange object not found for '{exchange}' in TaskManager. Cannot fetch initial candles.")
+             return
+             
+        try:
+            # Determine 'since' based on timeframe, similar to old logic
+            since = calculate_since(ccxt_exchange, timeframe, num_candles=1000) 
             
-            if key in candles_data[first_exchange]:
-                first_candle_df = candles_data[first_exchange][key]
-                
-                # Put the candles data in the queue
-                await self.data_queue.put({
-                    'type': 'candles',
-                    'tab': tab,
-                    'exchange': exchanges[0],
-                    'candles': first_candle_df
-                })
-        
-        return candles_data
+            # Fetch candles using data source method (assuming it's adapted or suitable)
+            # Assuming fetch_candles now returns the dataframe directly
+            # And does NOT interact with the queue or signals itself.
+            candles_dict = await self.data.fetch_candles( # Renamed to candles_dict
+                 exchanges=[exchange],
+                 symbols=[symbol],
+                 timeframes=[timeframe],
+                 since=since,
+                 write_to_db=False # Or based on config
+            )
+
+            # Extract the relevant DataFrame using the expected key structure
+            cache_key = f"{exchange}_{symbol.replace('/', '-')}_{timeframe}"
+            candles_df = candles_dict.get(exchange, {}).get(cache_key)
+
+            # Seed the corresponding CandleFactory with this initial data
+            factory_key = (exchange, symbol, timeframe)
+            factory_instance = self.candle_factories.get(factory_key)
+            if factory_instance:
+                factory_instance.set_initial_data(candles_df)
+            else:
+                logging.error(f"Could not find CandleFactory instance for {factory_key} to set initial data.")
+
+            if candles_df is not None and not candles_df.empty:
+                 logging.info(f"Fetched {len(candles_df)} initial candles for {exchange}/{symbol}/{timeframe}. Putting onto queue.")
+                 # Put data onto the queue for _process_data_queue to handle
+                 await self.data_queue.put({
+                     "type": "candles",
+                     "exchange": exchange,
+                     "symbol": symbol,
+                     "timeframe": timeframe,
+                     "candles": candles_df
+                 })
+            else:
+                 logging.warning(f"No initial candles returned for {exchange}/{symbol}/{timeframe}.")
+
+        except Exception as e:
+            logging.error(f"Error fetching initial candles for {exchange}/{symbol}/{timeframe}: {e}", exc_info=True)
 
     def run_task_until_complete(self, coro):
         """
@@ -414,17 +458,27 @@ class TaskManager:
 
     def stop_task(self, name: str):
         """
-        The stop_task function stops a task by name.
-        It cancels the task and removes it from the tasks dictionary.
-
-        :param self: Access the class instance
-        :param name: Identify the task to stop
-        :return: None
-        :doc-author: Trelent
+        Stops a task by name.
         """
-        if name in self.tasks:
-            self.tasks[name].cancel()
-            del self.tasks[name]
+        task = self.tasks.pop(name, None)
+        if task:
+            logging.info(f"Stopping task: {name}")
+            try:
+                 # Cancel the task using the correct method for threadsafe coroutines
+                 # task.cancel() # This might be for tasks created directly in the loop
+                 # For tasks started with run_coroutine_threadsafe, cancellation needs care
+                 # Often, it's better to signal the coroutine internally to stop.
+                 # If direct cancellation is supported by the Future:
+                 if hasattr(task, 'cancel'):
+                      task.cancel()
+                      logging.info(f"Cancellation requested for task: {name}")
+                 else:
+                     logging.warning(f"Task {name} future object does not support direct cancellation.")
+                 # We might need to wait briefly or check task status after cancellation attempt
+            except Exception as e:
+                logging.error(f"Error cancelling task {name}: {e}", exc_info=True)
+        else:
+            logging.warning(f"Task {name} not found for stopping.")
 
     def stop_all_tasks(self):
         """
@@ -437,53 +491,54 @@ class TaskManager:
         """
         for name in list(self.tasks.keys()):
             self.stop_task(name)
+        
+        # Ensure CandleFactories are also cleaned up if necessary? Or handled by unsubscribe?
+        self.candle_factories.clear()
+        self.factory_ref_counts.clear()
+        self.stream_ref_counts.clear()
+        self.widget_subscriptions.clear()
+        logging.info("All tasks stopped and resources cleared.")
 
     def is_task_running(self, task_id):
         """
-        The is_task_running function checks if a task is running.
-        It returns True if the task is running, False otherwise.
-
-        :param self: Access the class instance
-        :param task_id: Identify the task to check
-        :return: True if the task is running, False otherwise
-        :doc-author: Trelent
+        Checks if a task exists and is not done.
         """
-        return task_id in self.tasks and not self.tasks[task_id].done()
+        task = self.tasks.get(task_id)
+        return task is not None and not task.done()
 
-    def _on_task_complete(self, name, task):
+    def _on_task_complete(self, name, task_future):
         """
-        The _on_task_complete function is called when a task completes.
-        It removes the task from the tasks dictionary.
-
-        :param self: Access the class instance
-        :param name: Identify the task
-        :param task: The task object
-        :return: None
-        :doc-author: Trelent
+        Callback executed when a task started via create_task (asyncio.create_task) finishes.
+        NOTE: This might need adjustment if tasks are primarily managed via run_coroutine_threadsafe.
+        Futures returned by run_coroutine_threadsafe might need different handling.
         """
-        if name in self.tasks:
-            del self.tasks[name]
+        # Ensure this callback is running in the context of the event loop thread
+        # If called from another thread, marshalling might be needed.
 
-        # Emit signals based on task outcome
+        # Remove the task from the dictionary regardless of outcome
+        # Use pop with default to avoid KeyError if already removed or stopped
+        self.tasks.pop(name, None)
+
         try:
-            result, error = task.result() # Unpack result from wrapped_coro
-            if task.cancelled():
-                # Don't emit signal if cancelled explicitly
-                logging.debug(f"Task '{name}' completion handled (cancelled).")
-            elif error:
-                 # Emit TASK_ERROR signal
-                 self.data.emitter.emit(Signals.TASK_ERROR, task_name=name, error=error)
-                 logging.debug(f"Emitted TASK_ERROR for '{name}'. Error: {error}")
+            # Check if the future raised an exception
+            exception = task_future.exception()
+            if exception:
+                # Log specific cancellation error differently
+                if isinstance(exception, asyncio.CancelledError):
+                     logging.info(f"Task '{name}' was cancelled successfully.")
+                else:
+                     logging.error(f"Task '{name}' completed with error: {exception}", exc_info=exception)
             else:
-                 # Emit TASK_SUCCESS signal
-                 self.data.emitter.emit(Signals.TASK_SUCCESS, task_name=name, result=result)
-                 logging.debug(f"Emitted TASK_SUCCESS for '{name}'. Result type: {type(result)}")
-        except asyncio.CancelledError:
-            logging.debug(f"Task '{name}' completion handled (cancelled exception caught).")
+                # Task completed successfully
+                result = task_future.result() # Get result if needed (often None for streams)
+                logging.info(f"Task '{name}' completed successfully.") # Result: {result}") # Avoid logging large results
+
+        except asyncio.InvalidStateError:
+             # This can happen if the future was cancelled and we check exception() too early
+             logging.warning(f"Task '{name}' completion checked in invalid state (likely cancelled).")
         except Exception as e:
-            # Catch potential errors retrieving result (though wrapped_coro should prevent most)
-            logging.error(f"Error processing task completion for '{name}': {e}", exc_info=True)
-            self.data.emitter.emit(Signals.TASK_ERROR, task_name=name, error=e)
+            # Catch any other unexpected errors during callback execution
+             logging.error(f"Error in _on_task_complete for task '{name}': {e}", exc_info=True)
 
     def cleanup(self):
         """
@@ -510,5 +565,5 @@ class TaskManager:
         logging.info("TaskManager cleanup completed")
 
     def is_stream_running(self, stream_id: str) -> bool:
-        """Check if a task with the given ID is currently running."""
-        return stream_id in self.tasks and not self.tasks[stream_id].done()
+        """Checks if a stream task is currently running."""
+        return self.is_task_running(stream_id)

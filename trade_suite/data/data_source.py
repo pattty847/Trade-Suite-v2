@@ -83,7 +83,6 @@ class Data(CCXTInterface):
 
     async def watch_trades(
         self,
-        tab: str,
         symbol: str,
         exchange: str,
         track_stats: bool = False,
@@ -91,38 +90,36 @@ class Data(CCXTInterface):
         write_stats: bool = False,
     ):
         """
-        The watch_trades function is a coroutine that will continuously stream trades from the exchange.
-            It will also calculate trade statistics and write them to InfluxDB if enabled.
+        The watch_trades function is a method of the Data class that watches for trades on a specific exchange and symbol.
+        It uses the ccxt library to connect to the exchange, then loops indefinitely, waiting for new trades.
+        When new trades are received, they are processed and emitted via the NEW_TRADE signal.
 
-        :param self: Represent the instance of the class
-        :param tab: str: Identify the tab that is being used
-        :param symbol: str: Specify which coin you want to watch
+        :param self: Refer to the object itself
+        :param symbol: str: Specify the symbol to watch trades for
         :param exchange: str: Identify which exchange the data is coming from
         :param track_stats: bool: Determine whether or not we want to track statistics
         :param write_trades: bool: Write the trades to influxdb
         :param write_stats: bool: Write the statistics to a database
-        :param : Determine which tab the data is being sent to
         :return: The following:
         :doc-author: Trelent
         """
         exchange_object = self.exchange_list[exchange]
-        logging.info(f"Starting trade stream for {symbol} on {exchange} tab {tab}")
+        logging.info(f"Starting trade stream for {symbol} on {exchange}")
         # TODO: Add a condition to streaming
         while self.is_running:
             try:
                 # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
                 # returns whatever the latest tick was for whichever coin for the exchange.
                 # list[dict_keys(['id', 'order', 'info', 'timestamp', 'datetime', 'symbol', 'type', 'takerOrMaker', 'side', 'price', 'amount', 'fee', 'cost', 'fees'])]
-                logging.debug(f"[{tab}] Awaiting trades for {symbol}...") # Changed from INFO to DEBUG
+                logging.debug(f"Awaiting trades for {symbol}...")
                 trades = await exchange_object.watch_trades(symbol)
-                logging.debug(f"[{tab}] Received trades: {'Yes' if trades else 'No'}, Count: {len(trades) if trades else 0}") # Changed from INFO to DEBUG
+                logging.debug(f"Received trades: {'Yes' if trades else 'No'}, Count: {len(trades) if trades else 0}")
 
                 if trades:
-                    logging.debug(f"[{tab}] Emitting NEW_TRADE signal...") # Changed from INFO to DEBUG
-                    # Ensure we explicitly pass the tab parameter to match what CandleFactory expects
+                    logging.debug(f"Emitting NEW_TRADE signal...")
+                    # Ensure we explicitly pass the exchange and trade_data parameters
                     self.emitter.emit(
                         Signals.NEW_TRADE,
-                        tab=tab,
                         exchange=exchange,
                         trade_data=trades[0],
                     )
@@ -172,17 +169,16 @@ class Data(CCXTInterface):
                     except Exception as e:
                         logging.error(e)
 
-    async def watch_orderbook(self, tab, exchange: str, symbol: str):
+    async def watch_orderbook(self, exchange: str, symbol: str):
         """
-        The watch_orderbook function is a coroutine that takes in the tab, exchange and symbol as parameters.
+        The watch_orderbook function is a coroutine that takes in the exchange and symbol as parameters.
         It then creates an exchange_object variable which is equal to the ccxt object of the given exchange.
         Then it logs that it has started streaming orderbooks for a given symbol on a given exchange.
         Next, while True: (meaning forever) try: to create an orderbook variable which is equal to await
         the watch_orderbook function from ccxt with the parameter of symbol (which was passed into this function).
-        Then emit Signals.ORDER_BOOK_UPDATE with parameters tab=tab,exchange
+        Then emit Signals.ORDER_BOOK_UPDATE with parameters exchange and orderbook.
 
         :param self: Access the class attributes and methods
-        :param tab: Identify the tab that is being updated
         :param exchange: str: Identify the exchange that we want to get the orderbook from
         :param symbol: str: Specify what symbol to watch
         :return: A dictionary with the following keys:
@@ -198,9 +194,9 @@ class Data(CCXTInterface):
         
         while self.is_running:
             try:
-                logging.debug(f"[{tab}] Awaiting order book for {symbol}...") # Changed from INFO to DEBUG
+                # logging.debug(f"Awaiting order book for {symbol}...") # Changed from INFO to DEBUG
                 orderbook = await exchange_object.watch_order_book(symbol)
-                logging.debug(f"[{tab}] Received order book: {'Yes' if orderbook else 'No'}") # Changed from INFO to DEBUG
+                # logging.debug(f"Received order book: {'Yes' if orderbook else 'No'}") # Changed from INFO to DEBUG
 
                 if orderbook:
                     latest_orderbook = orderbook # Always store the latest received book
@@ -208,10 +204,12 @@ class Data(CCXTInterface):
                 # Check if throttle interval has passed and we have a book to send
                 current_time = asyncio.get_event_loop().time()
                 if latest_orderbook and (current_time - last_emit_time >= throttle_interval):
-                    logging.debug(f"[{tab}] Throttled emit: Emitting ORDER_BOOK_UPDATE signal...")
+                    logging.debug(f"Throttled emit: Emitting ORDER_BOOK_UPDATE signal...")
+                    # This emit call now seems redundant as TaskManager handles queuing and emission.
+                    # However, keeping it for now preserves original logic flow if direct calls were intended.
+                    # TODO: Review if this emit call can be removed entirely after TaskManager refactor.
                     self.emitter.emit(
                         Signals.ORDER_BOOK_UPDATE,
-                        tab=tab, # Keep tab for potential routing if needed later
                         exchange=exchange,
                         orderbook=latest_orderbook, # Emit the latest stored book
                     )
@@ -230,7 +228,6 @@ class Data(CCXTInterface):
 
     async def fetch_candles(
         self,
-        tab: str,
         exchanges: List[str],
         symbols: List[str],
         since: str,
@@ -241,13 +238,11 @@ class Data(CCXTInterface):
         The fetch_candles function is used to fetch candles from the exchanges.
 
         :param self: Access the attributes and methods of the class
-        :param tab: str: Identify the tab in which the data is being requested from
         :param exchanges: List[str]: Specify which exchanges to get data from
         :param symbols: List[str]: Define the symbols that we want to fetch data for
         :param since: str: Specify the start date of the candles that we want to fetch
         :param timeframes: List[str]: Specify the timeframes to fetch candles for
         :param write_to_db: Write the data to the database
-        :param : Determine the exchange, symbol and timeframe for which we want to fetch candles
         :return: A dictionary of dictionaries
         :doc-author: Trelent
         """

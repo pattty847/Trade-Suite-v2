@@ -3,12 +3,16 @@ import time
 import dearpygui.dearpygui as dpg
 import pandas as pd
 import numpy as np
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from datetime import datetime # Added for status bar update
 
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.widgets.base_widget import DockableWidget
 from trade_suite.gui.utils import timeframe_to_dpg_time_unit
+
+# Forward declaration for type hinting
+if TYPE_CHECKING:
+    from trade_suite.gui.task_manager import TaskManager
 
 
 class ChartWidget(DockableWidget):
@@ -20,6 +24,7 @@ class ChartWidget(DockableWidget):
     def __init__(
         self,
         emitter: SignalEmitter,
+        task_manager: 'TaskManager', # Added TaskManager
         exchange: str,
         symbol: str,
         timeframe: str,
@@ -32,6 +37,7 @@ class ChartWidget(DockableWidget):
         
         Args:
             emitter: Signal emitter
+            task_manager: Task manager instance
             exchange: Exchange name (e.g., 'coinbase')
             symbol: Trading pair (e.g., 'BTC/USD')
             timeframe: Timeframe (e.g., '1m', '1h')
@@ -47,13 +53,14 @@ class ChartWidget(DockableWidget):
         # IMPORTANT: The window_tag property from DockableWidget base class is used as the widget's unique identifier
         # This tag is used to:
         # 1. Reference the DPG window item
-        # 2. Connect the widget to data streams via the TaskManager (as 'tab' parameter)
-        # 3. Route signals from emitters to the correct widget instance
+        # 2. Store configuration (exchange, symbol, timeframe)
+        # 3. Setup DearPyGui specific elements for the chart
         # The id format is "widget_chart_[instance_id]" from the DockableWidget class
         super().__init__(
             title=f"Chart - {exchange.upper()} {symbol} ({timeframe})",
             widget_type="chart",
             emitter=emitter,
+            task_manager=task_manager, # Pass task_manager to base
             instance_id=instance_id,
             width=width,
             height=height,
@@ -87,11 +94,22 @@ class ChartWidget(DockableWidget):
         
         # Internal state
         self.auto_fit_enabled = True
+        self.initial_load_complete = False # Flag to track if initial data loaded
+        self.symbol_input_tag = f"{self.window_tag}_symbol_input" # Add tag for symbol input
         
         # Indicator State
         self.show_ema = False
         self.ema_spans = [10, 25, 50, 100, 200]
         self.ema_series_tags: Dict[int, int] = {} # {span: series_tag}
+    
+    def get_requirements(self) -> Dict[str, Any]:
+        """Define the data requirements for the ChartWidget."""
+        return {
+            "type": "candles",
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+            "timeframe": self.timeframe,
+        }
     
     def build_menu(self) -> None:
         """Build the chart widget's menu bar."""
@@ -106,6 +124,12 @@ class ChartWidget(DockableWidget):
                     callback=lambda s, a, u: self._on_timeframe_change(u),
                     user_data=tf
                 )
+        
+        # Add Symbol Change UI
+        with dpg.menu(label="Symbol"):
+            dpg.add_input_text(tag=self.symbol_input_tag, default_value=self.symbol, width=120)
+            dpg.add_button(label="Change Symbol", callback=self._on_symbol_change)
+            # TODO: Add validation or dropdown based on available symbols?
         
         with dpg.menu(label="View"):
             dpg.add_menu_item(
@@ -219,37 +243,55 @@ class ChartWidget(DockableWidget):
         self.emitter.register(Signals.NEW_CANDLES, self._on_new_candles)
         # Listen for updates to candles (e.g., from real-time trades)
         self.emitter.register(Signals.UPDATED_CANDLES, self._on_updated_candles)
-        # Listen for symbol changes originating elsewhere
-        self.emitter.register(Signals.SYMBOL_CHANGED, self._on_symbol_change)
         # Note: Timeframe changes are handled by the menu callback (_on_timeframe_change)
+        # Note: Symbol changes are handled by the menu callback (_on_symbol_change)
         # Note: NEW_TRADE is handled by CandleFactory/ChartProcessor upstream
     
-    def update(self, data: pd.DataFrame) -> None:
+    def update(self, data: pd.DataFrame | None) -> None:
         """
-        Update the chart with new OHLCV data.
-        
+        Update the chart with new OHLCV data. Assumes 'dates' are numeric timestamps (seconds or ms).
+
         Args:
-            data: DataFrame with OHLCV data
+            data: DataFrame with OHLCV data, or None. An empty DataFrame clears the chart.
+            Chart widget_chart_coinbase_btcusd_1h received data:               
+                          dates     opens     highs      lows    closes     volumes
+            0     1741482000000  86393.89  86480.00  86042.75  86169.04   71.885963
         """
         if isinstance(data, pd.DataFrame) and not data.empty:
-            # Ensure timestamps are numeric (seconds since epoch)
-            if not pd.api.types.is_numeric_dtype(data['dates']):
-                 # Attempt conversion if datetime-like
-                try:
-                    data['dates'] = data['dates'].astype(np.int64) // 10**9
-                except Exception as e:
-                    logging.error(f"Failed to convert dates to numeric for chart {self.window_tag}: {e}")
-                    return # Cannot plot non-numeric dates
+            processed_data = data.copy() # Work with a copy
 
-            # Handle potential milliseconds
-            if data['dates'].max() > time.time() * 2: # Heuristic: if max date is > 2x current time, likely ms
-                 data['dates'] = data['dates'] / 1000
+            # Ensure 'dates' column is numeric, log error if not
+            if not pd.api.types.is_numeric_dtype(processed_data['dates']):
+                logging.error(f"Chart {self.window_tag} received non-numeric 'dates'. Cannot update.")
+                return
 
-            self.ohlcv = data.copy() # Work with a copy
+            # Ensure timestamps are in seconds, converting from milliseconds if necessary
+            # Heuristic: Check if max timestamp is likely ms (e.g., > year 2065 in seconds)
+            if processed_data['dates'].max() > 3_000_000_000: 
+                 logging.debug(f"Chart {self.window_tag}: Detected potential millisecond timestamps, converting to seconds.")
+                 processed_data['dates'] = processed_data['dates'] / 1000
+            
+            # Ensure numeric types for OHLCV columns (handles potential strings)
+            for col in ["opens", "highs", "lows", "closes", "volumes"]:
+                 if col in processed_data.columns and not pd.api.types.is_numeric_dtype(processed_data[col]):
+                     processed_data[col] = pd.to_numeric(processed_data[col], errors='coerce')
+                     # Optionally handle NaNs introduced by coercion if necessary
+                     if processed_data[col].isnull().any():
+                         logging.warning(f"Chart {self.window_tag}: Found non-numeric values in column '{col}' after conversion. NaNs introduced.")
+                         # Depending on requirements, you might dropna, fillna, or return
+
+            self.ohlcv = processed_data # Assign the processed data
             self._update_chart()
-        elif data is not None: # Handle case where empty dataframe is sent
-             self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
-             self._update_chart() # Update to clear the chart
+            
+        elif isinstance(data, pd.DataFrame): # Handle case where an empty dataframe is sent to clear the chart
+            logging.debug(f"Chart {self.window_tag} received empty candle update, clearing chart.")
+            # Set ohlcv to an empty dataframe with the correct columns to clear
+            self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+            self._update_chart() # Update to show empty state
+        elif data is None:
+             logging.debug(f"Chart {self.window_tag} received None data, ignoring update.")
+        else:
+             logging.warning(f"Chart {self.window_tag} received unexpected data type: {type(data)}")
     
     def _update_chart(self) -> None:
         """Update the chart display with current OHLCV data and indicators."""
@@ -260,6 +302,13 @@ class ChartWidget(DockableWidget):
         dates_list = self.ohlcv["dates"].tolist() if not self.ohlcv.empty else []
 
         # --- Update Core Series ---
+        # Log data being sent to DPG
+        if not self.ohlcv.empty:
+            logging.debug(f"Chart {self.window_tag} Sending to DPG - Shape: {self.ohlcv.shape}")
+            logging.debug(f"Chart {self.window_tag} Sending to DPG - Last Row:\n{self.ohlcv.iloc[-1:].to_string()}")
+        else:
+            logging.debug(f"Chart {self.window_tag} Sending empty data to DPG.")
+
         # Update candle series
         if dpg.does_item_exist(self.candle_series_tag):
              dpg.configure_item(
@@ -272,7 +321,6 @@ class ChartWidget(DockableWidget):
              )
         else:
             logging.warning(f"Candle series {self.candle_series_tag} not found for update.")
-
 
         # Update volume series
         if dpg.does_item_exist(self.volume_series_tag):
@@ -313,46 +361,124 @@ class ChartWidget(DockableWidget):
                  if dpg.does_item_exist(self.last_update_tag): dpg.set_value(self.last_update_tag, "Never")
              except Exception as e:
                  logging.warning(f"Error clearing status bar for {self.window_tag}: {e}")
+        
+        logging.debug(f"Chart {self.window_tag} updated with {len(self.ohlcv)} candles.")
+    
+    def _on_new_candles(self, exchange: str, symbol: str, timeframe: str, candles: pd.DataFrame):
+        """Handle initial bulk loading of candle data."""
+        if exchange == self.exchange and symbol == self.symbol and timeframe == self.timeframe:
+            logging.info(f"Chart {self.window_tag} ({exchange}/{symbol}/{timeframe}) received NEW_CANDLES")
+            # Perform the full update, replacing existing data
+            self.update(candles)
+            
+            # Fit chart after initial load if auto-fit is enabled
+            if self.auto_fit_enabled:
+                self._fit_chart() # Fit after the first full data load
+            self._update_indicator_series() # Calculate indicators after initial load
+    
+    def _on_updated_candles(self, exchange: str, symbol: str, timeframe: str, candles: pd.DataFrame):
+        """Handle incremental updates to candle data (append or update last candle)."""
+        if exchange == self.exchange and symbol == self.symbol and timeframe == self.timeframe:
+            logging.debug(f"Chart {self.window_tag} ({exchange}/{symbol}/{timeframe}) received UPDATED_CANDLES - Shape: {candles.shape}")
+            logging.debug(f"Chart {self.window_tag} Received Candle Data:\n{candles.to_string()}")
+            
+            if candles is None or candles.empty:
+                 logging.debug(f"Chart {self.window_tag} received empty UPDATED_CANDLES, ignoring.")
+                 return
 
-        # We no longer auto-fit on every update, just on initial load and manual requests
-    
-    def _on_new_candles(self, tab, exchange, candles):
-        """Handler for NEW_CANDLES signal (initial load)."""
-        # Filter events specific to this widget instance based on its unique tag
-        if tab == self.window_tag and exchange == self.exchange:
-             logging.info(f"Chart {self.window_tag} received NEW_CANDLES")
-             self.update(candles)
-             # Auto-fit only on initial load, not on real-time updates
-             if self.auto_fit_enabled:
-                 self._fit_chart()
-    
-    def _on_updated_candles(self, tab, exchange, candles):
-        """Handler for UPDATED_CANDLES signal (real-time updates)."""
-        # Filter events specific to this widget instance
-        if tab == self.window_tag and exchange == self.exchange:
-             logging.debug(f"Chart {self.window_tag} received UPDATED_CANDLES - shape: {candles.shape if isinstance(candles, pd.DataFrame) else 'Not DataFrame'}")
-             
-             # Add more diagnostic logging
-             if isinstance(candles, pd.DataFrame) and not candles.empty:
-                 last_candle = candles.iloc[-1]
-                 logging.debug(f"Last candle timestamp: {datetime.fromtimestamp(last_candle['dates'])} - close: {last_candle['closes']}")
-             
-             self.update(candles)
-             # Don't auto-fit on updates to avoid constant rescaling
-        elif tab == self.window_tag:
-             # This log would catch mismatches in exchange
-             logging.warning(f"Chart {self.window_tag} filtered out UPDATED_CANDLES - expected exchange {self.exchange} but got {exchange}")
-        elif exchange == self.exchange:
-             # This log would catch mismatches in tab
-             logging.warning(f"Chart {self.window_tag} filtered out UPDATED_CANDLES - expected tab {self.window_tag} but got {tab}")
-    
-    # --- Indicator Methods ---
-    
+            # Ensure incoming dates are numeric (seconds) like in self.update
+            try:
+                 processed_candles = candles.copy()
+                 if not pd.api.types.is_numeric_dtype(processed_candles['dates']):
+                     if pd.api.types.is_datetime64_any_dtype(processed_candles['dates']):
+                          processed_candles['dates'] = processed_candles['dates'].view(np.int64) // 10**9
+                     else:
+                          processed_candles['dates'] = pd.to_datetime(processed_candles['dates'], errors='coerce').view(np.int64) // 10**9
+                 if processed_candles['dates'].isnull().any():
+                      logging.error(f"UPDATED_CANDLES for chart {self.window_tag} contained invalid dates after conversion.")
+                      return
+                 # Handle potential milliseconds
+                 if processed_candles['dates'].max() > time.time() * 2: # Heuristic
+                      processed_candles['dates'] = processed_candles['dates'] / 1000
+            except Exception as e:
+                 logging.error(f"Failed to process dates in UPDATED_CANDLES for chart {self.window_tag}: {e}")
+                 return
+
+            # Factory now sends only the single, latest candle row as a DataFrame.
+            # Extract it as a Series.
+            if len(processed_candles) == 1:
+                 update_row = processed_candles.iloc[0] # Get the single row as a Series
+            else:
+               # Should not happen if Factory is correct, but handle defensively
+               logging.error(f"Chart {self.window_tag} received {len(processed_candles)} rows in UPDATED_CANDLES, expected 1. Ignoring update.")
+               return
+
+            # --- Pre-Update Logging ---
+            if self.ohlcv is not None and not self.ohlcv.empty:
+                 logging.debug(f"Chart {self.window_tag} BEFORE update - Last OHLCV Row:\n{self.ohlcv.iloc[-1:].to_string()}")
+            else:
+                 logging.debug(f"Chart {self.window_tag} BEFORE update - OHLCV is empty.")
+            # -------------------------
+
+            if self.ohlcv is not None and not self.ohlcv.empty:
+                 # Check if the incoming candle timestamp matches the last candle we have
+                 last_candle_time = self.ohlcv['dates'].iloc[-1]
+                 update_time = update_row['dates']
+
+                 if update_time == last_candle_time:
+                      # Update the last row in place
+                      logging.debug(f"Chart {self.window_tag}: Updating last candle at {update_time}")
+                      self.ohlcv.iloc[-1] = update_row # Replace the last row's data
+                 elif update_time > last_candle_time:
+                      # Append the new candle row
+                      logging.debug(f"Chart {self.window_tag}: Appending new candle at {update_time}")
+                      # Use pd.concat instead of append for future-proofing
+                      self.ohlcv = pd.concat([self.ohlcv, update_row.to_frame().T], ignore_index=True)
+                 else:
+                      # Incoming update is older than last candle? Ignore or handle?
+                      logging.warning(f"Chart {self.window_tag}: Received out-of-order candle update (time {update_time} <= last time {last_candle_time}). Ignoring.")
+                      return # Don't update chart for out-of-order data
+
+            else:
+                 # If self.ohlcv is empty, initialize it with the update
+                 logging.info(f"Chart {self.window_tag}: Initializing OHLCV with first UPDATED_CANDLES.")
+                 self.ohlcv = update_row.to_frame().T
+
+            # --- Post-Update Logging ---
+            if self.ohlcv is not None and not self.ohlcv.empty:
+                logging.debug(f"Chart {self.window_tag} AFTER update - Last OHLCV Row:\n{self.ohlcv.iloc[-1:].to_string()}")
+            else:
+                logging.debug(f"Chart {self.window_tag} AFTER update - OHLCV is unexpectedly empty.")
+            # ------------------------
+
+            # Update the chart display with the modified self.ohlcv
+            self._update_chart()
+            self._update_indicator_series() # Recalculate indicators with the new data
+
+    def _update_status_bar(self, latest_candle):
+         """Updates the status bar with the latest candle data."""
+         if not self.is_created or latest_candle is None:
+             return
+         
+         try:
+             if dpg.does_item_exist(self.last_update_tag):
+                  # Format timestamp nicely
+                  dt_object = pd.to_datetime(latest_candle['dates'], unit='s')
+                  dpg.set_value(self.last_update_tag, dt_object.strftime("%Y-%m-%d %H:%M:%S"))
+             if dpg.does_item_exist(self.open_tag):
+                  dpg.set_value(self.open_tag, f"{latest_candle['opens']:.2f}")
+             if dpg.does_item_exist(self.high_tag):
+                  dpg.set_value(self.high_tag, f"{latest_candle['highs']:.2f}")
+             if dpg.does_item_exist(self.low_tag):
+                  dpg.set_value(self.low_tag, f"{latest_candle['lows']:.2f}")
+             if dpg.does_item_exist(self.close_tag):
+                  dpg.set_value(self.close_tag, f"{latest_candle['closes']:.2f}")
+         except Exception as e:
+             logging.error(f"Error updating status bar for {self.window_tag}: {e}")
+
     def _toggle_ema_visibility(self, sender, app_data, user_data):
-        """Callback for the EMA checkbox in the menu."""
-        self.show_ema = app_data # Checkbox passes its state directly
-        logging.info(f"EMA visibility toggled to {self.show_ema} for {self.window_tag}")
-        self._update_indicator_series()
+         self.show_ema = app_data
+         self._update_indicator_series() # Update to show/hide
     
     def _update_indicator_series(self):
         """Calculates and updates/creates/hides EMA line series."""
@@ -397,34 +523,88 @@ class ChartWidget(DockableWidget):
     
     # --- Event Handlers & Callbacks ---
     
-    def _on_symbol_change(self, exchange, tab, new_symbol):
-        """Handles symbol changes initiated from signals (e.g., another widget)."""
-        if exchange == self.exchange and tab == self.window_tag:
-            logging.info(f"Symbol change detected for {self.window_tag} to {new_symbol}")
-            self.symbol = new_symbol
-            self.timeframe = self._get_default_timeframe() # Reset timeframe? Or keep? Let's keep for now.
+    def _on_symbol_change(self, sender=None, app_data=None, user_data=None):
+        """Handles symbol changes initiated from the UI menu."""
+        # Get the new symbol from the input text field
+        if not dpg.does_item_exist(self.symbol_input_tag):
+             logging.error(f"Symbol input field {self.symbol_input_tag} not found.")
+             return
+            
+        new_symbol = dpg.get_value(self.symbol_input_tag)
+        
+        # Basic validation
+        if not new_symbol or new_symbol == self.symbol:
+             logging.debug(f"Symbol change aborted for {self.window_tag}. New symbol same as old or empty: '{new_symbol}'")
+             # Reset input field if it was different but invalid?
+             dpg.set_value(self.symbol_input_tag, self.symbol)
+             return
+        
+        logging.info(f"Symbol change requested for {self.window_tag} from {self.symbol} to {new_symbol}")
 
-            # Update window title
-            new_title = f"Chart - {self.exchange.upper()} {self.symbol} ({self.timeframe})"
-            if dpg.does_item_exist(self.window_tag):
-                dpg.set_item_label(self.window_tag, new_title)
+        # 1. Unsubscribe from old requirements
+        self.initial_load_complete = False # Reset flag before unsubscribe/resubscribe
+        try:
+            self.task_manager.unsubscribe(self)
+            logging.info(f"Unsubscribed {self.window_tag} before symbol change.")
+        except Exception as e:
+             logging.error(f"Error unsubscribing {self.window_tag} before symbol change: {e}", exc_info=True)
+             # Proceeding might lead to duplicate subscriptions, maybe return?
+             return
 
-            # Clear existing data and series
-            self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
-            self._clear_indicator_series() # Clear EMA lines
-            self._update_chart() # Update chart to show empty state
+        # 2. Update internal state and UI elements
+        self.symbol = new_symbol
+        # Keep the current timeframe
 
-            # TODO: IMPORTANT - Need to signal upstream (e.g., DashboardProgram)
-            # to stop the old data stream and start one for the new symbol/timeframe.
-            # This widget should not manage data streams directly.
-            # Emitting a specific signal might be appropriate here, or relying on
-            # the upstream controller that initiated the SYMBOL_CHANGED signal.
-            logging.warning(f"Symbol changed for {self.window_tag}. Upstream needs to handle data stream restart.")
+        # Update window title
+        new_title = f"Chart - {self.exchange.upper()} {self.symbol} ({self.timeframe})"
+        if dpg.does_item_exist(self.window_tag):
+            dpg.set_item_label(self.window_tag, new_title)
+
+        # Clear existing data and series
+        self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+        self._clear_indicator_series() # Clear EMA lines
+        self._update_chart() # Update chart to show empty state (or loading state)
+
+        # Update the symbol display text (top control)
+        # TODO: Find the actual tag for the symbol display if it exists
+        # For now, assume title update is sufficient or handled elsewhere.
+
+        # 3. Subscribe to new requirements
+        try:
+            new_requirements = self.get_requirements() # Get requirements with the new symbol
+            self.task_manager.subscribe(self, new_requirements)
+            logging.info(f"Resubscribed {self.window_tag} with new requirements: {new_requirements}")
+        except Exception as e:
+            logging.error(f"Error resubscribing {self.window_tag} after symbol change: {e}", exc_info=True)
+            # Widget might be left in a state without data.
+
+        # Clear existing data and series
+        self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+        self._clear_indicator_series() # Clear EMA lines
+        self._update_chart() # Update chart to show empty state
+
+        # TODO: IMPORTANT - Need to signal upstream (e.g., DashboardProgram)
+        # to stop the old data stream and start one for the new symbol/timeframe.
+        # This widget should not manage data streams directly.
+        # Emitting a specific signal might be appropriate here, or relying on
+        # the upstream controller that initiated the SYMBOL_CHANGED signal.
+        logging.warning(f"Symbol changed for {self.window_tag}. Upstream needs to handle data stream restart.")
     
     def _on_timeframe_change(self, new_timeframe: str) -> None:
         """Handles timeframe changes from the menu."""
         if new_timeframe != self.timeframe:
+            self.initial_load_complete = False # Reset flag before changing timeframe
             logging.info(f"Timeframe changing for {self.window_tag} from {self.timeframe} to {new_timeframe}")
+            
+            # 1. Unsubscribe from old requirements
+            try:
+                self.task_manager.unsubscribe(self)
+                logging.info(f"Unsubscribed {self.window_tag} before timeframe change.")
+            except Exception as e:
+                 logging.error(f"Error unsubscribing {self.window_tag} before timeframe change: {e}", exc_info=True)
+                 return # Avoid changing state if unsubscribe failed
+                
+            # 2. Update internal state and UI elements
             self.timeframe = new_timeframe
 
             # Update window title
@@ -445,14 +625,13 @@ class ChartWidget(DockableWidget):
                 
             self._update_chart()
 
-            # Signal upstream to change the data stream
-            self.emitter.emit(
-                Signals.TIMEFRAME_CHANGED,
-                exchange=self.exchange,
-                tab=self.window_tag, # Send own tag to identify source
-                new_timeframe=new_timeframe
-            )
-            logging.warning(f"Timeframe changed for {self.window_tag}. Upstream needs to handle data stream restart.")
+            # 3. Subscribe to new requirements
+            try:
+                new_requirements = self.get_requirements() # Get requirements with the new timeframe
+                self.task_manager.subscribe(self, new_requirements)
+                logging.info(f"Resubscribed {self.window_tag} with new requirements: {new_requirements}")
+            except Exception as e:
+                logging.error(f"Error resubscribing {self.window_tag} after timeframe change: {e}", exc_info=True)
     
     def _toggle_auto_fit(self, sender, value):
         """Toggle auto-fitting of chart axes."""
@@ -483,9 +662,23 @@ class ChartWidget(DockableWidget):
     
     # --- Overrides or specific implementations ---
     def close(self) -> None:
-        """Clean up chart-specific resources before closing."""
-        logging.info(f"Closing chart widget {self.window_tag}")
-        # Potentially signal upstream to stop data streams associated with this widget
-        # self.emitter.emit(Signals.WIDGET_CLOSING, widget_tag=self.window_tag, ...)
-        self._clear_indicator_series() # Clean up DPG items
-        super().close() # Call base class close to delete window 
+        """Close and destroy the widget, including cleanup."""
+        logging.info(f"Closing ChartWidget: {self.window_tag}")
+        # Any ChartWidget-specific cleanup needed before DPG deletion could go here.
+        # (e.g., removing plot items if not handled automatically by deleting the window)
+        self._clear_indicator_series() # Example: Clear indicators before closing
+        
+        # Call the base class close method to handle unsubscription and DPG item deletion
+        super().close()
+
+        # Unsubscribe from signals (optional - depends on emitter implementation)
+        # self.emitter.unregister_all(self)
+        
+        # Call base class close
+        # super().close()
+
+        # Unsubscribe from signals (optional - depends on emitter implementation)
+        # self.emitter.unregister_all(self)
+        
+        # Call base class close
+        # super().close() 
