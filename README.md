@@ -32,13 +32,20 @@
 
 ## Introduction
 
-TradeSuite is a multi-exchange cryptocurrency trading platform built using DearPyGUI and CCXT PRO. It provides a real-time streaming interface for multiple instances of the same exchange, with features such as real-time candlestick charting and a real-time order book with price level zoom and aggregation toggle. 
+TradeSuite is a multi-exchange cryptocurrency trading platform built using DearPyGUI and CCXT PRO. It provides a real-time streaming interface for multiple instances of the same exchange, with features such as real-time candlestick charting and a real-time order book with price level zoom and aggregation toggle.
+
+**Note:** A major architectural refactoring, introducing a fully dockable widget system and optimized data flow, is complete and available in a dedicated feature branch. This update significantly enhances performance and user interface flexibility.
 
 ## Features
 
-- Basic real-time candlestick charting interface
-- Real time EMA series for candle sticks
-- Real-time order book with price level zoom and aggregation toggle
+- **Flexible Dockable Widget UI:** Build your personalized trading dashboard by docking, undocking, tabbing, and resizing widgets.
+- **Persistent & Customizable Layouts:** Save your workspace layout and restore it automatically between sessions. Reset to a default layout anytime.
+- **Efficient Multi-Exchange Data Streaming:** Real-time trades and order book updates via CCXT PRO WebSockets.
+- **Optimized Shared Data Streams:** Display the same market (e.g., BTC/USDT) on multiple widgets (e.g., 1-minute chart, 1-hour chart, order book) simultaneously using a single, shared data connection for maximum efficiency.
+- **Real-Time Candlestick Charting:** View live candlestick charts with configurable timeframes and indicators (e.g., EMA).
+- **Real-Time Order Book:** Analyze market depth with price level aggregation and zoom capabilities.
+- **Real-Time Price Level / DOM View:** Visualize aggregated market depth through the dedicated Price Level widget.
+- **Modular Architecture:** Decoupled components for data handling, UI widgets, and external API integrations (like SEC EDGAR).
 
 ## Getting Started
 
@@ -175,27 +182,30 @@ python -m trade_suite --reset-layout
 
 ## Implemented Features
 
-- Basic Real-Time Candlestick Charting Interface: Implemented using DearPyGUI and CCXT PRO.
-- Widget based UI components with docking and persistance between sessions.
-- Real-Time Candlestick Updates and Indicators: Continuous updating of candlestick charts with relevant trading indicators.
-- Object-Oriented Design: Ensures ease of scalability and further development.
-- ArgParser for Command-Line Entry: To facilitate easier and more flexible program startup through the command line.
-- Performance Optimization: Enhanced the efficiency and responsiveness of the application (orderbook processing, chart updating).
+- **Complete UI Overhaul:** Fully dockable widget system built with DearPyGUI, allowing flexible user layouts.
+- **Optimized Data Architecture:** Decoupled data flow managed by a central `TaskManager`, enabling shared WebSocket streams and efficient multi-widget updates. Significantly reduces resource consumption compared to previous versions.
+- **Centralized Task Management:** Robust handling of asynchronous data streams and background processing tasks.
+- **Real-Time Candlestick Widget:** Displays live charts with EMA indicators, updated directly from trade streams.
+- **Real-Time Order Book Widget:** Shows live market depth with controls for price aggregation and zoom.
+- **Real-Time Price Level (DOM) Widget:** A new widget providing a clear view of aggregated buy/sell pressure at different price levels.
+- **Layout Persistence:** User-defined layouts are automatically saved (`user_layout.ini`) and restored. Factory default layout (`factory_layout.ini`) provided with reset capability.
+- **Modular Component Design:** Refactored codebase with clear separation of concerns (Data Source, Task Manager, Widgets, SEC API Module).
+- **Command-Line Interface:** Flexible application startup using `argparse` for setting exchanges, logging level, and layout reset.
+- **Basic Multi-Exchange Support:** Foundation laid for connecting to and displaying data from multiple exchanges simultaneously (e.g., Binance, Coinbase).
 
 ## Planned Features
 
-- Separate the Data storage aspect to a new continously running Influx server the client can request data from.
-- Trading Capabilities: Enabling actual trading actions (buy, sell, etc.) within the platform.
-- Multi-Exchange Portfolio Management: Cross-exchange portfolio aggregation and management system.
-- Expansion of Technical Indicators: Adding more indicators for comprehensive technical analysis.
-- Order Interface Development: To manage and execute trade orders directly from the platform.
-- User Authentication and Security: Implementing secure login and data protection measures.
-- Historical Data Analysis Features: Integrating tools for back-testing strategies with historical data.
-- Customizable UI Elements: Allowing users to personalize the interface to suit their preferences.
-- Integration with Additional Exchanges: Expanding the range of supported cryptocurrency exchanges.
-- Real-Time News and Market Updates: Incorporating a feature to provide live news and market updates.
-- Community Features: Adding forums or chatrooms for user interaction and discussion.
-- Advanced Charting Tools: Implementing more sophisticated charting options for in-depth analysis.
+- **Trading Capabilities:** Execute buy/sell orders directly through the platform interface.
+- **Order Interface Development:** Dedicated widgets/panels for managing open orders, positions, and trade history.
+- **Multi-Exchange Portfolio Management:** Aggregate and track assets across multiple connected exchanges.
+- **Expansion of Technical Indicators:** Add a wider variety of popular technical indicators to the charting widget.
+- **Advanced Charting Tools:** Implement drawing tools, more chart types, and deeper analysis features.
+- **Historical Data Integration & Analysis:** Fetch, store, and visualize historical market data for back-testing and analysis.
+- **User Authentication and Security:** Implement secure login and potentially encrypt sensitive API key storage.
+- **Integration with Additional Exchanges:** Expand the range of supported cryptocurrency exchanges via CCXT PRO.
+- **Real-Time News and Market Updates:** Incorporate relevant news feeds or market sentiment indicators.
+- **Widget-Specific Customization:** Allow finer-grained configuration within individual widget settings.
+- **Community Features:** Potential integration of chat or shared analysis features.
 
 ## Contributing
 
