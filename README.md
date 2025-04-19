@@ -2,6 +2,11 @@
 
 ![image](https://github.com/user-attachments/assets/28fd4835-f33a-4984-9550-dfe832810f8c)
 
+# 🚧 WIP: Multi-Widget Streaming for Same Market (WORKING in refactor/data-flow branch)
+> across **different timeframes**, all sharing a unified data stream.
+![Screenshot](https://github.com/user-attachments/assets/80dcbe6b-ecdf-45e2-a9fa-f0b542088655)
+
+
 ## Architecture
 ![image](https://github.com/user-attachments/assets/4d6c7474-0fcc-4ca7-891c-be9fe1077737)
 
