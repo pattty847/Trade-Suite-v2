@@ -78,12 +78,6 @@ class DashboardProgram:
 
     def initialize(self):
         """Initialize the dashboard program."""
-        # Initialize dashboard layout
-        # self.dashboard_manager.initialize_layout()
-        
-        # Set up the menu bar
-        self._setup_menu_bar()
-        
         # Create widgets for each exchange
         if self.data.exchange_list:
             for exchange_id in self.data.exchange_list:
@@ -91,66 +85,6 @@ class DashboardProgram:
         else:
             logging.warning("No exchanges found in the data source.")
 
-    def _setup_menu_bar(self):
-        """Set up the main menu bar."""
-        # Skip creating menu bar if there's no parent window
-        # Since we now have a viewport-level menu bar, this is fine
-        if self.parent is None:
-            logging.info("No parent window for menu bar, skipping window-level menu bar creation")
-            return
-            
-        with dpg.menu_bar(parent=self.parent):
-            with dpg.menu(label="File"):
-                dpg.add_menu_item(
-                    label="New Chart", 
-                    callback=lambda: self._show_new_chart_dialog()
-                )
-                dpg.add_menu_item(
-                    label="New Orderbook", 
-                    callback=lambda: self._show_new_orderbook_dialog()
-                )
-                dpg.add_menu_item(
-                    label="New Trading Panel", 
-                    callback=lambda: self._show_new_trading_dialog()
-                )
-                dpg.add_separator()
-                dpg.add_menu_item(
-                    label="Save Layout", 
-                    callback=self.dashboard_manager.save_layout
-                )
-                dpg.add_menu_item(
-                    label="Reset Layout", 
-                    callback=self.dashboard_manager.reset_to_default
-                )
-                dpg.add_separator()
-                dpg.add_menu_item(
-                    label="Exit", 
-                    callback=lambda: dpg.stop_dearpygui()
-                )
-            
-            with dpg.menu(label="View"):
-                dpg.add_menu_item(
-                    label="Layout Tools", 
-                    callback=lambda: self.dashboard_manager.create_layout_tools()
-                )
-                dpg.add_menu_item(
-                    label="Debug Tools",
-                    callback=lambda: self._create_debug_window()
-                )
-            
-            with dpg.menu(label="New Exchange"):
-                input_tag = dpg.add_input_text(label="Search")
-                exchange_list = dpg.add_listbox(
-                    items=list(self.data.exchanges),
-                    callback=lambda s, a, u: self._on_create_exchange(a),
-                    num_items=10,
-                )
-                dpg.set_item_callback(
-                    input_tag,
-                    callback=lambda: searcher(
-                        input_tag, exchange_list, list(self.data.exchanges)
-                    ),
-                )
 
     def _on_create_exchange(self, exchange):
         """Handle creating a new exchange tab."""
@@ -174,6 +108,7 @@ class DashboardProgram:
         exchange_settings = self.config_manager.get_setting(exchange) or {}
         
         # Determine default symbol and timeframe
+        # TODO: Save/Load the last symbol and timeframe for each exchange
         default_symbol = exchange_settings.get('last_symbol') or self._get_default_symbol(exchange)
         default_timeframe = exchange_settings.get('last_timeframe') or self._get_default_timeframe(exchange)
         
@@ -203,6 +138,13 @@ class DashboardProgram:
         self.dashboard_manager.add_widget(f"{exchange}_trading", trading_widget)
         
         # Store references to widgets
+        # TODO: Figure out how to have these widget subscribe to data directly from the data source
+        # TODO: Figure out how to handle duplicate widgets listening to the same data
+        # {
+        #     "chart": {"subscriptions": ["BTC/USD", "BTC/USDT"]}, 
+        #     "orderbook": {"subscriptions": ["BTC/USD", "BTC/USDT"]},
+        #     "trading": {"subscriptions": ["BTC/USD", "BTC/USDT"]}
+        # }
         self.widgets[exchange] = {
             'chart': chart_widget,
             'orderbook': orderbook_widget,
@@ -216,6 +158,7 @@ class DashboardProgram:
 
     def _start_data_streams_for_exchange(self, exchange, symbol, timeframe):
         """Start data streams for an exchange."""
+        # TODO: How do we identify the chart widget, send data there, as well as duplicate widgets listening to the same data?
         # Create a unique ID for the chart widget's tab
         chart_widget = self.widgets[exchange]['chart']
         tab_id = chart_widget.window_tag

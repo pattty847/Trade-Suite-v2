@@ -11,20 +11,6 @@ from trade_suite.data.data_source import Data
 from trade_suite.gui.signals import Signals
 from trade_suite.gui.utils import calculate_since, create_loading_modal, create_timed_popup
 
-"""
-Mechanism:
-
-Separate Thread for Asyncio: It creates a dedicated background thread (self.thread) solely to run an asyncio event loop (self.loop). This is a standard and good approach to prevent blocking the main DearPyGUI thread.
-
-Running Coroutines: When the GUI needs to start an async operation (like watch_trades or fetch_candles), it calls a method like start_task or start_stream_for_chart. These methods use asyncio.run_coroutine_threadsafe(coroutine, self.loop) to schedule the coroutine to run on the dedicated asyncio loop in the background thread.
-
-Task Tracking: It keeps track of running tasks in a dictionary (self.tasks) using generated names (e.g., trades_{exchange}_{symbol}_{tab}). This allows specific tasks to be cancelled later (e.g., when switching symbols or closing a tab). It also uses self.tabs to group tasks belonging to a specific GUI tab.
-
-GUI Updates (Implied): While TaskManager starts the data fetching/streaming tasks (by calling methods on the self.data object), it doesn't directly handle the incoming data or update the GUI itself. The coroutines it starts (like self.data.watch_trades and self.data.watch_orderbook) are responsible for processing the data received from ccxt and, presumably, using the SignalEmitter (which we know Data has) to send signals with the processed data. The GUI components (Chart, Orderbook, etc.) would listen for these signals and update themselves using dpg.set_value or similar functions, likely wrapped in dpg.submit_callback to ensure thread safety if the signal handling happens directly in the async context (though often the signal emitter handles dispatching to the main thread).
-
-Blocking Operations: For operations that need to wait for a result (like the initial candle fetch), it provides run_task_until_complete and run_task_with_loading_popup. These use future.result(), which blocks the calling thread (the main GUI thread in the case of the popup) until the async task completes. Using the loading popup version is good UX for this.
-"""
-
 
 class TaskManager:
     def __init__(self, data: Data):
@@ -50,20 +36,6 @@ class TaskManager:
         # Wait for the loop to be initialized
         while self.loop is None:
             time.sleep(0.01)
-
-    def set_visable_tab(self, sender, app_data, user_data):
-        """
-        The set_visable_tab function is used to set the currently visible tab.
-        This is used to determine which tab's data should be displayed.
-
-        :param self: Access the class instance
-        :param sender: Identify the sender of the signal
-        :param app_data: Pass data from the application
-        :param user_data: Pass user-specific data
-        :return: None
-        :doc-author: Trelent
-        """
-        self.visible_tab = app_data
 
     def run_loop(self):
         """
@@ -207,6 +179,9 @@ class TaskManager:
         """
 
         # We want to stop the old tab's tasks when requesting a new stream
+        # TODO: Fix this, we do not want to stop old streams, especially if another widget is listening to the same data
+        # This is from the old tab based architecture, we should use a more flexible approach for the new dashboard based architecture
+        # where widgets can subscribe to data directly from the data source if there are already streams running, start new streams if not
         if tab in self.tabs:
             for task in self.tabs[tab]:
                 self.stop_task(task)
@@ -216,8 +191,9 @@ class TaskManager:
             tab, exchange, symbol, timeframe
         ) 
         
+        # TODO: We need to start the trades and orderbook streams for the chart that widgets can subscribe to
         # Task ID for trades stream (usually specific to the chart/tab)
-        trades_task = f"trades_{exchange}_{symbol}_{tab}"
+        trades_task = f"trades_{exchange}_{symbol}"
         # Task ID for the shared orderbook stream (generic)
         orderbook_task = f"orderbook_{exchange}_{symbol}"
 
@@ -358,7 +334,7 @@ class TaskManager:
         """
         Fetch candles and put them in the queue for thread-safe processing
         """
-        candles = await self.data.fetch_candles(
+        candles_data = await self.data.fetch_candles(
             tab=tab,
             exchanges=exchanges,
             symbols=symbols,
@@ -367,15 +343,23 @@ class TaskManager:
             write_to_db=write_to_db,
         )
         
-        # Put the candles data in the queue
-        await self.data_queue.put({
-            'type': 'candles',
-            'tab': tab,
-            'exchange': exchanges[0],
-            'candles': candles
-        })
+        # Extract the specific candles we want to emit (similar to what data_source.py did)
+        if len(exchanges) == len(symbols) == len(timeframes) == 1 and candles_data:
+            first_exchange = next(iter(candles_data))
+            key = self.data._generate_cache_key(first_exchange, symbols[0], timeframes[0])
+            
+            if key in candles_data[first_exchange]:
+                first_candle_df = candles_data[first_exchange][key]
+                
+                # Put the candles data in the queue
+                await self.data_queue.put({
+                    'type': 'candles',
+                    'tab': tab,
+                    'exchange': exchanges[0],
+                    'candles': first_candle_df
+                })
         
-        return candles
+        return candles_data
 
     def run_task_until_complete(self, coro):
         """

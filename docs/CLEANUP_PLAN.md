@@ -23,12 +23,12 @@ This document outlines the steps needed to clean up and finalize the codebase af
 
 - [X] Rename `test_widgets_launch.py` to `app.py` or another appropriate name reflecting its role as the main application runner.
 - [X] Update `main.py` to properly import and call the main function from the renamed entry point file.
-- [X Ensure command-line arguments (e.g., `--reset-layout`, `--level`) are handled correctly in the renamed entry point.
+- [X] Ensure command-line arguments (e.g., `--reset-layout`, `--level`) are handled correctly in the renamed entry point.
 
 ### 4. Final Testing & Bug Fixes
 
-- [ ] Test all docking operations thoroughly (drag/drop, tabs, splits, floating).
-- [ ] Verify layout persistence works correctly (save on close, load on start, reset).
+- [X] Test all docking operations thoroughly (drag/drop, tabs, splits, floating).
+- [X] Verify layout persistence works correctly (save on close, load on start, reset).
 - [ ] Check that the dynamic `Exchange` menu populates and functions correctly.
 - [ ] Ensure all menu items (`File`, `View`, individual widget menus) trigger the appropriate actions without errors.
 - [ ] Test adding/removing all types of widgets (`Chart`, `Orderbook`, `Trading`, `Price Level`).

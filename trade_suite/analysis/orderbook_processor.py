@@ -1,5 +1,6 @@
 import math
 import logging
+import numpy as np
 from collections import defaultdict
 
 
@@ -33,24 +34,30 @@ class OrderBookProcessor:
             logging.debug(f"Empty order book data received. Skipping processing.")
             return None
             
+        # Convert to numpy arrays for faster processing
+        bids_arr = np.array(raw_bids, dtype=float)
+        asks_arr = np.array(raw_asks, dtype=float)
+            
         # Filter orderbook to reasonable range to avoid processing entire book
-        price_range_percentage = 0.10  # 10% range to capture
+        price_range_percentage = 0.25  # 25% range to capture
         if current_price is None and raw_bids and raw_asks:
-            best_bid = raw_bids[0][0]
-            best_ask = raw_asks[0][0]
+            best_bid = bids_arr[0, 0]
+            best_ask = asks_arr[0, 0]
             current_price = (best_bid + best_ask) / 2
             
         if current_price:
             min_price = current_price * (1 - price_range_percentage)
             max_price = current_price * (1 + price_range_percentage)
             
-            # Filter bids and asks within the range
-            limited_bids = [order for order in raw_bids if order[0] >= min_price]
-            limited_asks = [order for order in raw_asks if order[0] <= max_price]
+            # Filter bids and asks within the range using vectorized operations
+            bids_mask = bids_arr[:, 0] >= min_price
+            asks_mask = asks_arr[:, 0] <= max_price
+            limited_bids = bids_arr[bids_mask]
+            limited_asks = asks_arr[asks_mask]
         else:
             # Fallback if we can't calculate midpoint
-            limited_bids = raw_bids[:100]
-            limited_asks = raw_asks[:100]
+            limited_bids = bids_arr[:100]
+            limited_asks = asks_arr[:100]
             
         # Process the filtered orderbook
         bids_processed, asks_processed = self._aggregate_and_group_order_book(
@@ -58,13 +65,13 @@ class OrderBookProcessor:
         )
         
         # Return early if processing resulted in empty lists
-        if not bids_processed or not asks_processed:
+        if len(bids_processed) == 0 or len(asks_processed) == 0:
             logging.debug(f"Processing resulted in empty order book. Skipping.")
             return None
             
         # Calculate visualization parameters
-        best_bid = bids_processed[0][0] if bids_processed else 0
-        best_ask = asks_processed[0][0] if asks_processed else 0
+        best_bid = bids_processed[0][0] if bids_processed.size > 0 else 0
+        best_ask = asks_processed[0][0] if asks_processed.size > 0 else 0
         
         # Handle equal bid/ask edge case (usually from aggregation)
         if best_ask <= best_bid:
@@ -84,10 +91,14 @@ class OrderBookProcessor:
             bids_processed, asks_processed, x_axis_limits
         )
         
+        # Convert NumPy arrays to lists for compatibility with existing code
+        bids_processed_list = bids_processed.tolist() if isinstance(bids_processed, np.ndarray) else bids_processed
+        asks_processed_list = asks_processed.tolist() if isinstance(asks_processed, np.ndarray) else asks_processed
+        
         # Return all processed data in a single dictionary
         return {
-            "bids_processed": bids_processed,
-            "asks_processed": asks_processed,
+            "bids_processed": bids_processed_list,
+            "asks_processed": asks_processed_list,
             "x_axis_limits": x_axis_limits,
             "y_axis_limits": y_axis_limits,
             "bid_ask_ratio": bid_ask_ratio,
@@ -98,61 +109,90 @@ class OrderBookProcessor:
         
     def _aggregate_and_group_order_book(self, bids_raw, asks_raw):
         """
-        Processes raw bid/ask lists, aggregates if requested, and calculates cumulative sums.
+        Processes raw bid/ask arrays, aggregates if requested, and calculates cumulative sums.
         
         Args:
-            bids_raw (list): Raw bid data as [[price, quantity], ...]
-            asks_raw (list): Raw ask data as [[price, quantity], ...]
+            bids_raw (ndarray): Raw bid data as [[price, quantity], ...]
+            asks_raw (ndarray): Raw ask data as [[price, quantity], ...]
             
         Returns:
-            tuple: (bids_processed, asks_processed) with processed data
+            tuple: (bids_processed, asks_processed) with processed data as numpy arrays
         """
-        if self.aggregation_enabled:
-            # Aggregate bids
-            bids_grouped = defaultdict(float)
-            for price, quantity in bids_raw:
-                if self.tick_size > 0:
-                    group = math.floor(price / self.tick_size) * self.tick_size
-                    bids_grouped[group] += quantity
-                else: # Avoid division by zero if tick_size is invalid
-                    bids_grouped[price] += quantity
-            # Sort descending by price, calculate cumulative
-            bids_sorted = sorted(bids_grouped.items(), key=lambda item: item[0], reverse=True)
-            bids_processed = []
-            cumulative_qty = 0
-            for price, quantity in bids_sorted:
-                cumulative_qty += quantity
-                bids_processed.append([price, quantity, cumulative_qty]) # [price, individual_qty, cumulative_qty]
-
-            # Aggregate asks
-            asks_grouped = defaultdict(float)
-            for price, quantity in asks_raw:
-                 if self.tick_size > 0:
-                     group = math.floor(price / self.tick_size) * self.tick_size
-                     asks_grouped[group] += quantity
-                 else:
-                     asks_grouped[price] += quantity
-            # Sort ascending by price, calculate cumulative
-            asks_sorted = sorted(asks_grouped.items(), key=lambda item: item[0])
-            asks_processed = []
-            cumulative_qty = 0
-            for price, quantity in asks_sorted:
-                cumulative_qty += quantity
-                asks_processed.append([price, quantity, cumulative_qty]) # [price, individual_qty, cumulative_qty]
-
+        if self.aggregation_enabled and self.tick_size > 0:
+            # Vectorized aggregation for bids
+            bids_processed = self._vector_aggregate(bids_raw, descending=True)
+            
+            # Vectorized aggregation for asks
+            asks_processed = self._vector_aggregate(asks_raw, descending=False)
         else:
             # Non-aggregated: just sort
-            # Sort bids descending by price
-            bids_processed = sorted(bids_raw, key=lambda item: item[0], reverse=True)
-             # Ensure format consistency: [price, quantity] (no cumulative here)
-            bids_processed = [[p, q] for p, q in bids_processed]
-
-            # Sort asks ascending by price
-            asks_processed = sorted(asks_raw, key=lambda item: item[0])
-             # Ensure format consistency: [price, quantity]
-            asks_processed = [[p, q] for p, q in asks_processed]
+            if len(bids_raw) > 0:
+                # Sort bids descending by price
+                bid_order = np.argsort(-bids_raw[:, 0])  # Descending sort
+                bids_sorted = bids_raw[bid_order]
+                
+                # Add cumulative column
+                if bids_sorted.size > 0:
+                    cum_qty = np.cumsum(bids_sorted[:, 1])
+                    bids_processed = np.column_stack([bids_sorted, cum_qty])
+                else:
+                    bids_processed = np.array([])
+            else:
+                bids_processed = np.array([])
+                
+            if len(asks_raw) > 0:
+                # Sort asks ascending by price
+                ask_order = np.argsort(asks_raw[:, 0])  # Ascending sort
+                asks_sorted = asks_raw[ask_order]
+                
+                # Add cumulative column
+                if asks_sorted.size > 0:
+                    cum_qty = np.cumsum(asks_sorted[:, 1])
+                    asks_processed = np.column_stack([asks_sorted, cum_qty])
+                else:
+                    asks_processed = np.array([])
+            else:
+                asks_processed = np.array([])
 
         return bids_processed, asks_processed
+    
+    def _vector_aggregate(self, side_raw, descending=False):
+        """
+        Vectorized version of order book aggregation using NumPy.
+        
+        Args:
+            side_raw (ndarray): Raw price/qty data as [[price, quantity], ...]
+            descending (bool): Sort order (True for bids, False for asks)
+            
+        Returns:
+            ndarray: Processed data as [[price, qty, cumulative_qty], ...]
+        """
+        if side_raw.size == 0:
+            return np.array([])
+            
+        # Group by tick size
+        ticks = np.floor(side_raw[:, 0] / self.tick_size) * self.tick_size
+        
+        # Find unique price levels and their indices
+        uniq_prices, inverse_indices = np.unique(ticks, return_inverse=True)
+        
+        # Sum quantities at each price level
+        qty_sum = np.bincount(inverse_indices, weights=side_raw[:, 1])
+        
+        # Sort by price
+        if descending:
+            order = np.argsort(-uniq_prices)  # Descending for bids
+        else:
+            order = np.argsort(uniq_prices)   # Ascending for asks
+            
+        prices = uniq_prices[order]
+        quantities = qty_sum[order]
+        
+        # Calculate cumulative quantities
+        cumulative = np.cumsum(quantities)
+        
+        # Stack into final result
+        return np.column_stack([prices, quantities, cumulative])
         
     def _calculate_axis_limits(self, midpoint, bids_processed, asks_processed):
         """
@@ -168,28 +208,33 @@ class OrderBookProcessor:
         x_min = midpoint - dynamic_spread
         x_max = midpoint + dynamic_spread
         
-        # Extract price lists
-        if self.aggregation_enabled:
-            bid_prices = [item[0] for item in bids_processed]
-            ask_prices = [item[0] for item in asks_processed]
+        # Extract price arrays
+        if isinstance(bids_processed, np.ndarray) and bids_processed.size > 0:
+            bid_prices = bids_processed[:, 0]
         else:
-            bid_prices = [item[0] for item in bids_processed]
-            ask_prices = [item[0] for item in asks_processed]
+            bid_prices = np.array([])
+            
+        if isinstance(asks_processed, np.ndarray) and asks_processed.size > 0:
+            ask_prices = asks_processed[:, 0]
+        else:
+            ask_prices = np.array([])
         
-        # Find price levels that would be visible with these limits
-        visible_bids = [p for p in bid_prices if p >= x_min]
-        visible_asks = [p for p in ask_prices if p <= x_max]
+        # Find price levels that would be visible with these limits using vectorized operations
+        visible_bids = bid_prices[bid_prices >= x_min] if bid_prices.size > 0 else np.array([])
+        visible_asks = ask_prices[ask_prices <= x_max] if ask_prices.size > 0 else np.array([])
         
         # Make sure we have enough levels visible on each side
-        if len(visible_bids) < self.min_visible_levels and bid_prices:
+        if len(visible_bids) < self.min_visible_levels and bid_prices.size > 0:
             # Not enough bid levels visible, adjust x_min to show more bids
-            target_level = min(self.min_visible_levels, len(bid_prices) - 1)
-            x_min = bid_prices[target_level]  # Remember bids are sorted descending
+            target_level = min(self.min_visible_levels, bid_prices.size - 1)
+            if target_level >= 0 and target_level < bid_prices.size:
+                x_min = bid_prices[target_level]  # Remember bids are sorted descending
             
-        if len(visible_asks) < self.min_visible_levels and ask_prices:
+        if len(visible_asks) < self.min_visible_levels and ask_prices.size > 0:
             # Not enough ask levels visible, adjust x_max to show more asks
-            target_level = min(self.min_visible_levels, len(ask_prices) - 1)
-            x_max = ask_prices[target_level]  # Remember asks are sorted ascending
+            target_level = min(self.min_visible_levels, ask_prices.size - 1)
+            if target_level >= 0 and target_level < ask_prices.size:
+                x_max = ask_prices[target_level]  # Remember asks are sorted ascending
         
         # Make sure spread is centered on midpoint by adjusting limits symmetrically
         current_spread = x_max - x_min
@@ -199,8 +244,8 @@ class OrderBookProcessor:
         x_max = midpoint + half_spread
         
         # Update visible bid/ask lists based on new limits
-        visible_bids = [p for p in bid_prices if p >= x_min]
-        visible_asks = [p for p in ask_prices if p <= x_max]
+        visible_bids = bid_prices[bid_prices >= x_min] if bid_prices.size > 0 else np.array([])
+        visible_asks = ask_prices[ask_prices <= x_max] if ask_prices.size > 0 else np.array([])
         
         return (x_min, x_max), visible_bids, visible_asks
         
@@ -214,20 +259,29 @@ class OrderBookProcessor:
         x_min, x_max = x_limits
         
         # Calculate visible quantities based on aggregation mode
-        if self.aggregation_enabled:
-            visible_bids_qty = [item[2] for item in bids_processed if item[0] >= x_min]
-            visible_asks_qty = [item[2] for item in asks_processed if item[0] <= x_max]
-            visible_bids_indiv_qty_sum = sum(item[1] for item in bids_processed if item[0] >= x_min)
-            visible_asks_indiv_qty_sum = sum(item[1] for item in asks_processed if item[0] <= x_max)
+        if isinstance(bids_processed, np.ndarray) and bids_processed.size > 0:
+            # Use vectorized operations with boolean masks
+            bids_mask = bids_processed[:, 0] >= x_min
+            visible_bids_qty = bids_processed[bids_mask, 2] if np.any(bids_mask) else np.array([])
+            visible_bids_indiv_qty = bids_processed[bids_mask, 1] if np.any(bids_mask) else np.array([])
+            visible_bids_indiv_qty_sum = np.sum(visible_bids_indiv_qty) if visible_bids_indiv_qty.size > 0 else 0
         else:
-            visible_bids_qty = [item[1] for item in bids_processed if item[0] >= x_min]
-            visible_asks_qty = [item[1] for item in asks_processed if item[0] <= x_max]
-            visible_bids_indiv_qty_sum = sum(visible_bids_qty)
-            visible_asks_indiv_qty_sum = sum(visible_asks_qty)
+            visible_bids_qty = np.array([])
+            visible_bids_indiv_qty_sum = 0
+            
+        if isinstance(asks_processed, np.ndarray) and asks_processed.size > 0:
+            # Use vectorized operations with boolean masks
+            asks_mask = asks_processed[:, 0] <= x_max
+            visible_asks_qty = asks_processed[asks_mask, 2] if np.any(asks_mask) else np.array([])
+            visible_asks_indiv_qty = asks_processed[asks_mask, 1] if np.any(asks_mask) else np.array([])
+            visible_asks_indiv_qty_sum = np.sum(visible_asks_indiv_qty) if visible_asks_indiv_qty.size > 0 else 0
+        else:
+            visible_asks_qty = np.array([])
+            visible_asks_indiv_qty_sum = 0
 
         # Calculate max height
-        max_bid_y = max(visible_bids_qty) if visible_bids_qty else 0
-        max_ask_y = max(visible_asks_qty) if visible_asks_qty else 0
+        max_bid_y = np.max(visible_bids_qty) if visible_bids_qty.size > 0 else 0
+        max_ask_y = np.max(visible_asks_qty) if visible_asks_qty.size > 0 else 0
         max_y_value = max(max_bid_y, max_ask_y, 0.1)
         
         # Add buffer for better visual appearance

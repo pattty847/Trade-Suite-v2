@@ -37,6 +37,12 @@ class DashboardManager:
         self.user_layout = user_layout_file
         
         # Widget registry maps widget_id to widget instance
+        # TODO: Store the widgets plus the data streams they subscribe to
+        # {
+        #     "chart": {"subscriptions": ["BTC/USD", "BTC/USDT"]}, 
+        #     "orderbook": {"subscriptions": ["BTC/USD", "BTC/USDT"]},
+        #     "trading": {"subscriptions": ["BTC/USD", "BTC/USDT"]}
+        # }
         self.widgets: Dict[str, DockableWidget] = {}
         
         # Create layout directories if they don't exist

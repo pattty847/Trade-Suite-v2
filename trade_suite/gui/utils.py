@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 import threading
 import dearpygui.dearpygui as dpg
 from typing import Dict, Any
@@ -138,6 +139,119 @@ def delete_popup_modal(window_tag):
     """
     if dpg.does_item_exist(window_tag):
         dpg.delete_item(window_tag)
+        
+
+def load_font():
+    # Font loading
+    try:
+        with dpg.font_registry():
+            # Load font, adjust size for density (e.g., 13 or 14)
+            # Make sure the path is correct relative to your execution directory
+            default_font = dpg.add_font("fonts/Roboto_Mono/static/RobotoMono-Regular.ttf", 14)
+        # Set as default font
+        dpg.bind_font(default_font)
+        logging.info("Successfully loaded and bound font: RobotoMono-Regular.ttf")
+    except Exception as e:
+        logging.error(f"Failed to load or bind font: {e}", exc_info=True)
+        # Fallback or indicate error - maybe don't bind if it fails
+        
+
+def load_theme():
+        logging.info("Loading theme.")
+        # with dpg.theme() as global_theme:
+        #     with dpg.theme_component(dpg.mvAll):
+        #         dpg.add_theme_color(
+        #             dpg.mvThemeCol_FrameBg,
+        #             (13, 13, 13, 255),
+        #             category=dpg.mvThemeCat_Core,
+        #         )
+        #         dpg.add_theme_color(
+        #             dpg.mvThemeCol_WindowBg,
+        #             (13, 13, 13, 255),
+        #             category=dpg.mvThemeCat_Core,
+        #         )
+        #         dpg.add_theme_color(
+        #             dpg.mvThemeCol_ChildBg,
+        #             (13, 13, 13, 255),
+        #             category=dpg.mvThemeCat_Core,
+        #         )
+        #         dpg.add_theme_style(
+        #             dpg.mvStyleVar_FrameRounding, 2, category=dpg.mvThemeCat_Core
+        #         )
+        #         dpg.add_theme_style(
+        #             dpg.mvPlotStyleVar_MinorAlpha, 0.33, category=dpg.mvThemeCat_Plots
+        #         )
+        #         dpg.add_theme_style(
+        #             dpg.mvPlotStyleVar_PlotPadding, 0, 0, category=dpg.mvThemeCat_Plots
+        #         )
+
+        #     with dpg.theme_component(dpg.mvInputInt):
+        #         dpg.add_theme_color(
+        #             dpg.mvThemeCol_FrameBg,
+        #             (13, 13, 13, 255),
+        #             category=dpg.mvThemeCat_Core,
+        #         )
+        #         dpg.add_theme_color(
+        #             dpg.mvThemeCol_WindowBg,
+        #             (13, 13, 13, 255),
+        #             category=dpg.mvThemeCat_Core,
+        #         )
+        #         dpg.add_theme_color(
+        #             dpg.mvThemeCol_ChildBg,
+        #             (13, 13, 13, 255),
+        #             category=dpg.mvThemeCat_Core,
+        #         )
+        #         dpg.add_theme_style(
+        #             dpg.mvStyleVar_FrameRounding, 2, category=dpg.mvThemeCat_Core
+        #         )
+        #         dpg.add_theme_style(
+        #             dpg.mvPlotStyleVar_MinorAlpha, 0.33, category=dpg.mvThemeCat_Plots
+        #         )
+        #         dpg.add_theme_style(
+        #             dpg.mvPlotStyleVar_PlotPadding, 0, 0, category=dpg.mvThemeCat_Plots
+        #         )
+
+        # dpg.bind_theme(global_theme)
+        with dpg.theme() as global_theme:
+            with dpg.theme_component(dpg.mvAll): # Apply to all widget types unless overridden
+                # --- Overall Colors ---
+                # Very dark backgrounds
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (30, 30, 30), category=dpg.mvThemeCat_Core) # Dark grey window background
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (30, 30, 30), category=dpg.mvThemeCat_Core) # Dark background for tables/child windows
+                # Slightly lighter frames (inputs, selects)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (45, 45, 45), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (55, 55, 55), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (65, 65, 65), category=dpg.mvThemeCat_Core)
+                # Text color
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (210, 210, 210), category=dpg.mvThemeCat_Core) # Light grey text
+                # Borders and Separators (make them subtle)
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (60, 60, 60), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_Separator, (60, 60, 60), category=dpg.mvThemeCat_Core)
+                # Headers (like table headers, collapsing headers)
+                dpg.add_theme_color(dpg.mvThemeCol_Header, (55, 55, 55), category=dpg.mvThemeCat_Core) # Slightly lighter grey
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (65, 65, 65), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (75, 75, 75), category=dpg.mvThemeCat_Core)
+                # Buttons (adjust as needed)
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (55, 55, 55), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (65, 65, 65), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (75, 75, 75), category=dpg.mvThemeCat_Core)
+                # Tabs (adjust for desired active/inactive look)
+                # ... add mvThemeCol_Tab* colors ...
+
+                # --- Overall Styles (Density) ---
+                # Reduce padding and spacing
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 4, 2, category=dpg.mvThemeCat_Core) # Less vertical padding in frames
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 4, 2, category=dpg.mvThemeCat_Core) # Tighter spacing between items
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 4, 4, category=dpg.mvThemeCat_Core) # Less padding around window content
+                dpg.add_theme_style(dpg.mvStyleVar_CellPadding, 2, 2, category=dpg.mvThemeCat_Core) # TIGHT table cell padding
+                # Remove borders around input frames etc.
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 0, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize, 1, category=dpg.mvThemeCat_Core) # Keep a thin window border maybe
+
+        # Bind the theme globally after creating it
+        dpg.bind_theme(global_theme)
+        
+        logging.info("Done loading theme.")
 
 
 def searcher(searcher, result, search_list):

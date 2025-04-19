@@ -292,22 +292,6 @@ class Data(CCXTInterface):
             except Exception as e:
                 logging.error(f"Error writing to DB: {e}")
 
-        # If we're just requesting one exchange: symbol/timeframe pair we'll just emit that one
-        if len(exchanges) == len(symbols) == len(timeframes) == 1 and self.emitter:
-            first_exchange = next(iter(all_candles))
-            first_symbol_timeframe_key = next(iter(all_candles[first_exchange]))
-            first_candle_df = all_candles[first_exchange][first_symbol_timeframe_key]
-
-            # Emitting the data
-            if self.emitter:
-                self.emitter.emit(
-                    Signals.NEW_CANDLES,
-                    tab=tab,
-                    exchange=exchanges[0],
-                    candles=first_candle_df,
-                )
-                return
-
         return all_candles
 
     async def fetch_and_process_candles(self, exchange, symbol, timeframe, since_timestamp, exchange_name, all_candles):
