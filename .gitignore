@@ -3,12 +3,6 @@
 venv/
 
 # Project-specific files to ignore
-testing
-fetch_candles_main.py
-trade_suite/architecture.drawio
-project_to_text.py
-docs/TODO.md
-docs/UI_IMPROVEMENTS.md
 scripts/extract_docs.py
 sec_data_dump/
 sec_api_test.log
@@ -28,6 +22,8 @@ sec_api_test.log
 **/__pycache__/
 *.py[cod]
 *$py.class
+
+.pytest_cache
 
 # Data and logs
 /data/

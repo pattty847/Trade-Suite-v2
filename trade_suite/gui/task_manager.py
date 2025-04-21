@@ -37,11 +37,14 @@ class TaskManager:
         self.data_queue = asyncio.Queue()
         self.executor = ThreadPoolExecutor(max_workers=1)
         
+        # Stream stop events
+        self.stream_events: Dict[str, asyncio.Event] = {}
+        
         # Lock for thread synchronization (primarily for accessing shared resources like factories/counts)
         self.lock = threading.Lock()
         
         # Start the event loop in a separate thread
-        self.thread = threading.Thread(target=self.run_loop, daemon=True)
+        self.thread = threading.Thread(target=self.run_loop, daemon=False) #
         self.thread.start()
         
         # Wait for the loop to be initialized
@@ -248,46 +251,54 @@ class TaskManager:
                     self.stream_ref_counts[key] += 1
                     logging.debug(f"Stream ref count for {key} incremented to {self.stream_ref_counts[key]}")
                     if self.stream_ref_counts[key] == 1:
-                        logging.info(f"Starting stream for key: {key}")
-                        # Determine stream type and start
-                        if key.startswith("trades_"):
-                            _, exch, sym = key.split("_", 2)
-                            coro = self._get_watch_trades_coro(exch, sym)
+                        # Start the stream task if it's the first subscriber
+                        if key not in self.tasks or self.tasks[key].done():
+                            logging.info(f"Starting new stream task for key: {key}")
+                            coro = None
+                            # Create and set the event for this stream
+                            stop_event = asyncio.Event()
+                            stop_event.set()
+                            self.stream_events[key] = stop_event
+                            
+                            # Determine which watch function to call based on the key
+                            if key.startswith("trades_"):
+                                _, exchange, symbol = key.split("_", 2)
+                                coro = self._get_watch_trades_coro(exchange, symbol, stop_event) # Pass event
+                            elif key.startswith("orderbook_"):
+                                _, exchange, symbol = key.split("_", 2)
+                                coro = self._get_watch_orderbook_coro(exchange, symbol, stop_event) # Pass event
+                            # Add other stream types here if needed
+                            
                             if coro:
                                 self.start_task(key, coro)
                             else:
-                                logging.error(f"Could not create trade stream coroutine for {key}")
-                                self.stream_ref_counts[key] -= 1 # Rollback count
-                                self.widget_subscriptions[widget_id].remove(key) # Remove from widget sub
+                                logging.warning(f"Could not determine coroutine for stream key: {key}")
+                                # Clean up event if task isn't started
+                                if key in self.stream_events:
+                                    del self.stream_events[key]
+                                stop_event.clear() # Ensure it's not left dangling
+                                self.stream_ref_counts[key] -= 1 # Decrement count back
+                        else:
+                             logging.info(f"Stream task {key} is already running.")
 
-                        elif key.startswith("orderbook_"):
-                             _, exch, sym = key.split("_", 2)
-                             coro = self._get_watch_orderbook_coro(exch, sym)
-                             if coro:
-                                 self.start_task(key, coro)
-                             else:
-                                 logging.error(f"Could not create orderbook stream coroutine for {key}")
-                                 self.stream_ref_counts[key] -= 1 # Rollback count
-                                 self.widget_subscriptions[widget_id].remove(key) # Remove from widget sub
-            
-            # Trigger initial candle fetch outside the loop if a new factory was created
+            # After potentially creating a new CandleFactory, fetch initial candles
             if needs_initial_candles and initial_candle_details:
-                 logging.info(f"Triggering initial candle fetch for {initial_candle_details}")
-                 # Use run_coroutine_threadsafe as this might be called from UI thread
-                 asyncio.run_coroutine_threadsafe(
-                     self._fetch_initial_candles_for_factory(**initial_candle_details),
-                     self.loop
-                 )
+                # Run fetching in the background, do not block subscription
+                asyncio.run_coroutine_threadsafe(
+                    self._fetch_initial_candles_for_factory(**initial_candle_details),
+                    self.loop
+                )
 
     def unsubscribe(self, widget):
         """
-        Unsubscribes a widget, decrementing resource counts and cleaning up if necessary.
+        Unsubscribes a widget, decrements resource reference counts,
+        and stops/cleans up resources if no longer needed.
         """
-        with self.lock: # Ensure thread safety
+        with self.lock:
             widget_id = id(widget)
             if widget_id not in self.widget_subscriptions:
-                 logging.warning(f"Widget {widget_id} not found in subscriptions during unsubscribe.")
-                 return
+                logging.warning(f"Widget {widget_id} not found in subscriptions.")
+                return
 
             resource_keys = self.widget_subscriptions.pop(widget_id)
             logging.info(f"Unsubscribing widget {widget_id}. Resources: {resource_keys}")
@@ -298,12 +309,16 @@ class TaskManager:
                         self.factory_ref_counts[key] -= 1
                         logging.debug(f"Factory ref count for {key} decremented to {self.factory_ref_counts[key]}")
                         if self.factory_ref_counts[key] == 0:
-                             logging.info(f"Reference count is 0. Deleting CandleFactory for key: {key}")
-                             if key in self.candle_factories:
-                                 # Add potential cleanup logic for the factory itself if needed
-                                 del self.candle_factories[key]
-                                 logging.info(f"CandleFactory deleted for {key}.")
-                             del self.factory_ref_counts[key] # Remove from counts dict
+                            logging.info(f"Removing CandleFactory for key {key} as ref count is zero.")
+                            del self.factory_ref_counts[key]
+                            # Remove the factory instance itself
+                            if key in self.candle_factories:
+                                # Clean up factory resources if necessary (e.g., unregister listeners)
+                                factory = self.candle_factories[key]
+                                factory.cleanup()
+                                del self.candle_factories[key]
+                            else:
+                                logging.warning(f"Factory {key} not found in candle_factories dict during cleanup.")
                     else:
                          logging.warning(f"Factory key {key} not found in ref counts during unsubscribe.")
 
@@ -312,45 +327,38 @@ class TaskManager:
                         self.stream_ref_counts[key] -= 1
                         logging.debug(f"Stream ref count for {key} decremented to {self.stream_ref_counts[key]}")
                         if self.stream_ref_counts[key] == 0:
-                             logging.info(f"Reference count is 0. Stopping stream task: {key}")
-                             self.stop_task(key) # Stop the stream task
-                             del self.stream_ref_counts[key] # Remove from counts dict
+                            logging.info(f"Stopping stream task for key {key} as ref count is zero.")
+                            del self.stream_ref_counts[key]
+                            # Clear the event first to signal the loop to stop
+                            stop_event = self.stream_events.pop(key, None)
+                            if stop_event:
+                                stop_event.clear()
+                            # Then cancel the task
+                            self.stop_task(key) # stop_task now only cancels future
                     else:
                          logging.warning(f"Stream key {key} not found in ref counts during unsubscribe.")
 
-    # Helper methods to create stream coroutines
-    def _get_watch_trades_coro(self, exchange: str, symbol: str):
-        """Returns the coroutine for watching trades."""
+    def _get_watch_trades_coro(self, exchange: str, symbol: str, stop_event: asyncio.Event):
+        """Returns the coroutine for watching trades, passing the stop event."""
         async def wrapped_watch_trades():
             try:
-                # Assumes watch_trades puts data on the queue internally now, or handles signals
-                # Removed tab parameter
-                await self.data.watch_trades(
-                    exchange=exchange, symbol=symbol, track_stats=True
-                )
-            except asyncio.CancelledError:
-                 logging.info(f"Trade stream task trades_{exchange}_{symbol} cancelled.")
-                 raise # Re-raise
+                await self.data.watch_trades(exchange=exchange, symbol=symbol, stop_event=stop_event)
             except Exception as e:
-                 logging.error(f"Error in trade stream {exchange}/{symbol}: {e}", exc_info=True)
-        return wrapped_watch_trades() # Return the coroutine object itself
+                # Log specifics about the stream that failed
+                logging.error(f"Error in watch_trades task for {exchange}/{symbol}: {e}", exc_info=True)
+                # Optionally, attempt recovery or notify user
+        return wrapped_watch_trades()
 
-    def _get_watch_orderbook_coro(self, exchange: str, symbol: str):
-        """Returns the coroutine for watching orderbook."""
+    def _get_watch_orderbook_coro(self, exchange: str, symbol: str, stop_event: asyncio.Event):
+        """Returns the coroutine for watching orderbook, passing the stop event."""
         async def wrapped_watch_orderbook():
             try:
-                # Assumes watch_orderbook puts data on the queue internally now
-                # Removed tab parameter
-                await self.data.watch_orderbook(
-                    exchange=exchange,
-                    symbol=symbol,
-                )
-            except asyncio.CancelledError:
-                 logging.info(f"Orderbook stream task orderbook_{exchange}_{symbol} cancelled.")
-                 raise # Re-raise
+                await self.data.watch_orderbook(exchange=exchange, symbol=symbol, stop_event=stop_event)
             except Exception as e:
-                 logging.error(f"Error in orderbook stream {exchange}/{symbol}: {e}", exc_info=True)
-        return wrapped_watch_orderbook() # Return the coroutine object itself
+                # Log specifics about the stream that failed
+                logging.error(f"Error in watch_orderbook task for {exchange}/{symbol}: {e}", exc_info=True)
+                # Optionally, attempt recovery or notify user
+        return wrapped_watch_orderbook()
 
     async def _fetch_initial_candles_for_factory(self, exchange: str, symbol: str, timeframe: str):
         """Fetches initial candles and puts them onto the data queue."""
@@ -458,112 +466,153 @@ class TaskManager:
 
     def stop_task(self, name: str):
         """
-        Stops a task by name.
+        Stops a specific task by name by cancelling its Future.
+        Relies on unsubscribe to clear the associated event for streams.
         """
-        task = self.tasks.pop(name, None)
-        if task:
-            logging.info(f"Stopping task: {name}")
-            try:
-                 # Cancel the task using the correct method for threadsafe coroutines
-                 # task.cancel() # This might be for tasks created directly in the loop
-                 # For tasks started with run_coroutine_threadsafe, cancellation needs care
-                 # Often, it's better to signal the coroutine internally to stop.
-                 # If direct cancellation is supported by the Future:
-                 if hasattr(task, 'cancel'):
-                      task.cancel()
-                      logging.info(f"Cancellation requested for task: {name}")
-                 else:
-                     logging.warning(f"Task {name} future object does not support direct cancellation.")
-                 # We might need to wait briefly or check task status after cancellation attempt
-            except Exception as e:
-                logging.error(f"Error cancelling task {name}: {e}", exc_info=True)
+        task_future = self.tasks.pop(name, None)
+        if task_future:
+            if not task_future.done():
+                # Schedule cancellation in the event loop thread
+                self.loop.call_soon_threadsafe(task_future.cancel)
+                logging.info(f"Cancellation requested for task '{name}'.")
+                # Note: Cancellation is requested, but the task might take time to actually stop.
+                # We don't explicitly wait here to avoid blocking.
+                # Consider adding a mechanism to await cancellation if needed.
+            else:
+                logging.info(f"Task '{name}' was already done, removed reference.")
+                # Optionally handle results/exceptions if needed via task_future.result()
         else:
-            logging.warning(f"Task {name} not found for stopping.")
+            logging.warning(f"Task '{name}' not found or already stopped.")
 
     def stop_all_tasks(self):
         """
-        The stop_all_tasks function stops all tasks.
-        It cancels all tasks and clears the tasks dictionary.
-
-        :param self: Access the class instance
-        :return: None
-        :doc-author: Trelent
+        Stops all running tasks managed by the TaskManager.
+        Clears stream events first.
         """
-        for name in list(self.tasks.keys()):
-            self.stop_task(name)
+        logging.info("Stopping all tasks...")
         
-        # Ensure CandleFactories are also cleaned up if necessary? Or handled by unsubscribe?
-        self.candle_factories.clear()
-        self.factory_ref_counts.clear()
-        self.stream_ref_counts.clear()
-        self.widget_subscriptions.clear()
-        logging.info("All tasks stopped and resources cleared.")
+        # Clear all stream events first
+        with self.lock:
+            stream_keys = list(self.stream_events.keys())
+            logging.info(f"Clearing {len(stream_keys)} stream events.")
+            for key in stream_keys:
+                event = self.stream_events.pop(key, None)
+                if event:
+                    event.clear()
+            self.stream_ref_counts.clear()
+
+            # Clear factory references as well, assuming widgets are gone
+            factory_keys = list(self.candle_factories.keys())
+            logging.info(f"Cleaning up {len(factory_keys)} candle factories.")
+            for key in factory_keys:
+                 factory = self.candle_factories.pop(key, None)
+                 if factory:
+                     factory.cleanup()
+            self.factory_ref_counts.clear()
+            self.widget_subscriptions.clear() # Clear subscriptions
+
+        # Cancel all asyncio tasks
+        task_names = list(self.tasks.keys())
+        logging.info(f"Requesting cancellation for {len(task_names)} tasks.")
+        for name in task_names:
+            self.stop_task(name) # Uses the modified stop_task which just cancels
+            
+        # Give tasks a moment to process cancellation if needed
+        # This is a simple approach; more robust handling might involve `asyncio.gather`
+        # with return_exceptions=True on the task futures, but that adds complexity
+        # time.sleep(0.1) # Avoid blocking sleep if possible
+
+        logging.info("All tasks stop requested.")
 
     def is_task_running(self, task_id):
-        """
-        Checks if a task exists and is not done.
-        """
-        task = self.tasks.get(task_id)
-        return task is not None and not task.done()
+        """Check if a task with the given ID is currently running (not done)."""
+        task_future = self.tasks.get(task_id)
+        return task_future is not None and not task_future.done()
 
     def _on_task_complete(self, name, task_future):
         """
-        Callback executed when a task started via create_task (asyncio.create_task) finishes.
-        NOTE: This might need adjustment if tasks are primarily managed via run_coroutine_threadsafe.
-        Futures returned by run_coroutine_threadsafe might need different handling.
+        Callback function executed when an asyncio task completes.
+        Handles results, errors, and potentially task cleanup.
         """
-        # Ensure this callback is running in the context of the event loop thread
-        # If called from another thread, marshalling might be needed.
+        if name not in self.tasks or self.tasks[name] != task_future:
+            # Task might have been stopped and removed manually before completion
+            logging.info(f"Completion callback for task '{name}', but it's no longer tracked or replaced. Ignoring.")
+            return
 
-        # Remove the task from the dictionary regardless of outcome
-        # Use pop with default to avoid KeyError if already removed or stopped
-        self.tasks.pop(name, None)
+        # Remove the task from the active dictionary as it's now complete
+        # We keep the future object for inspection below
+        del self.tasks[name] 
 
         try:
-            # Check if the future raised an exception
-            exception = task_future.exception()
-            if exception:
-                # Log specific cancellation error differently
-                if isinstance(exception, asyncio.CancelledError):
-                     logging.info(f"Task '{name}' was cancelled successfully.")
-                else:
-                     logging.error(f"Task '{name}' completed with error: {exception}", exc_info=exception)
+            # Check if the task was cancelled
+            if task_future.cancelled():
+                logging.info(f"Task '{name}' completed: Cancelled.")
+                # Event should have been cleared by stop_task/unsubscribe
+                # Remove event just in case it wasn't cleaned up properly elsewhere
+                with self.lock:
+                    if name in self.stream_events:
+                        logging.warning(f"Task '{name}' cancelled, but stream event was still present. Cleaning up.")
+                        del self.stream_events[name]
             else:
-                # Task completed successfully
-                result = task_future.result() # Get result if needed (often None for streams)
-                logging.info(f"Task '{name}' completed successfully.") # Result: {result}") # Avoid logging large results
+                # If not cancelled, check for exceptions
+                exception = task_future.exception()
+                if exception:
+                    logging.error(f"Task '{name}' completed with error: {exception}", exc_info=exception)
+                    # Perform any error handling specific to the task type if needed
+                    # e.g., maybe try restarting the stream after a delay?
+                    # TODO: Implement specific error handling based on task name/type
+                else:
+                    # Task completed successfully
+                    result = task_future.result()
+                    logging.info(f"Task '{name}' completed successfully.")
+                    # Process result if necessary (though many background tasks might not return meaningful results)
+                    # logging.debug(f"Task '{name}' result: {result}")
 
-        except asyncio.InvalidStateError:
-             # This can happen if the future was cancelled and we check exception() too early
-             logging.warning(f"Task '{name}' completion checked in invalid state (likely cancelled).")
         except Exception as e:
-            # Catch any other unexpected errors during callback execution
-             logging.error(f"Error in _on_task_complete for task '{name}': {e}", exc_info=True)
+            # Catch any unexpected error during the callback itself
+            logging.error(f"Error in _on_task_complete for task '{name}': {e}", exc_info=True)
+        finally:
+            # Ensure event is removed if task finishes naturally (not cancelled) or errors out
+            with self.lock:
+                 if name in self.stream_events: 
+                    logging.warning(f"Task '{name}' finished (error/success), but stream event was still present. Cleaning up.")
+                    del self.stream_events[name]
 
     def cleanup(self):
         """
-        Clean up resources when the application is closing.
-        This method should be called when the application is shutting down.
+        Cleans up resources when the application is shutting down.
+        Stops all tasks and closes the event loop thread.
         """
-        # Stop all tasks
-        self.stop_all_tasks()
+        self.running = False # Signal processing loops to stop
         
-        # Set running to False to stop the data queue processing
-        self.running = False
+        # Stop the data processing queue loop
+        # await self.data_queue.join() # Wait for queue to empty (might block shutdown)
+        # TODO: Consider a timeout for joining the queue or just cancel the processor task
+
+        self.stop_all_tasks() # Ensure all tasks are stopped and events cleared
         
-        # Shutdown the executor
-        self.executor.shutdown(wait=True)
-        
-        # Stop the event loop
+        # Shutdown the thread pool executor
+        self.executor.shutdown(wait=False) # Don't wait indefinitely
+
         if self.loop and self.loop.is_running():
+            logging.info("Stopping event loop...")
+            # Use call_soon_threadsafe to stop the loop from the current thread
             self.loop.call_soon_threadsafe(self.loop.stop)
         
-        # Wait for the thread to finish
         if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=1.0)
-            
-        logging.info("TaskManager cleanup completed")
+            logging.info("Waiting for event loop thread to join...")
+            self.thread.join(timeout=2) # Wait for the thread to finish
+            if self.thread.is_alive():
+                logging.warning("Event loop thread did not join cleanly.")
+
+        logging.info("TaskManager cleanup complete.")
 
     def is_stream_running(self, stream_id: str) -> bool:
-        """Checks if a stream task is currently running."""
-        return self.is_task_running(stream_id)
+        """Checks if a stream task is running and its event is set."""
+        task_running = self.is_task_running(stream_id)
+        event_set = False
+        with self.lock:
+            event = self.stream_events.get(stream_id)
+            if event:
+                event_set = event.is_set()
+        return task_running and event_set

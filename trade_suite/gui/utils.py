@@ -147,7 +147,11 @@ def load_font():
         with dpg.font_registry():
             # Load font, adjust size for density (e.g., 13 or 14)
             # Make sure the path is correct relative to your execution directory
-            default_font = dpg.add_font("fonts/Roboto_Mono/static/RobotoMono-Regular.ttf", 14)
+            default_font = dpg.add_font("resources/fonts/Roboto_Mono/static/RobotoMono-Regular.ttf", 14)
+            # TODO: Loop through all fonts in the resources/fonts folder and add them to the font registry
+            # for font in os.listdir("resources/fonts"):
+            #     dpg.add_font(f"resources/fonts/{font}", 14)
+            
         # Set as default font
         dpg.bind_font(default_font)
         logging.info("Successfully loaded and bound font: RobotoMono-Regular.ttf")

@@ -50,7 +50,7 @@ def main():
         *icon_param,
         "--add-data", ".env.template;." if platform.system() == "Windows" else ".env.template:.",
         "--add-data", "config.json;." if platform.system() == "Windows" else "config.json:.",
-        "main.py"
+        "trade_suite/__main__.py"
     ]
     
     # Run PyInstaller

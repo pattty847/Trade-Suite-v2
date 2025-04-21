@@ -86,12 +86,16 @@ class Viewport:
         
         # Maximize viewport for better docking experience
         dpg.maximize_viewport()
+        # dpg.set_exit_callback
 
         logging.info("Setup complete. Launching DPG.")
 
         # Use manual render loop instead of dpg.start_dearpygui()
         # This allows us to process the signal queue on every frame
         try:
+            # If process_signal_queue() raises, you swallow it and the loop 
+            # continues with undefined state. Wrap each iteration in a try/except 
+            # or—better—make SignalEmitter fail‑safe.
             while dpg.is_dearpygui_running():
                 # Process the signal queue before rendering each frame
                 self.data.emitter.process_signal_queue()

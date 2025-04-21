@@ -14,23 +14,6 @@ This document outlines the necessary refactoring steps to fix the data flow arch
 *   **`CandleFactory` (`data/candle_factory.py`):** **One instance per unique `(exchange, symbol, timeframe)` combination**, managed by `TaskManager`. Subscribes to generic `NEW_TRADE` signals, filters by its `exchange`/`symbol`, processes trades directly against its internal candle state (DataFrame), and emits generic `UPDATED_CANDLES` signals tagged with its `exchange`/`symbol`/`timeframe`. Does **not** use an internal queue/batching for live trades.
 *   **`ChartProcessor` (`data/chart_processor.py`):** **To be removed or significantly repurposed.** Its role in live candle generation is superseded by `CandleFactory`. May have residual use for initial bulk history processing if complex logic is needed there, but aim to eliminate.
 
-### Notes: 
-
-Testing Strategy - Avoiding the "Start App & Wait" Grind:
-This is a super important point. We absolutely need a better way to test than just running the whole thing manually. Here are some strategies we should aim for as we implement:
-Unit Testing:
-CandleFactory: This is prime for unit tests. We can feed its _on_new_trade method (after refactoring) specific sequences of mock trade data (dicts) and assert that its internal candle DataFrame state is updated correctly (correct OHLCV values, correct timestamps, new bars created when expected). We don't need live data or signals for this.
-TaskManager (Subscription Logic): We can write tests to verify the reference counting. Mock out the actual start_task/stop_task/CandleFactory creation calls. Then, simulate subscribe and unsubscribe calls from mock widgets and assert that the reference counts (stream_ref_counts, factory_ref_counts) are correct and that the (mocked) start/stop/create/delete functions are called only when the counts transition between 0 and 1.
-Widget Filtering: Test the _on_* data handlers in widgets. Create a widget instance, manually call its handler (e.g., widget._on_updated_candles(...)) with various signal payloads (correct exchange/symbol/timeframe, incorrect ones), and assert that the widget's internal state (or a mock UI update function) is only affected when the filter conditions match.
-Mocking Dependencies:
-Data / CCXT: When testing TaskManager or CandleFactory, we don't need real CCXT streams. We can mock Data.watch_trades, Data.watch_orderbook, and Data.fetch_candles. For streams, the mock could yield pre-defined trade/orderbook data. For fetch_candles, it returns a sample DataFrame.
-SignalEmitter: We can use a real SignalEmitter instance in tests but control the signals being sent manually or via mocked components, allowing us to test the publish/subscribe flow between components without the full UI or network stack.
-DearPyGui (dpg): For unit/integration tests that don't need visual verification, mock out dpg calls within widgets to avoid errors about DPG context not being initialized or needing a running event loop.
-Integration Testing (Smaller Scale):
-Test the flow: Mock Widget -> TaskManager.subscribe -> TaskManager (starts mock stream/factory) -> Mock Stream (yields trade) -> TaskManager (emits NEW_TRADE) -> CandleFactory (_on_new_trade) -> CandleFactory (emits UPDATED_CANDLES) -> Mock Widget (_on_updated_candles). This verifies the core interaction paths using mocked streams/UI but real TaskManager, CandleFactory, and signal handlers.
-Fixtures / Recorded Data: Store sample trade sequences or candle DataFrames in files (e.g., JSON, CSV, Pickle) to use as consistent input for tests.
-Setting up a test framework (like pytest) and adopting these strategies early will save massive amounts of time and frustration compared to purely manual testing. We can build confidence in each refactored piece as we go.
-
 
 ## 1. Detailed Summary of Issues **[ADDRESSED by Refactor]**
 

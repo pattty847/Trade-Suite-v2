@@ -154,6 +154,11 @@ class CandleFactory:
         # Adjust timestamp to the candle boundary
         adjusted_timestamp = timestamp - (timestamp % self.timeframe_seconds)
 
+        # --- Debug Logging Start ---
+        log_prefix = f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) _process_trade:"
+        logging.debug(f"{log_prefix} Trade(ts={timestamp}, adj_ts={adjusted_timestamp}), LastCandle(ts={self.last_candle_timestamp}), TF(s)={self.timeframe_seconds}, OHLCV_Empty={self.ohlcv.empty}")
+        # --- Debug Logging End ---
+
         # Initialize last candle timestamp if not set
         if self.last_candle_timestamp is None and not self.ohlcv.empty:
             self.last_candle_timestamp = self.ohlcv["dates"].iloc[-1]
@@ -165,6 +170,7 @@ class CandleFactory:
         # Check if this trade belongs to a new candle
         # Use >= for safety, although > should be sufficient if timestamps are precise
         if adjusted_timestamp >= self.last_candle_timestamp + self.timeframe_seconds:
+            logging.debug(f"{log_prefix} Branch 1: New Candle") # Debug
             # Start a new candle
             logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) starting new candle at {datetime.fromtimestamp(self.last_candle_timestamp + self.timeframe_seconds)}")
             new_candle = {
@@ -182,6 +188,7 @@ class CandleFactory:
             return True # Candle data changed
 
         elif not self.ohlcv.empty and adjusted_timestamp == self.last_candle_timestamp:
+            logging.debug(f"{log_prefix} Branch 2: Update Current Candle") # Debug
             # Update the current (last) candle if the trade falls within its boundary
             logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) updating current candle.")
             last_idx = self.ohlcv.index[-1]
@@ -196,6 +203,7 @@ class CandleFactory:
             return True # Candle data changed
 
         elif self.ohlcv.empty:
+            logging.debug(f"{log_prefix} Branch 3: Initialize First Candle") # Debug
             # Initialize the first candle if ohlcv is empty
             logging.info(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initializing first candle.")
             new_candle = {
@@ -213,6 +221,7 @@ class CandleFactory:
             return True # Candle data changed
 
         else:
+             logging.debug(f"{log_prefix} Branch 4: Ignore Trade (Else condition)") # Debug
              # Trade might be older than the last candle or have other issues, ignore for now
              logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) ignoring trade timestamp {timestamp} relative to last candle {self.last_candle_timestamp}")
              return False
@@ -332,16 +341,37 @@ class CandleFactory:
             try:
                 df_copy = initial_candles_df.copy()
                 if 'dates' in df_copy.columns:
+                    # Log original dtype and max value for debugging
+                    logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initial 'dates' dtype: {df_copy['dates'].dtype}, max: {df_copy['dates'].max() if not df_copy.empty else 'N/A'}")
+
                     if not pd.api.types.is_numeric_dtype(df_copy['dates']):
                         if pd.api.types.is_datetime64_any_dtype(df_copy['dates']):
-                             df_copy['dates'] = df_copy['dates'].view(np.int64) // 10**9
+                             # Datetime64 is likely nanoseconds since epoch
+                             df_copy['dates'] = df_copy['dates'].astype(np.int64) // 1_000_000_000 # Convert ns to s
                         else:
-                             df_copy['dates'] = pd.to_datetime(df_copy['dates'], errors='coerce').view(np.int64) // 10**9
-                    # Handle potential milliseconds
-                    if df_copy['dates'].max() > time.time() * 2:
+                             # Attempt conversion from other formats (e.g., object strings)
+                             df_copy['dates'] = pd.to_datetime(df_copy['dates'], errors='coerce')
+                             # Check if conversion worked before converting to int
+                             if pd.api.types.is_datetime64_any_dtype(df_copy['dates']):
+                                 df_copy['dates'] = df_copy['dates'].astype(np.int64) // 1_000_000_000 # Convert ns to s
+                             else:
+                                 # Handle cases where pd.to_datetime failed (result is NaT or original)
+                                 # Try converting directly to numeric, assuming it might be ms/s in string/object form
+                                 df_copy['dates'] = pd.to_numeric(df_copy['dates'], errors='coerce')
+                                 # Now check if it needs ms -> s conversion (only if numeric)
+                                 # Use a simpler heuristic: > 2 billion likely means milliseconds
+                                 if pd.api.types.is_numeric_dtype(df_copy['dates']) and not df_copy['dates'].isna().all() and df_copy['dates'].max() > 2_000_000_000:
+                                     logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initial 'dates' converting potential ms to s after pd.to_numeric.")
+                                     df_copy['dates'] = df_copy['dates'] / 1000
+                    elif not df_copy['dates'].isna().all() and df_copy['dates'].max() > 2_000_000_000:
+                        # Already numeric, check if it's milliseconds
+                        logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initial 'dates' are numeric, converting potential ms to s.")
                         df_copy['dates'] = df_copy['dates'] / 1000
                     
-                    # Drop rows with invalid dates after conversion
+                    # Log after conversion attempts
+                    logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) 'dates' after conversion - dtype: {df_copy['dates'].dtype}, max: {df_copy['dates'].max() if not df_copy.empty and pd.api.types.is_numeric_dtype(df_copy['dates']) and not df_copy['dates'].isna().all() else 'N/A or Non-numeric'}")
+
+                    # Drop rows with invalid dates (NaT or NaN) after conversion
                     df_copy.dropna(subset=['dates'], inplace=True)
                 else:
                     logging.error(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initial data missing 'dates' column.")
@@ -349,8 +379,9 @@ class CandleFactory:
 
                 if not df_copy.empty:
                      self.ohlcv = df_copy.reset_index(drop=True) # Ensure clean index
-                     self.last_candle_timestamp = self.ohlcv["dates"].iloc[-1]
-                     logging.info(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initialized with {len(self.ohlcv)} historical candles. Last timestamp: {self.last_candle_timestamp}")
+                     # Ensure we take the last timestamp *after* potential ms -> s conversion
+                     self.last_candle_timestamp = self.ohlcv["dates"].iloc[-1] # This should now be in seconds
+                     logging.info(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initialized with {len(self.ohlcv)} historical candles. Last timestamp (seconds): {self.last_candle_timestamp}") # Adjusted log message
                 else:
                      logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) initial data was empty after date processing.")
 
@@ -358,3 +389,14 @@ class CandleFactory:
                 logging.error(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) failed to set initial data: {e}", exc_info=True)
         else:
              logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) received empty initial data.")
+             
+    def cleanup(self):
+        """Unregister listeners to prevent potential memory leaks."""
+        try:
+            logging.info(f"Cleaning up CandleFactory for {self.exchange}/{self.symbol}/{self.timeframe_str}")
+            # Unregister the specific listener method
+            self.emitter.unregister(Signals.NEW_TRADE, self._on_new_trade)
+            logging.debug(f"Unregistered NEW_TRADE listener for CandleFactory {self.exchange}/{self.symbol}/{self.timeframe_str}")
+        except Exception as e:
+            # Log if unregistering fails for some reason
+            logging.error(f"Error during CandleFactory cleanup for {self.exchange}/{self.symbol}/{self.timeframe_str}: {e}", exc_info=True)

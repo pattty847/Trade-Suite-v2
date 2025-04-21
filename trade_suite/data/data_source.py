@@ -27,11 +27,10 @@ class Data(CCXTInterface):
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
 
-        self.is_running = True
-
     async def watch_trades_list(
         self,
         symbols: List[str],
+        stop_event: asyncio.Event,
         track_stats: bool = False,
         write_trades: bool = False,
         write_stats: bool = False,
@@ -41,6 +40,7 @@ class Data(CCXTInterface):
 
         :param self: Represent the instance of the class
         :param symbols: List[str]: Specify which symbols to stream trades for
+        :param stop_event: asyncio.Event: Event to signal when to stop the stream.
         :param since: str: Get trades after a certain timestamp
         :param limit: int: Limit the number of trades returned
         :param params: Pass additional parameters to the exchange
@@ -54,7 +54,7 @@ class Data(CCXTInterface):
 
             logging.info(f"Starting trade stream for {symbols} on {exchange_id}")
             # TODO: Add a condition to streaming
-            while self.is_running:
+            while stop_event.is_set():
                 try:
                     # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
                     # returns whatever the latest tick was for whichever coin for the exchange.
@@ -78,13 +78,18 @@ class Data(CCXTInterface):
                     if write_stats and write_trades:
                         await self.influx.write_trades(exchange_id, trades)
                         await self.influx.write_stats(exchange_id, stats, symbol)
+                except asyncio.CancelledError:
+                    logging.info(f"Trade list stream for {symbols} on {exchange_id} cancelled.")
+                    break # Exit loop on cancellation
                 except Exception as e:
                     logging.error(e)
+            logging.info(f"Trade list stream for {symbols} on {exchange_id} stopped.")
 
     async def watch_trades(
         self,
         symbol: str,
         exchange: str,
+        stop_event: asyncio.Event,
         track_stats: bool = False,
         write_trades: bool = False,
         write_stats: bool = False,
@@ -97,6 +102,7 @@ class Data(CCXTInterface):
         :param self: Refer to the object itself
         :param symbol: str: Specify the symbol to watch trades for
         :param exchange: str: Identify which exchange the data is coming from
+        :param stop_event: asyncio.Event: Event to signal when to stop the stream.
         :param track_stats: bool: Determine whether or not we want to track statistics
         :param write_trades: bool: Write the trades to influxdb
         :param write_stats: bool: Write the statistics to a database
@@ -106,7 +112,7 @@ class Data(CCXTInterface):
         exchange_object = self.exchange_list[exchange]
         logging.info(f"Starting trade stream for {symbol} on {exchange}")
         # TODO: Add a condition to streaming
-        while self.is_running:
+        while stop_event.is_set():
             try:
                 # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
                 # returns whatever the latest tick was for whichever coin for the exchange.
@@ -125,25 +131,30 @@ class Data(CCXTInterface):
                     )
 
                 if track_stats:
-                    symbol, stats = self.agg.calc_trade_stats(exchange, trades)
+                    symbol_key, stats = self.agg.calc_trade_stats(exchange, trades)
                     # self.agg.report_statistics() # logging.info to console
                     self.emitter.emit(
-                        Signals.TRADE_STAT_UPDATE, symbol=symbol, stats=stats
+                        Signals.TRADE_STAT_UPDATE, symbol=symbol_key, stats=stats
                     )
 
                 if write_stats and write_trades:
                     await self.influx.write_trades(exchange, trades)
-                    await self.influx.write_stats(exchange, stats, symbol)
+                    await self.influx.write_stats(exchange, stats, symbol_key)
+            except asyncio.CancelledError:
+                logging.info(f"Trade stream for {symbol} on {exchange} cancelled.")
+                break # Exit loop on cancellation
             except Exception as e:
                 logging.error(e)
+        logging.info(f"Trade stream for {symbol} on {exchange} stopped.")
 
-    async def watch_orderbooks(self, symbols: List[str]):
+    async def watch_orderbooks(self, symbols: List[str], stop_event: asyncio.Event):
         """
         The watch_orderbooks function is a coroutine that takes in a list of symbols and returns an orderbook for each symbol on the exchange.
         The function will continue to run until it encounters an error, at which point it will log the error and restart itself.
 
         :param self: Make the function a method of the class
         :param symbols: List[str]: Specify which symbols you want to watch
+        :param stop_event: asyncio.Event: Event to signal when to stop the stream.
         :return: An orderbook, which is a dictionary with the following keys:
         :doc-author: Trelent
         """
@@ -152,7 +163,7 @@ class Data(CCXTInterface):
             exchange_object = self.exchange_list[exchange_id]
             logging.info(f"Starting orderbook stream for {symbols} on {exchange_id}")
             if exchange_object.has["watchOrderBookForSymbols"]:
-                while self.is_running:
+                while stop_event.is_set():
                     try:
                         orderbook = await exchange_object.watchOrderBookForSymbols(
                             symbols
@@ -166,10 +177,18 @@ class Data(CCXTInterface):
                         )
 
                         await asyncio.sleep(0.3)
+                    except asyncio.CancelledError:
+                        logging.info(f"Orderbook list stream for {symbols} on {exchange_id} cancelled.")
+                        break # Exit inner loop on cancellation
                     except Exception as e:
                         logging.error(e)
+                # If the outer loop should also stop on cancellation, check event here or re-raise
+                if not stop_event.is_set():
+                    logging.info(f"Orderbook list stream stopping for {exchange_id} due to event clear.")
+                    break # Exit outer loop if event is cleared
+            logging.info(f"Orderbook list stream for {symbols} on {exchange_id} stopped.")
 
-    async def watch_orderbook(self, exchange: str, symbol: str):
+    async def watch_orderbook(self, exchange: str, symbol: str, stop_event: asyncio.Event):
         """
         The watch_orderbook function is a coroutine that takes in the exchange and symbol as parameters.
         It then creates an exchange_object variable which is equal to the ccxt object of the given exchange.
@@ -181,6 +200,7 @@ class Data(CCXTInterface):
         :param self: Access the class attributes and methods
         :param exchange: str: Identify the exchange that we want to get the orderbook from
         :param symbol: str: Specify what symbol to watch
+        :param stop_event: asyncio.Event: Event to signal when to stop the stream.
         :return: A dictionary with the following keys:
         :doc-author: Trelent
         """
@@ -189,10 +209,10 @@ class Data(CCXTInterface):
         
         # Throttle orderbook signal emission
         last_emit_time = 0
-        throttle_interval = 0.5  # Emit max 5 times per second (500ms interval)
+        throttle_interval = 0.5  # Emit max 2 times per second (500ms interval)
         latest_orderbook = None # Store the most recent orderbook
         
-        while self.is_running:
+        while stop_event.is_set():
             try:
                 # logging.debug(f"Awaiting order book for {symbol}...") # Changed from INFO to DEBUG
                 orderbook = await exchange_object.watch_order_book(symbol)
@@ -225,6 +245,7 @@ class Data(CCXTInterface):
                 logging.error(f"Error in orderbook stream for {symbol} on {exchange}: {e}")
                 # Optional: Add a delay before retrying after an error
                 await asyncio.sleep(1)
+        logging.info(f"Orderbook stream for {symbol} on {exchange} stopped.")
 
     async def fetch_candles(
         self,
@@ -357,8 +378,6 @@ class Data(CCXTInterface):
 
         except (ccxt.NetworkError, ccxt.ExchangeError, Exception) as e:
             logging.error(f"{type(e).__name__} occurred: {e}")
-
-
 
     async def retry_fetch_ohlcv(self, exchange, symbol, timeframe, since):
         max_retries = 3

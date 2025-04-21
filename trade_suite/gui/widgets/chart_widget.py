@@ -117,10 +117,8 @@ class ChartWidget(DockableWidget):
             # TODO: Potentially make timeframes dynamic based on exchange capabilities
             for tf in ["1m", "5m", "15m", "1h", "4h", "1d"]:
                 # Use radio buttons for single selection feel
-                dpg.add_radio_button(
-                    items=[tf], # Hacky way to use radio for single item selection visual
+                dpg.add_menu_item(
                     label=tf,
-                    default_value=tf if tf == self.timeframe else "",
                     callback=lambda s, a, u: self._on_timeframe_change(u),
                     user_data=tf
                 )
@@ -199,7 +197,8 @@ class ChartWidget(DockableWidget):
                     self.candle_series_tag = dpg.add_candle_series(
                         dates=[], opens=[], closes=[], lows=[], highs=[],
                         label=self.symbol,
-                        time_unit=timeframe_to_dpg_time_unit(self.timeframe)
+                        time_unit=timeframe_to_dpg_time_unit(self.timeframe),
+                        weight=0.2
                     )
                     # Indicator series will be added here dynamically
             
@@ -217,7 +216,7 @@ class ChartWidget(DockableWidget):
                 # Y Axis (Volume)
                 with dpg.plot_axis(dpg.mvYAxis, label="Volume", tag=self.volume_y_axis_tag):
                     self.volume_series_tag = dpg.add_bar_series(
-                        x=[], y=[], weight=0.7, label="Volume"
+                        x=[], y=[], label="Volume",
                     )
     
     def build_status_bar(self) -> None:
@@ -266,8 +265,8 @@ class ChartWidget(DockableWidget):
                 return
 
             # Ensure timestamps are in seconds, converting from milliseconds if necessary
-            # Heuristic: Check if max timestamp is likely ms (e.g., > year 2065 in seconds)
-            if processed_data['dates'].max() > 3_000_000_000: 
+            # Use simpler heuristic: > 2 billion suggests milliseconds
+            if not processed_data['dates'].isna().all() and processed_data['dates'].max() > 2_000_000_000:
                  logging.debug(f"Chart {self.window_tag}: Detected potential millisecond timestamps, converting to seconds.")
                  processed_data['dates'] = processed_data['dates'] / 1000
             
@@ -318,6 +317,7 @@ class ChartWidget(DockableWidget):
                  highs=self.ohlcv["highs"].tolist() if not self.ohlcv.empty else [],
                  lows=self.ohlcv["lows"].tolist() if not self.ohlcv.empty else [],
                  closes=self.ohlcv["closes"].tolist() if not self.ohlcv.empty else [],
+                 time_unit=timeframe_to_dpg_time_unit(self.timeframe) # Add time_unit update
              )
         else:
             logging.warning(f"Candle series {self.candle_series_tag} not found for update.")
@@ -391,15 +391,28 @@ class ChartWidget(DockableWidget):
                  processed_candles = candles.copy()
                  if not pd.api.types.is_numeric_dtype(processed_candles['dates']):
                      if pd.api.types.is_datetime64_any_dtype(processed_candles['dates']):
-                          processed_candles['dates'] = processed_candles['dates'].view(np.int64) // 10**9
+                          # Convert nanoseconds to seconds
+                          processed_candles['dates'] = processed_candles['dates'].astype(np.int64) // 1_000_000_000
                      else:
-                          processed_candles['dates'] = pd.to_datetime(processed_candles['dates'], errors='coerce').view(np.int64) // 10**9
+                          # Try converting other types (e.g., object)
+                          processed_candles['dates'] = pd.to_datetime(processed_candles['dates'], errors='coerce')
+                          if pd.api.types.is_datetime64_any_dtype(processed_candles['dates']):
+                              processed_candles['dates'] = processed_candles['dates'].astype(np.int64) // 1_000_000_000
+                          else:
+                              # Fallback: try direct numeric conversion (might be ms/s)
+                              processed_candles['dates'] = pd.to_numeric(processed_candles['dates'], errors='coerce')
+                              # Check for potential ms using simpler heuristic
+                              if pd.api.types.is_numeric_dtype(processed_candles['dates']) and not processed_candles['dates'].isna().all() and processed_candles['dates'].max() > 2_000_000_000:
+                                   logging.debug(f"_on_updated_candles {self.window_tag}: converting potential ms to s.")
+                                   processed_candles['dates'] = processed_candles['dates'] / 1000
+                 elif not processed_candles['dates'].isna().all() and processed_candles['dates'].max() > 2_000_000_000:
+                     logging.debug(f"_on_updated_candles {self.window_tag}: numeric dates, converting potential ms to s.")
+                     processed_candles['dates'] = processed_candles['dates'] / 1000
+
                  if processed_candles['dates'].isnull().any():
                       logging.error(f"UPDATED_CANDLES for chart {self.window_tag} contained invalid dates after conversion.")
                       return
-                 # Handle potential milliseconds
-                 if processed_candles['dates'].max() > time.time() * 2: # Heuristic
-                      processed_candles['dates'] = processed_candles['dates'] / 1000
+
             except Exception as e:
                  logging.error(f"Failed to process dates in UPDATED_CANDLES for chart {self.window_tag}: {e}")
                  return
