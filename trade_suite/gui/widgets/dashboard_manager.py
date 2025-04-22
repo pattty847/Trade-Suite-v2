@@ -1,9 +1,12 @@
 import os
 import logging
-import json
+# Remove json import if no longer needed after full refactoring
+# import json
 from typing import Dict, Optional, List, Any, Type
 import dearpygui.dearpygui as dpg
 
+# Add ConfigManager import
+from trade_suite.config import ConfigManager
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.widgets.base_widget import DockableWidget
 from trade_suite.gui.widgets.chart_widget import ChartWidget
@@ -17,14 +20,15 @@ if TYPE_CHECKING:
     from trade_suite.gui.task_manager import TaskManager
     # Add type hint for SECDataFetcher if not already present or adjust import
     # from trade_suite.data.sec_data import SECDataFetcher # Example path, adjust as needed
+    from trade_suite.config import ConfigManager # Add type hint for ConfigManager
 
 class DashboardManager:
     """
-    Manages dockable widgets and layout persistence.
+    Manages dockable widgets and layout persistence using ConfigManager.
     
     This class handles:
     - Adding/removing widgets to the dashboard
-    - Saving/loading widget configurations (JSON) and DPG layout (INI)
+    - Saving/loading widget configurations and DPG layout via ConfigManager
     - Recreating widgets based on saved configurations
     - Managing widget visibility and state
     - Providing layout management tools
@@ -34,10 +38,9 @@ class DashboardManager:
         self,
         emitter: SignalEmitter,
         task_manager: 'TaskManager',
-        sec_fetcher: 'SECDataFetcher',
-        default_layout_file: str = "config/factory_layout.ini",
-        user_layout_file: str = "config/user_layout.ini",
-        user_widgets_file: str = "config/user_widgets.json",
+        sec_fetcher: 'SECDataFetcher', # Keep if needed by SECFilingViewer instantiation
+        config_manager: 'ConfigManager' # Add config_manager parameter
+        # Remove default_layout_file, user_layout_file, user_widgets_file parameters
     ):
         """
         Initialize the dashboard manager.
@@ -45,17 +48,15 @@ class DashboardManager:
         Args:
             emitter: Signal emitter for event communication
             task_manager: Task manager for subscriptions
-            sec_fetcher: SEC data fetcher instance
-            default_layout_file: Path to the default/factory DPG layout file
-            user_layout_file: Path to the user's custom DPG layout file
-            user_widgets_file: Path to the user's custom widget configuration file
+            sec_fetcher: SEC data fetcher instance (passed to relevant widgets)
+            config_manager: The application's configuration manager instance.
         """
         self.emitter = emitter
         self.task_manager = task_manager
-        self.sec_fetcher = sec_fetcher
-        self.default_layout = default_layout_file
-        self.user_layout = user_layout_file
-        self.user_widgets = user_widgets_file
+        self.sec_fetcher = sec_fetcher # Keep temporarily, might pass to common_args
+        self.config_manager = config_manager # Store config_manager
+        
+        # Remove self.default_layout, self.user_layout, self.user_widgets attributes
         
         # Widget registry maps instance_id to widget instance
         self.widgets: Dict[str, DockableWidget] = {}
@@ -71,9 +72,7 @@ class DashboardManager:
             # Add other widget types here
         }
         
-        # Create layout directories if they don't exist
-        # Ensure directory for widget file also exists
-        self._ensure_layout_directories([self.default_layout, self.user_layout, self.user_widgets])
+        # Remove call to self._ensure_layout_directories()
         
         # Register event handlers
         self._register_handlers()
@@ -81,41 +80,53 @@ class DashboardManager:
         # Track layout modification state
         self.layout_modified = False
     
-    def initialize_layout(self, reset: bool = False) -> None:
+    def initialize_layout(self, reset: bool = False) -> bool:
         """
-        Initialize the layout system.
-        1. Loads widget configurations from JSON (if available).
+        Initialize the layout system using ConfigManager.
+        1. Loads widget configurations via ConfigManager.
         2. Recreates widget instances and their DPG windows.
-        3. Applies the DPG layout (INI) to the recreated windows.
+        3. Applies the DPG layout (INI) via ConfigManager.
+        
+        Purpose: 
+            To recreate the widgets and their DPG window layout based 
+            on previously saved configuration files managed by `ConfigManager`. 
+            It aims to restore the user's workspace exactly as they left it.
 
         Args:
-            reset: If True, reset to the default layout (implies deleting user files).
+            reset: If True, delete user config/layout before loading.
+
+        Returns:
+            True if any widgets were successfully recreated, False otherwise.
         """
-        logging.info("Initializing layout...")
+        logging.info("Initializing layout using ConfigManager...")
+        widgets_recreated = False
+
         # --- Reset Handling ---
         if reset:
-            logging.info("Reset requested. Removing user layout and widget configuration files.")
-            if os.path.exists(self.user_layout):
-                os.remove(self.user_layout)
-            if os.path.exists(self.user_widgets):
-                os.remove(self.user_widgets)
+            logging.info("Reset requested. Deleting user layout and widget configuration.")
+            # Use ConfigManager to delete user files
+            self.config_manager.delete_user_layout()
+            self.config_manager.delete_user_widget_config()
+            # Note: Existing widgets might need explicit removal if reset is called mid-session
+            # This logic assumes initialize_layout is called early
 
-        # --- Load Widget Configurations ---
-        widget_data = self._load_widget_config()
+        # --- Load Widget Configurations from ConfigManager ---
+        widget_definitions = self.config_manager.load_widget_config()
 
         # --- Recreate Widgets ---
-        if widget_data:
-            logging.info(f"Recreating {len(widget_data)} widgets from loaded configuration...")
-            for config in widget_data:
-                instance_id = config.get("instance_id")
-                widget_type = config.get("widget_type")
-                widget_config = config.get("config", {})
+        if widget_definitions:
+            logging.info(f"Recreating {len(widget_definitions)} widgets from loaded configuration...")
+            for definition in widget_definitions:
+                instance_id = definition.get("instance_id")
+                widget_type = definition.get("widget_type")
+                config = definition.get("config", {})
 
                 if not instance_id or not widget_type:
-                    logging.warning(f"Skipping invalid widget data entry: {config}")
+                    logging.warning(f"Skipping invalid widget definition: {definition}")
                     continue
 
                 if widget_type in self.widget_classes:
+                    # Get the widget class from the registry so owe can create an instance during runtime
                     WidgetClass = self.widget_classes[widget_type]
                     try:
                         # Prepare common dependencies
@@ -124,21 +135,42 @@ class DashboardManager:
                             "task_manager": self.task_manager,
                             "instance_id": instance_id,
                         }
-                        
-                        # Add specific dependencies if needed
-                        if WidgetClass is SECFilingViewer:
-                            common_args["sec_fetcher"] = self.sec_fetcher
-                        
-                        # Instantiate the widget using its specific config and dependencies
-                        widget_instance = WidgetClass(
-                            **common_args,
-                            **widget_config # Pass specific config (e.g., exchange, symbol)
-                        )
 
-                        # Use the add_widget method (which calls widget.create() internally)
-                        # This keeps registry and creation logic consistent
-                        self.add_widget(instance_id, widget_instance, _loading_layout=True)
-                        logging.debug(f"Successfully recreated widget: {instance_id} (Type: {widget_type})")
+                        # Add specific dependencies ONLY if required by the widget type
+                        if WidgetClass is SECFilingViewer:
+                            # Ensure sec_fetcher is available in self
+                            # This is passed to the SECFilingViewer constructor
+                            if hasattr(self, 'sec_fetcher'):
+                                common_args["sec_fetcher"] = self.sec_fetcher
+                            else:
+                                logging.error(f"SECDataFetcher not available for SECFilingViewer {instance_id}. Skipping.")
+                                continue
+
+                        # Instantiate the widget
+                        widget_instance = WidgetClass(
+                            **common_args, 
+                            **config # Pass specific config (e.g., exchange, symbol)
+                        )
+                        
+                        # Add widget to registry and create DPG window
+                        # Pass _loading_layout=True to prevent marking layout as modified prematurely
+                        widget_window_tag = self.add_widget(instance_id, widget_instance, _loading_layout=True)
+                        if widget_window_tag:
+                           # --- BEGIN ADDED LOGGING ---
+                           try:
+                               if dpg.does_item_exist(widget_window_tag):
+                                   w_config = dpg.get_item_configuration(widget_window_tag)
+                                   w_state = dpg.get_item_state(widget_window_tag)
+                                   logging.info(f"  [POST-CREATE] Widget {instance_id} ({widget_window_tag}): Pos={w_config.get('pos')}, Size=({w_config.get('width')}, {w_config.get('height')}), Docked={w_state.get('docked')}")
+                               else:
+                                   logging.warning(f"  [POST-CREATE] Widget {instance_id} ({widget_window_tag}) DPG item does not exist after creation attempt.")
+                           except Exception as log_e:
+                               logging.error(f"  [POST-CREATE] Error logging state for {instance_id}: {log_e}")
+                           # --- END ADDED LOGGING ---
+                           widgets_recreated = True # Mark as True if at least one widget is added
+                           logging.debug(f"Successfully recreated widget: {instance_id} (Type: {widget_type})")
+                        else:
+                            logging.warning(f"Failed to add/create widget: {instance_id} (Type: {widget_type})")
 
                     except Exception as e:
                         logging.error(f"Error recreating widget {instance_id} (Type: {widget_type}): {e}", exc_info=True)
@@ -146,44 +178,65 @@ class DashboardManager:
                     logging.warning(f"Unknown widget type '{widget_type}' found in config. Skipping.")
             logging.info("Finished recreating widgets.")
         else:
-            logging.info("No previous widget configurations found or loaded. Starting fresh.")
-            # Optionally: Create a default set of widgets here if desired
+            logging.info("No widget definitions found or loaded via ConfigManager. Starting potentially empty.")
+            # If no widgets are loaded, the layout will be empty unless default widgets are added elsewhere
 
-        # --- Apply DPG Layout (INI) ---
-        ini_file_to_load = None
-        load_default_layout = False
-        if os.path.exists(self.user_layout):
-            ini_file_to_load = self.user_layout
-            logging.info(f"User DPG layout exists. Will apply: {ini_file_to_load}")
-        elif os.path.exists(self.default_layout):
-             # NOTE: We generally don't load the default INI, as it might not match
-             # the widgets created by a fresh start or a potentially different user_widgets.json.
-             # Default widgets should ideally be created programmatically if no user config exists.
-             # If you *really* want to load default INI, uncomment below:
-             # ini_file_to_load = self.default_layout
-             # load_default_layout = True
-             # logging.info(f"User DPG layout not found. Applying default layout: {ini_file_to_load}")
-             logging.info(f"User DPG layout not found. Using default DPG window placement.")
-        else:
-             logging.info("No existing DPG layout file found. Using default DPG window placement.")
+        # --- Apply DPG Layout (INI) via ConfigManager ---
+        # Get the path where DPG should save the layout (user layout path)
+        ini_save_path = self.config_manager.get_user_layout_ini_path()
 
-        # Configure DPG for docking and apply the INI file *after* windows are recreated
-        # The save target should always be the user layout file.
+        # Determine if the user layout INI file exists to load from
+        should_load_ini = os.path.exists(ini_save_path)
+
+        # Configure basic app settings and *save* path immediately
+        # This sets up docking and tells DPG where to save the layout on exit.
+        # It does NOT load the layout yet.
         try:
             dpg.configure_app(
                 docking=True,
                 docking_space=True,
-                init_file=self.user_layout, # Always set the SAVE target to user layout
-                load_init_file=ini_file_to_load is not None # Load only if a user file was found
+                init_file=ini_save_path # DPG saves here on exit
             )
-            if ini_file_to_load:
-                logging.info(f"Successfully applied DPG layout from {ini_file_to_load}")
-            else:
-                logging.info("DPG configured without loading an INI file.")
+            logging.info(f"DPG configured for docking. Save path: {ini_save_path}")
         except Exception as e:
-            logging.error(f"Error configuring app or applying DPG layout from {ini_file_to_load}: {e}")
+            logging.error(f"Error configuring DPG docking/save path: {e}")
+            # If this fails, loading probably won't work either, but we proceed cautiously
 
-        logging.info("Layout initialization finished.")
+        # --- Explicitly Apply/Load the DPG Layout (INI) ---
+        # This should happen AFTER all windows from the config have been recreated.
+        # Calling configure_app again with init_file seems to be the trigger DPG needs.
+        if should_load_ini:
+            logging.info(f"User DPG layout exists. Applying layout from: {ini_save_path}")
+            try:
+                # Re-apply configuration, focusing on the init_file to trigger layout load
+                # We keep docking settings as they were set just before.
+                # The key is calling this *after* windows are created.
+                dpg.configure_app(init_file=ini_save_path)
+                logging.info(f"DPG layout application triggered using init_file: {ini_save_path}")
+                # --- BEGIN ADDED LOGGING ---
+                logging.info("  [POST-INI APPLY] Checking widget states:")
+                for post_id, post_widget in self.widgets.items():
+                    try:
+                        post_tag = post_widget.window_tag # Assuming widget has window_tag attribute
+                        if dpg.does_item_exist(post_tag):
+                            post_config = dpg.get_item_configuration(post_tag)
+                            post_state = dpg.get_item_state(post_tag)
+                            logging.info(f"    Widget {post_id} ({post_tag}): Pos={post_config.get('pos')}, Size=({post_config.get('width')}, {post_config.get('height')}), Docked={post_state.get('docked')}")
+                        else:
+                            logging.warning(f"    Widget {post_id} ({post_tag}) DPG item does not exist after INI apply.")
+                    except Exception as log_e:
+                         logging.error(f"    Error logging state for {post_id}: {log_e}")
+                # --- END ADDED LOGGING ---
+            except Exception as e_load:
+                 logging.error(f"Error applying DPG layout via configure_app(init_file=...): {e_load}")
+        else:
+            logging.info(f"User DPG layout not found at {ini_save_path}. DPG will use default placement.")
+            # Even if not loading, configure_app was already called to set the save path.
+
+        # Reset layout modified flag after initialization
+        self.layout_modified = False
+        logging.info(f"Layout initialization finished. Widgets recreated: {widgets_recreated}")
+        return widgets_recreated # Return status
     
     def add_widget(self, widget_id: str, widget: DockableWidget, _loading_layout: bool = False) -> Optional[str]:
         """
@@ -275,130 +328,169 @@ class DashboardManager:
     
     def reset_to_default(self) -> None:
         """
-        Reset to the default layout state.
-
-        This now means:
-        1. Clearing current widgets.
-        2. Deleting user layout and widget files.
-        3. Re-initializing the layout (which will start fresh or create defaults).
-        4. Restarting the application might be necessary for a clean reset.
+        Resets the dashboard to the default state.
+        - Deletes user layout (INI) and widget configuration (JSON) using ConfigManager.
+        - Removes all current widgets.
+        - Re-initializes the layout (which will load defaults if user files are gone).
         """
-        logging.warning("Resetting layout to default. This will clear current widgets and delete user layout files.")
+        logging.info("Resetting dashboard to default state...")
 
-        # 1. Clear current widgets cleanly
-        # Create a list of keys to avoid modifying dict during iteration
-        widget_ids_to_remove = list(self.widgets.keys())
-        for widget_id in widget_ids_to_remove:
-            self.remove_widget(widget_id) # Use remove_widget for proper cleanup
+        # 1. Delete user layout and widget config using ConfigManager
+        try:
+            self.config_manager.delete_user_layout()
+            logging.info("User layout file deleted via ConfigManager.")
+        except Exception as e:
+            logging.error(f"Error deleting user layout file via ConfigManager: {e}", exc_info=True)
 
-        # 2. Delete user files
-        if os.path.exists(self.user_layout):
-            os.remove(self.user_layout)
-            logging.info(f"Removed user layout file: {self.user_layout}")
-        if os.path.exists(self.user_widgets):
-            os.remove(self.user_widgets)
-            logging.info(f"Removed user widget config file: {self.user_widgets}")
+        try:
+            self.config_manager.delete_user_widget_config()
+            logging.info("User widget configuration file deleted via ConfigManager.")
+        except Exception as e:
+            logging.error(f"Error deleting user widget config file via ConfigManager: {e}", exc_info=True)
 
-        # 3. Re-initialize (will now find no user files)
-        # NOTE: Depending on application structure, a full restart might be cleaner.
-        # For now, re-initializing attempts to rebuild the state.
-        # Clear the internal widget registry again just in case remove failed partially
-        self.widgets.clear()
-        self.initialize_layout() # Call initialize again, which will now start fresh
+        # 2. Remove all current widgets from the dashboard
+        # Iterate over a copy of keys since remove_widget modifies the dictionary
+        current_widget_ids = list(self.widgets.keys())
+        if not current_widget_ids:
+            logging.info("No widgets currently active to remove during reset.")
+        else:
+            logging.info(f"Removing {len(current_widget_ids)} current widgets...")
+            for widget_id in current_widget_ids:
+                self.remove_widget(widget_id) # This handles DPG cleanup and registry removal
+            logging.info("All current widgets removed.")
+            # Verify registry is empty after removal
+            if self.widgets:
+                 logging.warning(f"Widget registry not empty after attempting removal: {list(self.widgets.keys())}")
 
-        # 4. Inform user restart might be needed
-        logging.warning("Layout reset complete. A restart may be required for all changes to take effect cleanly.")
-        # Consider emitting a signal that the main app can catch to trigger a restart dialog?
-        # self.emitter.emit(Signals.REQUEST_RESTART, reason="Layout reset to default.")
+
+        # 3. Re-initialize the layout
+        # Since user files are deleted, this should ideally load the default state
+        # or start fresh, depending on ConfigManager's behavior and if defaults exist.
+        # The initialize_layout method now handles DPG setup.
+        logging.info("Re-initializing layout after reset...")
+        self.initialize_layout(reset=False) # Call without reset=True as we already deleted files
+        
+        # Maybe trigger a UI update or signal if needed
+        self.emitter.emit(Signals.LAYOUT_RESET_COMPLETE)
+        logging.info("Dashboard reset to default complete.")
     
     def save_as_default(self) -> None:
         """
-        Save current layout and widget config as the default. (Use with caution!)
-        """
-        logging.warning(f"Saving current state as FACTORY DEFAULT to {self.default_layout} and a corresponding default widget file. This overwrites the application default.")
-        # 1. Save DPG Layout as default
-        dpg.save_init_file(self.default_layout)
-        logging.info(f"Saved current DPG layout as default: {self.default_layout}")
+        Save the current layout and widget configurations as the new default/factory state
+        using the ConfigManager.
 
-        # 2. Save Widget Config as default (derive name)
-        default_widget_file = self.default_layout.replace(".ini", "_widgets.json") # Or choose a fixed name
-        widget_data = self._prepare_widget_config_data()
+        WARNING: This overwrites the application's default settings.
+        """
+        logging.warning("Saving current layout as the new default. This will overwrite factory settings.")
+        if not self.widgets:
+            logging.warning("Save as default called, but no widgets are present. Skipping.")
+            return
+            
+        # 1. Save DPG Layout (INI) as default using ConfigManager
         try:
-            with open(default_widget_file, 'w') as f:
-                json.dump(widget_data, f, indent=4)
-            logging.info(f"Saved current widget configurations as default: {default_widget_file}")
+            # Use ConfigManager to save DPG layout to the default path
+            self.config_manager.save_dpg_layout(is_default=True)
+            logging.info(f"Current DPG layout saved as default via ConfigManager.")
         except Exception as e:
-            logging.error(f"Error saving default widget data to {default_widget_file}: {e}")
-    
-    def trigger_save_layout(self) -> None:
-        """
-        Schedule the layout save operation for the next frame.
-        This ensures DPG has fully registered all window states before saving.
-        """
-        logging.info("Scheduling layout save for next frame")
-        dpg.set_frame_callback(self.save_layout)
+            logging.error(f"Failed to save DPG layout as default via ConfigManager: {e}", exc_info=True)
+            # Decide if we should continue saving widget config if layout save failed
 
-    def save_layout(self) -> None:
-        """
-        Save the current DPG layout (INI) and widget configurations (JSON).
-        """
-        # 1. Save DPG window states (position, size, docking, etc.) to INI
-        try:
-            dpg.save_init_file(self.user_layout)
-            logging.info(f"Successfully saved DPG layout to {self.user_layout}")
-        except Exception as e:
-            logging.error(f"Error saving DPG layout to {self.user_layout}: {e}")
-            # Decide if we should proceed with saving JSON if INI save fails
-            # For now, we'll continue
-
-        # 2. Save widget configurations to JSON
-        widget_data = self._prepare_widget_config_data()
-        try:
-            with open(self.user_widgets, 'w') as f:
-                json.dump(widget_data, f, indent=4)
-            logging.info(f"Successfully saved widget configurations to {self.user_widgets}")
-            self.layout_modified = False # Reset modified flag only on successful save
-        except Exception as e:
-            logging.error(f"Error saving widget data to {self.user_widgets}: {e}")
-
-        logging.info(f"Layout saving finished.")
-    
-    def _prepare_widget_config_data(self) -> List[Dict[str, Any]]:
-        """
-        Helper method to gather configuration data from all active widgets.
-        """
+        # 2. Prepare Widget Configuration Data (same logic as save_layout)
         widget_data = []
         for instance_id, widget in self.widgets.items():
             try:
-                widget_config = widget.get_config()
+                config = widget.get_config()
+                if config is None:
+                     logging.warning(f"Widget {instance_id} ({widget.widget_type}) returned None for get_config(). Skipping for default save.")
+                     continue
                 widget_data.append({
-                    "instance_id": instance_id, # Store the key used in the registry
-                    "widget_type": widget.widget_type, # Store the type string from the widget
-                    "config": widget_config # Store the specific config dict
+                    "instance_id": instance_id,
+                    "widget_type": widget.widget_type,
+                    "config": config,
                 })
             except Exception as e:
-                 logging.error(f"Failed to get config for widget {instance_id} (type {widget.widget_type}): {e}", exc_info=True)
-        return widget_data
-    
-    def _load_widget_config(self) -> List[Dict[str, Any]]:
-        """
-        Loads widget configurations from the user JSON file.
-        """
-        widget_data = []
-        if os.path.exists(self.user_widgets):
+                logging.error(f"Error getting config for widget {instance_id} ({widget.widget_type}) during save_as_default: {e}", exc_info=True)
+
+        # 3. Save Widget Configurations (JSON) as default using ConfigManager
+        if widget_data:
             try:
-                with open(self.user_widgets, 'r') as f:
-                    widget_data = json.load(f)
-                logging.info(f"Successfully loaded {len(widget_data)} widget configurations from {self.user_widgets}")
-            except json.JSONDecodeError as e:
-                logging.error(f"Error decoding JSON from widget config file {self.user_widgets}: {e}")
-                widget_data = [] # Reset on error
+                self.config_manager.save_widget_config(widget_data, is_default=True)
+                logging.info(f"Widget configurations for {len(widget_data)} widgets saved as default via ConfigManager.")
             except Exception as e:
-                logging.error(f"Error loading widget data from {self.user_widgets}: {e}", exc_info=True)
-                widget_data = [] # Reset on error
+                logging.error(f"Failed to save widget configurations as default via ConfigManager: {e}", exc_info=True)
         else:
-            logging.info(f"Widget configuration file {self.user_widgets} not found.")
-        return widget_data
+             logging.warning("No valid widget configurations obtained. Skipping default widget config save.")
+
+        # Reset modified flag (saving as default also clears modification state)
+        self.layout_modified = False
+        logging.info("Save as default process finished.")
+    
+    def save_layout(self) -> None:
+        """
+        Save the current DPG layout (INI) and widget configurations (JSON)
+        using the ConfigManager for user settings.
+        """
+        if not self.widgets:
+            logging.warning("Save layout called, but no widgets are present. Skipping.")
+            return
+
+        logging.info("Saving current layout and widget configurations...")
+
+        # --- BEGIN ADDED LOGGING ---
+        logging.info("  [PRE-SAVE] Checking widget states before calling save_dpg_layout:")
+        for pre_id, pre_widget in self.widgets.items():
+            try:
+                pre_tag = pre_widget.window_tag
+                if dpg.does_item_exist(pre_tag):
+                    pre_config = dpg.get_item_configuration(pre_tag)
+                    pre_state = dpg.get_item_state(pre_tag)
+                    logging.info(f"    Widget {pre_id} ({pre_tag}): Pos={pre_config.get('pos')}, Size=({pre_config.get('width')}, {pre_config.get('height')}), Docked={pre_state.get('docked')}")
+                else:
+                    logging.warning(f"    Widget {pre_id} ({pre_tag}) DPG item does not exist before INI save.")
+            except Exception as log_e:
+                logging.error(f"    Error logging state for {pre_id}: {log_e}")
+        # --- END ADDED LOGGING ---
+
+        # 1. Save DPG Layout (INI) using ConfigManager
+        try:
+            # Assuming save_dpg_layout internally calls dpg.save_init_file()
+            self.config_manager.save_dpg_layout(is_default=False)
+            logging.info(f"DPG layout save triggered via ConfigManager.") # Changed log msg slightly
+        except Exception as e:
+            logging.error(f"Failed to save DPG layout via ConfigManager: {e}", exc_info=True)
+            # Decide if we should continue saving widget config if layout save failed
+            # For now, we continue.
+
+        # 2. Prepare Widget Configuration Data
+        widget_data = []
+        for instance_id, widget in self.widgets.items():
+            try:
+                config = widget.get_config() # Use the widget's own method
+                if config is None:
+                     logging.warning(f"Widget {instance_id} ({widget.widget_type}) returned None for get_config(). Skipping.")
+                     continue # Skip widgets that don't provide config
+                widget_data.append({
+                    "instance_id": instance_id,
+                    "widget_type": widget.widget_type,
+                    "config": config,
+                })
+            except Exception as e:
+                logging.error(f"Error getting config for widget {instance_id} ({widget.widget_type}): {e}", exc_info=True)
+                # Optionally skip this widget or handle error differently
+
+        # 3. Save Widget Configurations (JSON) using ConfigManager
+        if widget_data:
+            try:
+                self.config_manager.save_widget_config(widget_data, is_default=False)
+                logging.info(f"Widget configurations for {len(widget_data)} widgets saved to user path via ConfigManager.")
+            except Exception as e:
+                logging.error(f"Failed to save widget configurations via ConfigManager: {e}", exc_info=True)
+        else:
+            logging.warning("No valid widget configurations obtained. Skipping widget config save.")
+
+        # Reset modified flag after saving
+        self.layout_modified = False
+        logging.info("Layout saving process finished.")
     
     def create_layout_tools(self) -> int:
         """
@@ -437,16 +529,6 @@ class DashboardManager:
             dpg.add_text(f"Active Widgets: {len(self.widgets)}", tag=f"{layout_tools_id}_widget_count")
             
         return layout_tools_id
-    
-    def _ensure_layout_directories(self, file_paths: List[str]) -> None:
-        """
-        Ensure directories for the given file paths exist.
-        """
-        for file_path in file_paths:
-            directory = os.path.dirname(file_path)
-            if directory and not os.path.exists(directory):
-                os.makedirs(directory, exist_ok=True)
-                logging.info(f"Created layout directory: {directory}")
     
     def _register_handlers(self) -> None:
         """

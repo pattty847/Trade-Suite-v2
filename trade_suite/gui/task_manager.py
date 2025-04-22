@@ -227,7 +227,7 @@ class TaskManager:
                     if self.factory_ref_counts[key] == 1:
                         # Create CandleFactory if it doesn't exist
                         if key not in self.candle_factories:
-                            logging.info(f"Creating new CandleFactory for key: {key}")
+                            logging.debug(f"Creating new CandleFactory for key: {key}")
                             # Ensure required arguments are passed
                             ccxt_exchange = self.data.exchange_list.get(exchange)
                             if not ccxt_exchange:

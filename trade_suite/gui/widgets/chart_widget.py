@@ -112,12 +112,11 @@ class ChartWidget(DockableWidget):
         }
     
     def get_config(self) -> Dict[str, Any]:
-        """Return the configuration needed to recreate the ChartWidget."""
+        """Returns the configuration needed to recreate this ChartWidget."""
         return {
             "exchange": self.exchange,
             "symbol": self.symbol,
             "timeframe": self.timeframe,
-            # Add any other relevant config parameters here (e.g., indicator settings)
         }
     
     def build_menu(self) -> None:

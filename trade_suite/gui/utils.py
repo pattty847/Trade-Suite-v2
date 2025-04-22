@@ -161,7 +161,7 @@ def load_font():
         
 
 def load_theme():
-        logging.info("Loading theme.")
+        logging.info("Loading theme...")
         # with dpg.theme() as global_theme:
         #     with dpg.theme_component(dpg.mvAll):
         #         dpg.add_theme_color(
@@ -254,8 +254,6 @@ def load_theme():
 
         # Bind the theme globally after creating it
         dpg.bind_theme(global_theme)
-        
-        logging.info("Done loading theme.")
 
 
 def searcher(searcher, result, search_list):

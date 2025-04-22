@@ -216,7 +216,7 @@ class LayoutManager:
             logging.info(f"  -> Applying DPG layout from {ini_path}...")
             try:
                 # Use configure_app which is safer than load_init_file during runtime setup
-                dpg.configure_app(init_file=ini_path)
+                dpg.configure_app(docking=True, docking_space=True, init_file=ini_path)
                 logging.info(f"  -> Successfully applied DPG layout from {ini_path}")
                 ini_applied = True
             except Exception as e:
@@ -271,11 +271,6 @@ def main():
     # --- DPG Setup (Viewport and main setup) ---
     logging.info("Setting up DPG viewport...")
     dpg.create_viewport(title='Dynamic Layout Test', width=1280, height=720)
-
-    # Enable docking
-    logging.info("Enabling Docking...")
-    dpg.configure_app(docking=True, docking_space=True)
-
     # setup_dearpygui must be called after creating the viewport and before showing it.
     dpg.setup_dearpygui()
     logging.info("DPG setup complete.")

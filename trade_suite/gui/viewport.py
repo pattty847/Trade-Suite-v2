@@ -19,6 +19,8 @@ class Viewport:
     def __init__(self, data: Data, config_manager: ConfigManager) -> None:
         self.data = data
         self.config_manager = config_manager
+        # Flag to track if widgets were loaded from config
+        self.widgets_loaded_from_config: bool = False 
 
         # Initialize components that TaskManager depends on
         self.sec_fetcher = SECDataFetcher()
@@ -26,15 +28,15 @@ class Viewport:
         # Pass dependencies to TaskManager
         self.task_manager = TaskManager(data=self.data, sec_fetcher=self.sec_fetcher)
         
+        # Instantiate DashboardManager, passing the config_manager instance
         self.dashboard_manager = DashboardManager(
             emitter=self.data.emitter,
             task_manager=self.task_manager,
             sec_fetcher=self.sec_fetcher,
-            default_layout_file="config/factory_layout.ini",
-            user_layout_file="config/user_layout.ini",
-            user_widgets_file="config/user_widgets.json"
+            config_manager=self.config_manager # Pass the instance here
+            # Remove old file path arguments
         )
-        self.program = DashboardProgram(    
+        self.dashboard_program = DashboardProgram(    
             parent=None,  # No parent window anymore as we're not using a primary window
             data=self.data,
             task_manager=self.task_manager,
@@ -64,9 +66,17 @@ class Viewport:
         load_font()
         load_theme()
 
-        # --- Initialize Dashboard Manager and Layout EARLY --- 
-        # This MUST happen after create_context and before create_viewport
-        self.dashboard_manager.initialize_layout() # Calls configure_app internally
+        # --- Setup DearPyGui context BEFORE initializing layout --- 
+        # This is crucial as DPG might need setup for layout loading to work correctly.
+        # Corresponds to the working test_custom_layout.py sequence.
+        self.create_viewport_and_menubar() # Create viewport and menubar first
+        dpg.setup_dearpygui()
+
+        # --- Initialize Dashboard Manager and Layout AFTER setup_dearpygui --- 
+        # This MUST happen after create_context and setup_dearpygui, and before show_viewport
+        logging.info("Initializing layout AFTER DPG setup...")
+        self.widgets_loaded_from_config = self.dashboard_manager.initialize_layout()
+        
         return self
 
     def start_program(self):
@@ -80,13 +90,40 @@ class Viewport:
         """
         logging.info("Setting up DearPyGUI loop, viewport, and primary window...")
 
-        # Initialize the program BEFORE creating viewport to ensure windows are created
-        # in the correct order for layout persistence
-        self.initialize_program()
+        # --- Initialize program ---
+        # Check if widgets were loaded from config during __enter__
+        if not self.widgets_loaded_from_config:
+            # If no widgets were loaded from config, initialize the default program layout
+            logging.info("No saved widgets loaded from configuration, initializing default program layout.")
+            self.dashboard_program.initialize()
+        else:
+            # Widgets were loaded, log how many
+            # We access self.dashboard_manager.widgets which was populated by initialize_layout
+            num_loaded = len(self.dashboard_manager.widgets) 
+            logging.info(f"Successfully loaded {num_loaded} widgets from configuration.")
+            # Ensure the exchange menu reflects any loaded exchanges if necessary,
+            # although DashboardProgram.initialize usually handles widget creation logic.
+            # If loaded widgets require specific exchange menu setup, add it here.
         
-        self.create_viewport_and_menubar()
+        # We no longer set a primary window - all windows are equal and dockable
+        # dpg.set_primary_window(self.primary_window_tag, True)
         
-        dpg.setup_dearpygui()
+        # Populate the Exchange menu with available exchanges
+        self.populate_exchange_menu()
+        
+        # Setup viewport resize handler
+        dpg.set_viewport_resize_callback(
+            lambda: self.data.emitter.emit(
+                Signals.VIEWPORT_RESIZED,
+                width=dpg.get_viewport_width(),
+                height=dpg.get_viewport_height(),
+            )
+        )
+        
+        # Viewport creation and DPG setup moved to __enter__
+        # self.create_viewport_and_menubar()
+        # dpg.setup_dearpygui()
+        
         dpg.show_viewport()
         
         # Maximize viewport for better docking experience
@@ -123,14 +160,14 @@ class Viewport:
                 dpg.add_menu_item(label="New Price Level", callback=lambda: self.data.emitter.emit(Signals.NEW_PRICE_LEVEL_REQUESTED))
                 dpg.add_menu_item(label="New SEC Filing Viewer", callback=lambda: self.data.emitter.emit(Signals.NEW_SEC_FILING_VIEWER_REQUESTED))
                 dpg.add_separator()
-                dpg.add_menu_item(label="Save Layout", callback=lambda: self.dashboard_manager.trigger_save_layout() if self.dashboard_manager else None)
+                dpg.add_menu_item(label="Save Layout", callback=lambda: self.dashboard_manager.save_layout() if self.dashboard_manager else None)
                 dpg.add_menu_item(label="Reset Layout", callback=lambda: self.dashboard_manager.reset_to_default() if self.dashboard_manager else None)
                 dpg.add_separator()
                 dpg.add_menu_item(label="Exit", callback=lambda: dpg.stop_dearpygui())
             
             with dpg.menu(label="View"):
                 dpg.add_menu_item(label="Layout Tools", callback=lambda: self.dashboard_manager.create_layout_tools() if self.dashboard_manager else None)
-                dpg.add_menu_item(label="Debug Tools", callback=lambda: self.program._create_debug_window() if self.program else None)
+                dpg.add_menu_item(label="Debug Tools", callback=lambda: self.dashboard_program._create_debug_window() if self.dashboard_program else None)
             
             # Placeholder for Exchange menu - will be populated after exchanges are loaded
             # Use a consistent tag for easier reference later
@@ -177,45 +214,6 @@ class Viewport:
             ),
         )
 
-    def initialize_program(self):
-        """
-        The initialize_program function is responsible for initializing the program classes and subclasses.
-            This function will initialize all UI components and register their callback.
-
-
-        :param self: Reference the class instance
-        :return: None
-        :doc-author: Trelent
-        """
-
-        # This will initialize all UI components and register their callback
-        logging.info(f"Setting up the program classes and subclasses.")
-            
-        # Create and initialize the program with the dashboard manager
-        # Ensure dashboard_manager was created in __enter__
-        if not self.dashboard_manager:
-            logging.error("DashboardManager was not initialized in __enter__!")
-            # Handle error appropriately - maybe raise an exception or stop
-            dpg.stop_dearpygui()
-            return
-
-        # Initialize program by creating widgets for each exchange
-        self.program.initialize()
-        
-        # We no longer set a primary window - all windows are equal and dockable
-        # dpg.set_primary_window(self.primary_window_tag, True)
-        
-        # Populate the Exchange menu with available exchanges
-        self.populate_exchange_menu()
-        
-        # Setup viewport resize handler
-        dpg.set_viewport_resize_callback(
-            lambda: self.data.emitter.emit(
-                Signals.VIEWPORT_RESIZED,
-                width=dpg.get_viewport_width(),
-                height=dpg.get_viewport_height(),
-            )
-        )
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """

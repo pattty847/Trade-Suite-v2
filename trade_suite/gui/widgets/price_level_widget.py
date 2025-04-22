@@ -93,12 +93,12 @@ class PriceLevelWidget(DockableWidget):
         }
 
     def get_config(self) -> Dict[str, Any]:
-        """Return the configuration needed to recreate the PriceLevelWidget."""
+        """Returns the configuration needed to recreate this PriceLevelWidget."""
         return {
             "exchange": self.exchange,
             "symbol": self.symbol,
             "max_depth": self.max_depth,
-            "default_tick_size": self.tick_size, # Save the *current* tick size
+            "default_tick_size": self.tick_size, # Use current tick_size with correct init param name
         }
 
     def build_content(self) -> None:

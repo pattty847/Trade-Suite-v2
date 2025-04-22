@@ -77,23 +77,13 @@ class DashboardProgram:
 
     def initialize(self):
         """Initialize the dashboard program."""
-        # Check if DashboardManager already loaded widgets from configuration
-        if self.dashboard_manager.widgets:
-            logging.info("Widgets loaded from existing configuration. Skipping default widget creation.")
-            # Optionally, you might still want to ensure widgets exist for the default exchange
-            # or perform other checks/updates on the loaded widgets here.
-            return # Stop here, widgets are already loaded
-
-        # If no widgets were loaded, create a default set for the default exchange
-        logging.info(f"No existing widget configuration found. Creating default widgets for exchange: {self.default_exchange}")
-        if self.default_exchange in self.data.exchange_list:
-            self._create_widgets_for_exchange(self.default_exchange)
-        elif self.data.exchange_list: # If default isn't available, pick the first one
-            first_exchange = next(iter(self.data.exchange_list)) # Get the first key
-            logging.warning(f"Default exchange '{self.default_exchange}' not found. Creating widgets for first available exchange: {first_exchange}")
-            self._create_widgets_for_exchange(first_exchange)
+        # Create widgets for each exchange
+        if self.data.exchange_list:
+            for exchange_id in self.data.exchange_list:
+                self._create_widgets_for_exchange(exchange_id)
         else:
-            logging.warning("No exchanges loaded, cannot create default widgets.")
+            logging.warning("No exchanges found in the data source.")
+
 
     def _on_create_exchange(self, exchange):
         """Handle creating a new exchange tab."""

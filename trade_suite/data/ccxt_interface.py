@@ -32,9 +32,9 @@ class CCXTInterface:
 
         try:
             if credentials:
-                logging.info(f"Initializing {exchange_id} with credentials.")
+                logging.debug(f"Initializing {exchange_id} with credentials.")
             else:
-                logging.info(f"Initializing {exchange_id} without credentials for public data access.")
+                logging.debug(f"Initializing {exchange_id} without credentials for public data access.")
                 
             exchange_class: ccxt.Exchange = getattr(ccxtpro, exchange_id)(credentials)
 
@@ -108,7 +108,7 @@ class CCXTInterface:
         
         # Don't log the actual credentials for security reasons
         if api_key and secret and api_key != "your_coinbase_api_key_here" and secret != "your_coinbase_secret_here":
-            logging.info(f"Credentials found for {exchange_id}")
+            logging.debug(f"Credentials found for {exchange_id}")
             return {"apiKey": api_key, "secret": secret}
         
         logging.info(f"No valid credentials found for {exchange_id}, initializing without authentication")

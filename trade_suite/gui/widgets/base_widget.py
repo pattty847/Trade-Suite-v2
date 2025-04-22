@@ -157,14 +157,11 @@ class DockableWidget(ABC):
     def get_requirements(self) -> Dict[str, Any]:
         """Define the data requirements for this widget. Must be implemented by derived classes."""
         raise NotImplementedError("Subclasses must implement get_requirements()")
-    
+
     @abstractmethod
     def get_config(self) -> Dict[str, Any]:
-        """Return a dictionary containing the necessary configuration 
-        to recreate this widget instance. 
-        
-        Should include parameters like exchange, symbol, timeframe, etc.,
-        but NOT the instance_id or widget_type as those are handled by the manager.
+        """Returns a dictionary containing the necessary configuration
+        to recreate this specific widget instance.
         """
         raise NotImplementedError("Subclasses must implement get_config()")
     

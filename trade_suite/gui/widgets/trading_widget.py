@@ -85,7 +85,7 @@ class TradingWidget(DockableWidget):
         }
     
     def get_config(self) -> Dict[str, Any]:
-        """Return the configuration needed to recreate the TradingWidget."""
+        """Returns the configuration needed to recreate this TradingWidget."""
         return {
             "exchange": self.exchange,
             "symbol": self.symbol,
