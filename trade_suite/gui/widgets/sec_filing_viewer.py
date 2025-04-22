@@ -66,6 +66,7 @@ class SECFilingViewer(DockableWidget):
         super().__init__(
             title="SEC Filing Viewer",
             widget_type=self.WIDGET_TYPE,
+            task_manager=task_manager,
             emitter=emitter,
             instance_id=instance_id,
             width=600,
@@ -909,7 +910,19 @@ class SECFilingViewer(DockableWidget):
         # Auto-adjust height based on content? DPG might not support this easily for modals.
         # dpg.configure_item(content_area_id, height=dpg.get_text_size(content, wrap_width=width-20)[1] + 40)
         # dpg.configure_item(modal_id, height=dpg.get_item_height(content_area_id) + 60)
+    
+    def get_requirements(self) -> Dict[str, Any]:
+        """Define the data requirements for the SECFilingViewer."""
+        return {}
 
+    def get_config(self) -> Dict[str, Any]:
+        """Return the configuration needed to recreate the SECFilingViewer.
+
+        This widget currently doesn't have specific persistent configuration beyond
+        its type and instance ID, which are handled by the DashboardManager.
+        """
+        return {}
+        
 # Example Integration (in Viewport or DashboardManager):
 # from trade_suite.gui.widgets.sec_filing_viewer import SECFilingViewer
 #

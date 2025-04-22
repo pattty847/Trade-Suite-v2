@@ -348,18 +348,3 @@ class SECDataFetcher:
         else:
              logging.warning("HttpClient not initialized, cannot close session.")
         # Close other resources if needed
-
-    # --- REMOVED PLACEHOLDER/DEPRECATED METHODS ---
-    # Removed: _get_session, _make_request, _test_api_access (in HttpClient)
-    # Removed: _ensure_directories, _load_*_cache, _save_*_cache (in CacheManager)
-    # Removed: download_form_document, fetch_filing_document, etc. (in DocumentHandler)
-    # Removed: parse_form4_xml, process_form4_filing (in Form4Processor)
-    # Removed: _get_latest_fact_value, _calculate_ratios (in FinancialProcessor)
-    # Removed: fetch_form_direct (Deprecated)
-    # Removed: process_insider_filings (Deprecated - use analyze_insider_transactions)
-    # Removed: summarize_insider_activity (Deprecated - use analyze_insider_transactions)
-    # Removed: generate_insider_report (Deprecated)
-
-# Ensure pandas is only imported where needed (Form4Processor)
-# Ensure ET is only imported where needed (Form4Processor placeholder)
-# Ensure glob is only imported where needed (CacheManager)

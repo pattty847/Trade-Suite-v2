@@ -1,0 +1,34 @@
+[
+    {
+        "instance_id": "338d20590b304e54ad51a0dc076c6e77",
+        "widget_type": "SimpleWidget",
+        "config": {
+            "label": "Widget 1",
+            "value": "Default 1"
+        }
+    },
+    {
+        "instance_id": "9e8d00c7a7bd49159a43b1330060b230",
+        "widget_type": "SimpleWidget",
+        "config": {
+            "label": "Widget 2",
+            "value": "Default 2"
+        }
+    },
+    {
+        "instance_id": "62ee563709cf4c32911de43ee8af53b9",
+        "widget_type": "SimpleWidget",
+        "config": {
+            "label": "Widget 3",
+            "value": "Default 3"
+        }
+    },
+    {
+        "instance_id": "37ace92508f7450cb9aafe65b36fa6b4",
+        "widget_type": "SimpleWidget",
+        "config": {
+            "label": "Widget 4",
+            "value": "Default 4"
+        }
+    }
+]

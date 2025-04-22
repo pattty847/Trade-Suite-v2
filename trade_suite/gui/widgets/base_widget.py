@@ -64,7 +64,7 @@ class DockableWidget(ABC):
         self.status_bar_tag = f"{self.window_tag}_status"
         
     def create(self, parent: Optional[int] = None) -> str: # Return type is string tag
-        """Create the dockable widget window.
+        """Create the dockable widget window. 
         
         Args:
             parent: Optional parent container
@@ -80,7 +80,9 @@ class DockableWidget(ABC):
             else:
                 logging.warning(f"Widget {self.title} (tag: {self.window_tag}) marked as created but DPG item doesn't exist. Recreating.")
                 self.is_created = False # Force recreation
-            
+        
+        # --- Create the window ---
+        # DearPyGUI window kwargs
         window_kwargs = {
             "label": self.title, # User-friendly label
             "tag": self.window_tag,   # Stable, predictable string tag
@@ -155,6 +157,16 @@ class DockableWidget(ABC):
     def get_requirements(self) -> Dict[str, Any]:
         """Define the data requirements for this widget. Must be implemented by derived classes."""
         raise NotImplementedError("Subclasses must implement get_requirements()")
+    
+    @abstractmethod
+    def get_config(self) -> Dict[str, Any]:
+        """Return a dictionary containing the necessary configuration 
+        to recreate this widget instance. 
+        
+        Should include parameters like exchange, symbol, timeframe, etc.,
+        but NOT the instance_id or widget_type as those are handled by the manager.
+        """
+        raise NotImplementedError("Subclasses must implement get_config()")
     
     def build_menu(self) -> None:
         """Build the widget's menu bar. Optional for derived classes."""

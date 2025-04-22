@@ -84,6 +84,13 @@ class TradingWidget(DockableWidget):
             # No timeframe needed
         }
     
+    def get_config(self) -> Dict[str, Any]:
+        """Return the configuration needed to recreate the TradingWidget."""
+        return {
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+        }
+    
     def build_menu(self) -> None:
         """Build the trading widget's menu bar."""
         with dpg.menu(label="Order Types"):

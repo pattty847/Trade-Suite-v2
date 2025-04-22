@@ -9,7 +9,7 @@ class ConfigManager:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(ConfigManager, cls).__new__(cls)
-            cls._config_file = "config.json"
+            cls._config_file = "config/config.json"
             cls._default_config = {"default_exchange": "coinbase"}
             cls._config = cls.load_config()
         return cls._instance

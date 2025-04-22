@@ -20,12 +20,19 @@ class Viewport:
         self.data = data
         self.config_manager = config_manager
 
-        self.task_manager = TaskManager(self.data)
+        # Initialize components that TaskManager depends on
         self.sec_fetcher = SECDataFetcher()
+
+        # Pass dependencies to TaskManager
+        self.task_manager = TaskManager(data=self.data, sec_fetcher=self.sec_fetcher)
+        
         self.dashboard_manager = DashboardManager(
             emitter=self.data.emitter,
+            task_manager=self.task_manager,
+            sec_fetcher=self.sec_fetcher,
             default_layout_file="config/factory_layout.ini",
             user_layout_file="config/user_layout.ini",
+            user_widgets_file="config/user_widgets.json"
         )
         self.program = DashboardProgram(    
             parent=None,  # No parent window anymore as we're not using a primary window
@@ -77,9 +84,7 @@ class Viewport:
         # in the correct order for layout persistence
         self.initialize_program()
         
-        dpg.create_viewport(title="Trading Suite v2", width=1200, height=720)
-        
-        self.create_viewport_menu_bar()
+        self.create_viewport_and_menubar()
         
         dpg.setup_dearpygui()
         dpg.show_viewport()
@@ -90,6 +95,7 @@ class Viewport:
 
         logging.info("Setup complete. Launching DPG.")
 
+        # --- Start the DearPyGUI loop ---
         # Use manual render loop instead of dpg.start_dearpygui()
         # This allows us to process the signal queue on every frame
         try:
@@ -105,7 +111,8 @@ class Viewport:
         except Exception as e:
             logging.error(f"Error in main render loop: {e}", exc_info=True)
 
-    def create_viewport_menu_bar(self):
+    def create_viewport_and_menubar(self):
+        dpg.create_viewport(title="Trading Suite v2", width=1200, height=720)
         """Create the viewport menu bar."""
         # Add viewport menu bar (attached to viewport, not to any window)
         with dpg.viewport_menu_bar():
@@ -116,7 +123,7 @@ class Viewport:
                 dpg.add_menu_item(label="New Price Level", callback=lambda: self.data.emitter.emit(Signals.NEW_PRICE_LEVEL_REQUESTED))
                 dpg.add_menu_item(label="New SEC Filing Viewer", callback=lambda: self.data.emitter.emit(Signals.NEW_SEC_FILING_VIEWER_REQUESTED))
                 dpg.add_separator()
-                dpg.add_menu_item(label="Save Layout", callback=lambda: self.dashboard_manager.save_layout() if self.dashboard_manager else None)
+                dpg.add_menu_item(label="Save Layout", callback=lambda: self.dashboard_manager.trigger_save_layout() if self.dashboard_manager else None)
                 dpg.add_menu_item(label="Reset Layout", callback=lambda: self.dashboard_manager.reset_to_default() if self.dashboard_manager else None)
                 dpg.add_separator()
                 dpg.add_menu_item(label="Exit", callback=lambda: dpg.stop_dearpygui())
@@ -192,6 +199,7 @@ class Viewport:
             dpg.stop_dearpygui()
             return
 
+        # Initialize program by creating widgets for each exchange
         self.program.initialize()
         
         # We no longer set a primary window - all windows are equal and dockable
@@ -225,9 +233,8 @@ class Viewport:
         :doc-author: Trelent
         """
         logging.info("Shutting down...")
-        # Cleanup resources
+        # Cleanup resources (TaskManager now handles sec_fetcher.close)
         self.task_manager.cleanup()
-        self.sec_fetcher.close()
         dpg.destroy_context()
 
         if exc_type:

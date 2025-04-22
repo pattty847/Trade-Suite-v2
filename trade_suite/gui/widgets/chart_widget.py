@@ -111,23 +111,35 @@ class ChartWidget(DockableWidget):
             "timeframe": self.timeframe,
         }
     
+    def get_config(self) -> Dict[str, Any]:
+        """Return the configuration needed to recreate the ChartWidget."""
+        return {
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+            "timeframe": self.timeframe,
+            # Add any other relevant config parameters here (e.g., indicator settings)
+        }
+    
     def build_menu(self) -> None:
         """Build the chart widget's menu bar."""
-        with dpg.menu(label="Timeframes"):
-            # TODO: Potentially make timeframes dynamic based on exchange capabilities
-            for tf in ["1m", "5m", "15m", "1h", "4h", "1d"]:
-                # Use radio buttons for single selection feel
-                dpg.add_menu_item(
-                    label=tf,
-                    callback=lambda s, a, u: self._on_timeframe_change(u),
-                    user_data=tf
-                )
-        
         # Add Symbol Change UI
         with dpg.menu(label="Symbol"):
-            dpg.add_input_text(tag=self.symbol_input_tag, default_value=self.symbol, width=120)
-            dpg.add_button(label="Change Symbol", callback=self._on_symbol_change)
-            # TODO: Add validation or dropdown based on available symbols?
+            dpg.add_listbox(
+                items=list(self.task_manager.data.exchange_list[self.exchange].symbols),
+                callback=self._on_symbol_change,
+                width=120,
+                num_items=10
+            )
+
+        # Add Timeframe Change UI
+        with dpg.menu(label="Timeframes"):
+            # TODO: Potentially make timeframes dynamic based on exchange capabilities
+            dpg.add_listbox(
+                items=list(self.task_manager.data.exchange_list[self.exchange].timeframes),
+                callback=self._on_timeframe_change,
+                width=120,
+                num_items=10
+            )
         
         with dpg.menu(label="View"):
             dpg.add_menu_item(

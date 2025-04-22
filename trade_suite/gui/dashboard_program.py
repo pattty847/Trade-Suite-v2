@@ -77,13 +77,23 @@ class DashboardProgram:
 
     def initialize(self):
         """Initialize the dashboard program."""
-        # Create widgets for each exchange
-        if self.data.exchange_list:
-            for exchange_id in self.data.exchange_list:
-                self._create_widgets_for_exchange(exchange_id)
-        else:
-            logging.warning("No exchanges found in the data source.")
+        # Check if DashboardManager already loaded widgets from configuration
+        if self.dashboard_manager.widgets:
+            logging.info("Widgets loaded from existing configuration. Skipping default widget creation.")
+            # Optionally, you might still want to ensure widgets exist for the default exchange
+            # or perform other checks/updates on the loaded widgets here.
+            return # Stop here, widgets are already loaded
 
+        # If no widgets were loaded, create a default set for the default exchange
+        logging.info(f"No existing widget configuration found. Creating default widgets for exchange: {self.default_exchange}")
+        if self.default_exchange in self.data.exchange_list:
+            self._create_widgets_for_exchange(self.default_exchange)
+        elif self.data.exchange_list: # If default isn't available, pick the first one
+            first_exchange = next(iter(self.data.exchange_list)) # Get the first key
+            logging.warning(f"Default exchange '{self.default_exchange}' not found. Creating widgets for first available exchange: {first_exchange}")
+            self._create_widgets_for_exchange(first_exchange)
+        else:
+            logging.warning("No exchanges loaded, cannot create default widgets.")
 
     def _on_create_exchange(self, exchange):
         """Handle creating a new exchange tab."""
@@ -139,6 +149,23 @@ class DashboardProgram:
         )
         self.dashboard_manager.add_widget(f"{exchange}_trading", trading_widget)
         
+        price_level_widget = PriceLevelWidget(
+            emitter=self.emitter,
+            task_manager=self.task_manager,
+            exchange=exchange,
+            symbol=default_symbol,
+        )
+        self.dashboard_manager.add_widget(f"{exchange}_price_level", price_level_widget)
+        
+        # sec_viewer = SECFilingViewer(
+        #     emitter=self.emitter,
+        #     task_manager=self.task_manager,
+        #     instance_id=f"sec_viewer_{self._sec_viewer_count}",
+        #     sec_fetcher=self.sec_fetcher,
+        #     show=True
+        # )
+        # self.dashboard_manager.add_widget(f"sec_viewer_{self._sec_viewer_count}", sec_viewer)
+        
         # Store references to widgets
         # TODO: Figure out how to have these widget subscribe to data directly from the data source
         # TODO: Figure out how to handle duplicate widgets listening to the same data
@@ -147,10 +174,16 @@ class DashboardProgram:
         #     "orderbook": {"subscriptions": ["BTC/USD", "BTC/USDT"]},
         #     "trading": {"subscriptions": ["BTC/USD", "BTC/USDT"]}
         # }
+        """
+        Retrieve the pre-existing hidden widget instance from DashboardManager using its 
+        known hidden ID (e.g., widget = self.dashboard_manager.get_widget("sec_viewer_hidden_0"))
+        """
         self.widgets[exchange] = {
             'chart': chart_widget,
             'orderbook': orderbook_widget,
             'trading': trading_widget,
+            # 'sec_viewer': sec_viewer,
+            'price_level': price_level_widget
         }
         
         # Data streams are now automatically started via widget subscription (task_manager.subscribe)

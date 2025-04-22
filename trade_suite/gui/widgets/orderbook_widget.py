@@ -91,6 +91,14 @@ class OrderbookWidget(DockableWidget):
             # No timeframe needed for orderbook
         }
     
+    def get_config(self) -> Dict[str, Any]:
+        """Return the configuration needed to recreate the OrderbookWidget."""
+        return {
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+            # Add other relevant config like aggregation settings if needed
+        }
+    
     def build_menu(self) -> None:
         """Build the order book widget's menu bar."""
         with dpg.menu(label="Aggregate"):

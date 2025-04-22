@@ -13,11 +13,13 @@ from trade_suite.data.data_source import Data
 from trade_suite.gui.signals import Signals
 from trade_suite.gui.utils import calculate_since, create_loading_modal, create_timed_popup
 from trade_suite.data.candle_factory import CandleFactory
+from trade_suite.data.sec_api import SECDataFetcher
 
 
 class TaskManager:
-    def __init__(self, data: Data):
+    def __init__(self, data: Data, sec_fetcher: SECDataFetcher):
         self.data = data
+        self.sec_fetcher = sec_fetcher
         self.tasks: Dict[str, asyncio.Task] = {}
         self.visible_tab = None
         self.loop: asyncio.AbstractEventLoop = None
@@ -284,9 +286,8 @@ class TaskManager:
             # After potentially creating a new CandleFactory, fetch initial candles
             if needs_initial_candles and initial_candle_details:
                 # Run fetching in the background, do not block subscription
-                asyncio.run_coroutine_threadsafe(
+                self.run_task_until_complete(
                     self._fetch_initial_candles_for_factory(**initial_candle_details),
-                    self.loop
                 )
 
     def unsubscribe(self, widget):
@@ -581,7 +582,7 @@ class TaskManager:
     def cleanup(self):
         """
         Cleans up resources when the application is shutting down.
-        Stops all tasks and closes the event loop thread.
+        Stops all tasks, closes async resources, and closes the event loop thread.
         """
         self.running = False # Signal processing loops to stop
         
@@ -591,6 +592,22 @@ class TaskManager:
 
         self.stop_all_tasks() # Ensure all tasks are stopped and events cleared
         
+        # --- Close async resources BEFORE stopping the loop --- 
+        if self.loop and self.loop.is_running() and self.sec_fetcher:
+            try:
+                logging.info("Closing SECDataFetcher resources...")
+                close_coro = self.sec_fetcher.close()
+                future = asyncio.run_coroutine_threadsafe(close_coro, self.loop)
+                # Wait for the close operation to complete, with a timeout
+                future.result(timeout=5) 
+                logging.info("SECDataFetcher resources closed.")
+            except asyncio.TimeoutError:
+                logging.error("Timeout waiting for SECDataFetcher to close.")
+            except Exception as e:
+                logging.error(f"Error closing SECDataFetcher: {e}", exc_info=True)
+        # Add other async resource cleanup here if needed
+        # --- End async resource cleanup ---
+
         # Shutdown the thread pool executor
         self.executor.shutdown(wait=False) # Don't wait indefinitely
 
