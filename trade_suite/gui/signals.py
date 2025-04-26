@@ -7,19 +7,20 @@ import dearpygui.dearpygui as dpg
 
 
 class Signals(Enum):
-    CREATE_EXCHANGE_TAB = auto()
-    CREATE_TAB = auto()
-    NEW_CANDLES = auto()
-    NEW_CHART_REQUESTED = auto()
-    NEW_ORDERBOOK_REQUESTED = auto()
-    NEW_TRADING_PANEL_REQUESTED = auto()
-    NEW_PRICE_LEVEL_REQUESTED = auto()
-    NEW_TRADE = auto()
-    ORDER_BOOK_UPDATE = auto()
-    ORDERBOOK_VISIBILITY_CHANGED = auto()
-    SYMBOL_CHANGED = auto()
-    TIMEFRAME_CHANGED = auto()
-    TRADE_STAT_UPDATE = auto()
+    # TODO: Make sure these payloads below are correct 
+    CREATE_EXCHANGE_TAB = auto() # payload: {'exchange': str}
+    CREATE_TAB = auto() # payload: {'tab_name': str}
+    NEW_CANDLES = auto() # payload: {'symbol': str, 'timeframe': str}
+    NEW_CHART_REQUESTED = auto() # payload: {'symbol': str, 'timeframe': str}
+    NEW_ORDERBOOK_REQUESTED = auto() # payload: {'symbol': str}
+    NEW_TRADING_PANEL_REQUESTED = auto() # payload: {'symbol': str}
+    NEW_PRICE_LEVEL_REQUESTED = auto() # payload: {'symbol': str}
+    NEW_TRADE = auto() # payload: {'symbol': str, 'trade': dict}
+    ORDER_BOOK_UPDATE = auto() # payload: {'symbol': str, 'orderbook': dict}
+    ORDERBOOK_VISIBILITY_CHANGED = auto() # payload: {'symbol': str, 'visible': bool}
+    SYMBOL_CHANGED = auto() # payload: {'symbol': str}
+    TIMEFRAME_CHANGED = auto() # payload: {'symbol': str, 'timeframe': str}
+    TRADE_STAT_UPDATE = auto() # payload: {'symbol': str, 'trade_stats': dict}
     VIEWPORT_RESIZED = auto()
     UPDATED_CANDLES = auto()
 
