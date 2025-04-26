@@ -549,12 +549,7 @@ class ChartWidget(DockableWidget):
     
     def _on_symbol_change(self, sender=None, app_data=None, user_data=None):
         """Handles symbol changes initiated from the UI menu."""
-        # Get the new symbol from the input text field
-        if not dpg.does_item_exist(self.symbol_input_tag):
-             logging.error(f"Symbol input field {self.symbol_input_tag} not found.")
-             return
-            
-        new_symbol = dpg.get_value(self.symbol_input_tag)
+        new_symbol = app_data
         
         # Basic validation
         if not new_symbol or new_symbol == self.symbol:
@@ -614,9 +609,13 @@ class ChartWidget(DockableWidget):
         # the upstream controller that initiated the SYMBOL_CHANGED signal.
         logging.warning(f"Symbol changed for {self.window_tag}. Upstream needs to handle data stream restart.")
     
-    def _on_timeframe_change(self, new_timeframe: str) -> None:
+    def _on_timeframe_change(self, sender, app_data, user_data) -> None:
+        logging.info(f"Timeframe change received for {self.window_tag}: {sender}, {app_data}, {user_data}")
+        # new_timeframe = user_data # Incorrect, use app_data for listbox selection
+        new_timeframe = app_data
+        
         """Handles timeframe changes from the menu."""
-        if new_timeframe != self.timeframe:
+        if new_timeframe is not None and new_timeframe != self.timeframe: # Add None check
             self.initial_load_complete = False # Reset flag before changing timeframe
             logging.info(f"Timeframe changing for {self.window_tag} from {self.timeframe} to {new_timeframe}")
             

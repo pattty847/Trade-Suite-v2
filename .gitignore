@@ -18,6 +18,8 @@ sec_api_test.log
 .env
 .env
 
+.cursor
+
 # Python cache
 **/__pycache__/
 *.py[cod]

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil # Added shutil import
 from typing import Any, Dict, List  # Added typing imports
 
 import dearpygui.dearpygui as dpg  # Added dpg import
@@ -71,30 +72,58 @@ class ConfigManager:
             logging.error(f"Error saving Dear PyGui layout to {target_path}: {e}")
 
     def load_widget_config(self) -> List[Dict[str, Any]]:
-        """Loads widget configuration from the user's JSON file.
+        """Loads widget configuration from user JSON, falling back to factory defaults.
+
+        If the user configuration file doesn't exist, it attempts to load the
+        factory default configuration. If the factory default exists and is loaded
+        successfully, it's copied to the user configuration path for future use.
 
         Returns:
             List[Dict[str, Any]]: A list of widget definition dictionaries.
-                                  Returns an empty list if the file doesn't exist
-                                  or is invalid.
+                                  Returns an empty list if neither user nor factory
+                                  config exists or if loading fails.
         """
-        path = self.get_user_widgets_json_path()
-        if not os.path.exists(path):
-            logging.warning(f"User widget config file not found: {path}. Returning empty list.")
+        user_path = self.get_user_widgets_json_path()
+        factory_path = self.get_default_widgets_json_path()
+        config_to_load = None
+        loaded_from = None
+
+        if os.path.exists(user_path):
+            config_to_load = user_path
+            loaded_from = "user"
+            logging.info(f"Found user widget config: {user_path}")
+        elif os.path.exists(factory_path):
+            config_to_load = factory_path
+            loaded_from = "factory"
+            logging.info(f"User widget config not found. Found factory default: {factory_path}")
+        else:
+            logging.warning(f"Neither user ({user_path}) nor factory ({factory_path}) widget config file found. Returning empty list.")
             return []
+
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(config_to_load, 'r', encoding='utf-8') as f:
                 widget_data = json.load(f)
                 if not isinstance(widget_data, list):
-                    logging.error(f"Invalid format in widget config file {path}. Expected a list.")
+                    logging.error(f"Invalid format in widget config file {config_to_load}. Expected a list.")
                     return []
-                logging.info(f"Loaded {len(widget_data)} widget definitions from {path}.")
+
+                logging.info(f"Loaded {len(widget_data)} widget definitions from {loaded_from} config: {config_to_load}.")
+
+                # If loaded from factory, copy it to user path
+                if loaded_from == "factory":
+                    try:
+                        shutil.copy2(factory_path, user_path) # copy2 preserves metadata
+                        logging.info(f"Copied factory widget config to user path: {user_path}")
+                    except Exception as copy_e:
+                        logging.error(f"Error copying factory widget config {factory_path} to {user_path}: {copy_e}")
+                        # Proceed with loaded data even if copy fails, but log the error
+
                 return widget_data
         except json.JSONDecodeError as e:
-            logging.error(f"Error decoding JSON from {path}: {e}")
+            logging.error(f"Error decoding JSON from {config_to_load}: {e}")
             return []
         except IOError as e:
-            logging.error(f"Error reading widget config file {path}: {e}")
+            logging.error(f"Error reading widget config file {config_to_load}: {e}")
             return []
 
     def save_widget_config(self, widget_data: List[Dict[str, Any]], is_default: bool = False):

@@ -1,5 +1,6 @@
 import os
 import logging
+import shutil # Added shutil import
 # Remove json import if no longer needed after full refactoring
 # import json
 from typing import Dict, Optional, List, Any, Type
@@ -182,37 +183,53 @@ class DashboardManager:
             # If no widgets are loaded, the layout will be empty unless default widgets are added elsewhere
 
         # --- Apply DPG Layout (INI) via ConfigManager ---
-        # Get the path where DPG should save the layout (user layout path)
-        ini_save_path = self.config_manager.get_user_layout_ini_path()
+        # Get the paths for user and factory layouts
+        user_ini_path = self.config_manager.get_user_layout_ini_path()
+        factory_ini_path = self.config_manager.get_factory_layout_ini_path()
 
-        # Determine if the user layout INI file exists to load from
-        should_load_ini = os.path.exists(ini_save_path)
+        # Determine if the user layout INI file exists
+        user_ini_exists = os.path.exists(user_ini_path)
+
+        # --- Default Layout Handling ---
+        if not user_ini_exists:
+            logging.info(f"User layout INI not found at {user_ini_path}. Checking for factory default.")
+            if os.path.exists(factory_ini_path):
+                try:
+                    shutil.copy2(factory_ini_path, user_ini_path) # copy2 preserves metadata
+                    logging.info(f"Copied factory layout INI ({factory_ini_path}) to user path ({user_ini_path}).")
+                    user_ini_exists = True # Mark as existing now
+                except Exception as copy_e:
+                    logging.error(f"Error copying factory layout INI {factory_ini_path} to {user_ini_path}: {copy_e}")
+                    # Proceed without the user INI if copy fails
+            else:
+                logging.warning(f"Factory layout INI also not found at {factory_ini_path}. DPG will use default placement.")
+        # --- End Default Layout Handling ---
 
         # Configure basic app settings and *save* path immediately
-        # This sets up docking and tells DPG where to save the layout on exit.
+        # This sets up docking and tells DPG where to save the layout on exit (always the user path).
         # It does NOT load the layout yet.
         try:
             dpg.configure_app(
                 docking=True,
                 docking_space=True,
-                init_file=ini_save_path # DPG saves here on exit
+                init_file=user_ini_path # DPG saves here on exit, and potentially loads from here
             )
-            logging.info(f"DPG configured for docking. Save path: {ini_save_path}")
+            logging.info(f"DPG configured for docking. Save/init path: {user_ini_path}")
         except Exception as e:
             logging.error(f"Error configuring DPG docking/save path: {e}")
             # If this fails, loading probably won't work either, but we proceed cautiously
 
         # --- Explicitly Apply/Load the DPG Layout (INI) ---
         # This should happen AFTER all windows from the config have been recreated.
-        # Calling configure_app again with init_file seems to be the trigger DPG needs.
-        if should_load_ini:
-            logging.info(f"User DPG layout exists. Applying layout from: {ini_save_path}")
+        # If the user_ini exists (either originally or copied from factory), apply it.
+        if user_ini_exists:
+            logging.info(f"Applying DPG layout from: {user_ini_path}")
             try:
                 # Re-apply configuration, focusing on the init_file to trigger layout load
                 # We keep docking settings as they were set just before.
                 # The key is calling this *after* windows are created.
-                dpg.configure_app(init_file=ini_save_path)
-                logging.info(f"DPG layout application triggered using init_file: {ini_save_path}")
+                dpg.configure_app(init_file=user_ini_path)
+                logging.info(f"DPG layout application triggered using init_file: {user_ini_path}")
                 # --- BEGIN ADDED LOGGING ---
                 logging.info("  [POST-INI APPLY] Checking widget states:")
                 for post_id, post_widget in self.widgets.items():
@@ -230,7 +247,8 @@ class DashboardManager:
             except Exception as e_load:
                  logging.error(f"Error applying DPG layout via configure_app(init_file=...): {e_load}")
         else:
-            logging.info(f"User DPG layout not found at {ini_save_path}. DPG will use default placement.")
+            # This case should now only happen if neither user nor factory INI existed, or copy failed
+            logging.info(f"DPG layout INI not found or failed to copy. DPG will use default window placement.")
             # Even if not loading, configure_app was already called to set the save path.
 
         # Reset layout modified flag after initialization
