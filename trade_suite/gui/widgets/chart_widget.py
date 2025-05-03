@@ -76,6 +76,14 @@ class ChartWidget(DockableWidget):
             columns=["dates", "opens", "highs", "lows", "closes", "volumes"]
         )
         
+        # Cached python lists for fast incremental updates (avoids DataFrame -> list conversion each frame)
+        self._dates_list: list[float] = []
+        self._opens_list: list[float] = []
+        self._highs_list: list[float] = []
+        self._lows_list: list[float] = []
+        self._closes_list: list[float] = []
+        self._volumes_list: list[float] = []
+        
         # UI components
         self.chart_plot_tag = f"{self.window_tag}_plot"
         self.volume_plot_tag = f"{self.window_tag}_volume"
@@ -290,26 +298,39 @@ class ChartWidget(DockableWidget):
                          logging.warning(f"Chart {self.window_tag}: Found non-numeric values in column '{col}' after conversion. NaNs introduced.")
                          # Depending on requirements, you might dropna, fillna, or return
 
-            self.ohlcv = processed_data # Assign the processed data
-            self._update_chart()
+            # Replace internal DataFrame and rebuild caches
+            self.ohlcv = processed_data
+            self._dates_list = self.ohlcv["dates"].tolist()
+            self._opens_list = self.ohlcv["opens"].tolist()
+            self._highs_list = self.ohlcv["highs"].tolist()
+            self._lows_list = self.ohlcv["lows"].tolist()
+            self._closes_list = self.ohlcv["closes"].tolist()
+            self._volumes_list = self.ohlcv["volumes"].tolist()
+            self._update_chart(partial=False)
             
         elif isinstance(data, pd.DataFrame): # Handle case where an empty dataframe is sent to clear the chart
             logging.debug(f"Chart {self.window_tag} received empty candle update, clearing chart.")
             # Set ohlcv to an empty dataframe with the correct columns to clear
             self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
-            self._update_chart() # Update to show empty state
+            self._dates_list = []
+            self._opens_list = []
+            self._highs_list = []
+            self._lows_list = []
+            self._closes_list = []
+            self._volumes_list = []
+            self._update_chart(partial=False) # Update to show empty state
         elif data is None:
              logging.debug(f"Chart {self.window_tag} received None data, ignoring update.")
         else:
              logging.warning(f"Chart {self.window_tag} received unexpected data type: {type(data)}")
     
-    def _update_chart(self) -> None:
+    def _update_chart(self, partial: bool = True) -> None:
         """Update the chart display with current OHLCV data and indicators."""
         if not self.is_created:
              logging.warning(f"Attempted to update chart {self.window_tag} before creation.")
              return
 
-        dates_list = self.ohlcv["dates"].tolist() if not self.ohlcv.empty else []
+        dates_list = self._dates_list if not self.ohlcv.empty else []
 
         # --- Update Core Series ---
         # Log data being sent to DPG
@@ -324,10 +345,10 @@ class ChartWidget(DockableWidget):
              dpg.configure_item(
                  self.candle_series_tag,
                  dates=dates_list,
-                 opens=self.ohlcv["opens"].tolist() if not self.ohlcv.empty else [],
-                 highs=self.ohlcv["highs"].tolist() if not self.ohlcv.empty else [],
-                 lows=self.ohlcv["lows"].tolist() if not self.ohlcv.empty else [],
-                 closes=self.ohlcv["closes"].tolist() if not self.ohlcv.empty else [],
+                 opens=self._opens_list if not self.ohlcv.empty else [],
+                 highs=self._highs_list if not self.ohlcv.empty else [],
+                 lows=self._lows_list if not self.ohlcv.empty else [],
+                 closes=self._closes_list if not self.ohlcv.empty else [],
                  time_unit=timeframe_to_dpg_time_unit(self.timeframe) # Add time_unit update
              )
         else:
@@ -338,7 +359,7 @@ class ChartWidget(DockableWidget):
              dpg.configure_item(
                  self.volume_series_tag,
                  x=dates_list,
-                 y=self.ohlcv["volumes"].tolist() if not self.ohlcv.empty else [],
+                 y=self._volumes_list if not self.ohlcv.empty else [],
              )
         else:
              logging.warning(f"Volume series {self.volume_series_tag} not found for update.")
@@ -453,11 +474,26 @@ class ChartWidget(DockableWidget):
                       # Update the last row in place
                       logging.debug(f"Chart {self.window_tag}: Updating last candle at {update_time}")
                       self.ohlcv.iloc[-1] = update_row # Replace the last row's data
+                      # Reflect change in cached lists (last index)
+                      last_idx = -1
+                      self._dates_list[last_idx] = update_row["dates"]
+                      self._opens_list[last_idx] = update_row["opens"]
+                      self._highs_list[last_idx] = update_row["highs"]
+                      self._lows_list[last_idx] = update_row["lows"]
+                      self._closes_list[last_idx] = update_row["closes"]
+                      self._volumes_list[last_idx] = update_row["volumes"]
                  elif update_time > last_candle_time:
                       # Append the new candle row
                       logging.debug(f"Chart {self.window_tag}: Appending new candle at {update_time}")
                       # Use pd.concat instead of append for future-proofing
                       self.ohlcv = pd.concat([self.ohlcv, update_row.to_frame().T], ignore_index=True)
+                      # Append to cached lists
+                      self._dates_list.append(update_row["dates"])
+                      self._opens_list.append(update_row["opens"])
+                      self._highs_list.append(update_row["highs"])
+                      self._lows_list.append(update_row["lows"])
+                      self._closes_list.append(update_row["closes"])
+                      self._volumes_list.append(update_row["volumes"])
                  else:
                       # Incoming update is older than last candle? Ignore or handle?
                       logging.warning(f"Chart {self.window_tag}: Received out-of-order candle update (time {update_time} <= last time {last_candle_time}). Ignoring.")
@@ -467,6 +503,12 @@ class ChartWidget(DockableWidget):
                  # If self.ohlcv is empty, initialize it with the update
                  logging.info(f"Chart {self.window_tag}: Initializing OHLCV with first UPDATED_CANDLES.")
                  self.ohlcv = update_row.to_frame().T
+                 self._dates_list = [update_row["dates"]]
+                 self._opens_list = [update_row["opens"]]
+                 self._highs_list = [update_row["highs"]]
+                 self._lows_list = [update_row["lows"]]
+                 self._closes_list = [update_row["closes"]]
+                 self._volumes_list = [update_row["volumes"]]
 
             # --- Post-Update Logging ---
             if self.ohlcv is not None and not self.ohlcv.empty:
@@ -476,7 +518,7 @@ class ChartWidget(DockableWidget):
             # ------------------------
 
             # Update the chart display with the modified self.ohlcv
-            self._update_chart()
+            self._update_chart(partial=True)
             self._update_indicator_series() # Recalculate indicators with the new data
 
     def _update_status_bar(self, latest_candle):
@@ -581,8 +623,14 @@ class ChartWidget(DockableWidget):
 
         # Clear existing data and series
         self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+        self._dates_list = []
+        self._opens_list = []
+        self._highs_list = []
+        self._lows_list = []
+        self._closes_list = []
+        self._volumes_list = []
         self._clear_indicator_series() # Clear EMA lines
-        self._update_chart() # Update chart to show empty state (or loading state)
+        self._update_chart(partial=False) # Update chart to show empty state (or loading state)
 
         # Update the symbol display text (top control)
         # TODO: Find the actual tag for the symbol display if it exists
@@ -599,8 +647,14 @@ class ChartWidget(DockableWidget):
 
         # Clear existing data and series
         self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+        self._dates_list = []
+        self._opens_list = []
+        self._highs_list = []
+        self._lows_list = []
+        self._closes_list = []
+        self._volumes_list = []
         self._clear_indicator_series() # Clear EMA lines
-        self._update_chart() # Update chart to show empty state
+        self._update_chart(partial=False) # Update chart to show empty state
 
         # TODO: IMPORTANT - Need to signal upstream (e.g., DashboardProgram)
         # to stop the old data stream and start one for the new symbol/timeframe.
@@ -637,6 +691,12 @@ class ChartWidget(DockableWidget):
 
             # Clear existing data and series
             self.ohlcv = pd.DataFrame(columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
+            self._dates_list = []
+            self._opens_list = []
+            self._highs_list = []
+            self._lows_list = []
+            self._closes_list = []
+            self._volumes_list = []
             self._clear_indicator_series()
             
             # Reset the candle series with the new time unit
@@ -646,7 +706,7 @@ class ChartWidget(DockableWidget):
                     time_unit=timeframe_to_dpg_time_unit(new_timeframe)
                 )
                 
-            self._update_chart()
+            self._update_chart(partial=False)
 
             # 3. Subscribe to new requirements
             try:

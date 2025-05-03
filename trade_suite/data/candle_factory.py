@@ -51,11 +51,19 @@ class CandleFactory:
         )
         self.last_candle_timestamp = None
         self.price_precision = price_precision # Store precision if needed later
+        # Convert precision to number of decimal digits for rounding
+        if 0 < price_precision < 1:
+            self.precision_digits = int(round(-np.log10(price_precision)))
+        else:
+            self.precision_digits = 0
 
         # Queue for batching trades
         self._trade_queue = deque()
         self.max_trades_per_candle_update = 5
-        self.last_update_time = None
+        # Time-based flush interval (seconds) to send updates to UI even when trade volume is low
+        # Helps maintain high refresh rates (e.g., 144 Hz means frame every ~0.007 s, but we only need ~4–8 fps for charts)
+        self.flush_interval = 0.25  # seconds
+        self.last_update_time = time.time()
 
         self._register_event_listeners()
 
@@ -74,14 +82,20 @@ class CandleFactory:
             # Log trade receipt for this factory instance
             logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) received trade: {trade_symbol} @ {trade_data.get('price')} - Time: {datetime.fromtimestamp(trade_data.get('timestamp')/1000).strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # Add to queue
-            self._trade_queue.append(trade_data)
+            # Pre-round price once and enqueue trade for later batch processing
+            processed_trade = {
+                **trade_data,
+                "price": round(trade_data["price"], self.precision_digits),
+            }
+            self._trade_queue.append(processed_trade)
             current_time = time.time()
 
             # Check if we should process the queued trades
-            if (len(self._trade_queue) >= self.max_trades_per_candle_update or
-                (self.last_update_time is not None and 
-                 current_time - self.last_update_time >= self.timeframe_seconds)):
+            # We flush when either we have accumulated enough trades OR the flush interval has elapsed.
+            if (
+                len(self._trade_queue) >= self.max_trades_per_candle_update
+                or (current_time - self.last_update_time) >= self.flush_interval
+            ):
                 logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) processing trade batch - queue size: {len(self._trade_queue)}")
                 self._process_trade_batch()
         # else:
@@ -148,7 +162,7 @@ class CandleFactory:
             True if candle was updated, False otherwise
         """
         timestamp = trade_data["timestamp"] / 1000  # Convert ms to seconds
-        price = trade_data["price"]
+        price = round(trade_data["price"], self.precision_digits)
         volume = trade_data["amount"]
 
         # Adjust timestamp to the candle boundary
