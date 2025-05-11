@@ -78,6 +78,12 @@ def _get_args():
         help="Reset layout to factory default",
     )
 
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable yappi CPU profiler and dump flamegraph on exit",
+    )
+
     return parser.parse_args()
 
 
@@ -137,6 +143,27 @@ def main():
     
     # Ensure the config directory exists
     os.makedirs('config', exist_ok=True)
+    
+    # Optionally start profiler
+    if args.profile:
+        try:
+            import yappi, atexit, pathlib, time
+
+            yappi.set_clock_type("cpu")
+            yappi.start()
+
+            def _stop_profiler():
+                yappi.stop()
+                stats = yappi.get_func_stats()
+                ts = time.strftime("%Y%m%d_%H%M%S")
+                out_path = pathlib.Path("logs") / f"yappi_{ts}.pstat"
+                stats.save(str(out_path), type="pstat")
+                logging.info(f"Yappi profile saved to {out_path}")
+
+            atexit.register(_stop_profiler)
+            logging.info("Yappi profiler started (CPU mode).")
+        except ImportError as e:
+            logging.error("--profile requested but yappi not installed: %s", e)
     
     # Create and run the viewport (main application window)
     with Viewport(data=data, config_manager=config_manager) as viewport:

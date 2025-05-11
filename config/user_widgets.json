@@ -33,5 +33,14 @@
             "max_depth": 20,
             "default_tick_size": 10.0
         }
+    },
+    {
+        "instance_id": "coinbase_btc_usd_5m",
+        "widget_type": "chart",
+        "config": {
+            "exchange": "coinbase",
+            "symbol": "BTC/USD",
+            "timeframe": "5m"
+        }
     }
 ]

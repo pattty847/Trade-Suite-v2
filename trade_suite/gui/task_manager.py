@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Any, Callable, Set, Tuple
 import time
 from collections import defaultdict
@@ -35,10 +34,6 @@ class TaskManager:
         # Maps widget instance to a set of resource keys (stream or factory) it requires
         self.widget_subscriptions: Dict[Any, Set[str | Tuple[str, str, str]]] = defaultdict(set)
         
-        # Add a queue for thread-safe communication
-        self.data_queue = asyncio.Queue()
-        self.executor = ThreadPoolExecutor(max_workers=1)
-        
         # Stream stop events
         self.stream_events: Dict[str, asyncio.Event] = {}
         
@@ -53,6 +48,14 @@ class TaskManager:
         while self.loop is None:
             time.sleep(0.01)
 
+        # Now that the asyncio loop is ready, inform Data so it can emit
+        # signals thread-safely without the intermediate queue.
+        try:
+            self.data.set_ui_loop(self.loop)
+        except AttributeError:
+            # Data class may not yet have the helper if running older version.
+            logging.warning("Data object lacks set_ui_loop – direct emit optimisation disabled.")
+
     def run_loop(self):
         """
         The run_loop function is the main event loop for the task manager.
@@ -65,71 +68,44 @@ class TaskManager:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         
-        # Start the data processing task
-        self.loop.create_task(self._process_data_queue())
-        
-        # Run the event loop
+        # Run the event loop (no longer schedules a separate data-queue consumer)
         self.loop.run_forever()
 
+    # ---------------- Deprecated Queue API ----------------------
+    # The internal asyncio.Queue and its consumer have been removed in favour of
+    # emitting signals directly from worker tasks (via SignalEmitter) to the
+    # main-thread GUI.  The following stub remains only to avoid import errors
+    # if any legacy code calls TaskManager._process_data_queue.
     async def _process_data_queue(self):
-        """Process items from the data queue"""
-        while self.running:
-            try:
-                # Block until an item is available or a timeout occurs
-                data = await asyncio.wait_for(self.data_queue.get(), timeout=1.0)
-                if data:
-                    data_type = data.get("type")
-                    if data_type == "candles":
-                        # Extract candle data including symbol and timeframe
-                        exchange = data.get("exchange")
-                        symbol = data.get("symbol")
-                        timeframe = data.get("timeframe")
-                        candles = data.get("candles")
-                        # Update UI with candle data using keywords, no tab
-                        self._update_ui_with_candles(
-                            exchange=exchange,
-                            symbol=symbol,
-                            timeframe=timeframe,
-                            candles=candles
-                        )
-                    elif data_type == "trades":
-                        # Extract trade data
-                        exchange = data.get("exchange")
-                        trade_data = data.get("trades") # Assuming 'trades' is the single trade dict
-                        # Update UI with trade data using keywords, no tab
-                        self._update_ui_with_trades(exchange=exchange, trade_data=trade_data)
-                    elif data_type == "orderbook":
-                        # Extract orderbook data
-                        exchange = data.get("exchange")
-                        orderbook = data.get("orderbook")
-                        # Update UI with orderbook data using keywords
-                        self._update_ui_with_orderbook(exchange=exchange, orderbook=orderbook)
+        logging.warning("_process_data_queue is deprecated and no longer used.")
+        await asyncio.sleep(0)
 
-                    self.data_queue.task_done()
-            except asyncio.TimeoutError:
-                # No item received within the timeout, continue loop
-                continue
-            except Exception as e:
-                logging.error(f"Error processing data queue: {e}")
-
+    # ------------------------------------------------------------------
+    # Direct emit helpers (used by worker tasks) – they forward the data to
+    # the GUI thread via SignalEmitter.  Keeping them as small wrappers keeps
+    # caller code changes minimal.
+    # ------------------------------------------------------------------
     def _update_ui_with_candles(self, exchange, symbol, timeframe, candles):
-        """Thread-safe method to update UI with initial/bulk candles data"""
-        logging.debug(f"TaskManager emitting NEW_CANDLES for {exchange}/{symbol}/{timeframe}")
+        logging.debug(
+            f"TaskManager emitting NEW_CANDLES for {exchange}/{symbol}/{timeframe}"
+        )
         self.data.emitter.emit(
             Signals.NEW_CANDLES,
             exchange=exchange,
-            symbol=symbol,     # Added symbol
-            timeframe=timeframe, # Added timeframe
-            candles=candles
+            symbol=symbol,
+            timeframe=timeframe,
+            candles=candles,
         )
 
     def _update_ui_with_trades(self, exchange, trade_data):
-        """Thread-safe method to update UI with trades data"""
-        self.data.emitter.emit(Signals.NEW_TRADE, exchange=exchange, trade_data=trade_data)
+        self.data.emitter.emit(
+            Signals.NEW_TRADE, exchange=exchange, trade_data=trade_data
+        )
 
     def _update_ui_with_orderbook(self, exchange, orderbook):
-        """Thread-safe method to update UI with orderbook data"""
-        self.data.emitter.emit(Signals.ORDER_BOOK_UPDATE, exchange=exchange, orderbook=orderbook)
+        self.data.emitter.emit(
+            Signals.ORDER_BOOK_UPDATE, exchange=exchange, orderbook=orderbook
+        )
 
     def start_task(self, name: str, coro):
         """
@@ -400,14 +376,13 @@ class TaskManager:
 
             if candles_df is not None and not candles_df.empty:
                  logging.info(f"Fetched {len(candles_df)} initial candles for {exchange}/{symbol}/{timeframe}. Putting onto queue.")
-                 # Put data onto the queue for _process_data_queue to handle
-                 await self.data_queue.put({
-                     "type": "candles",
-                     "exchange": exchange,
-                     "symbol": symbol,
-                     "timeframe": timeframe,
-                     "candles": candles_df
-                 })
+                 # Emit directly instead of queuing
+                 self._update_ui_with_candles(
+                     exchange=exchange,
+                     symbol=symbol,
+                     timeframe=timeframe,
+                     candles=candles_df,
+                 )
             else:
                  logging.warning(f"No initial candles returned for {exchange}/{symbol}/{timeframe}.")
 
@@ -608,8 +583,7 @@ class TaskManager:
         # Add other async resource cleanup here if needed
         # --- End async resource cleanup ---
 
-        # Shutdown the thread pool executor
-        self.executor.shutdown(wait=False) # Don't wait indefinitely
+        # No thread-pool executor anymore – left here for backward-compat documentation
 
         if self.loop and self.loop.is_running():
             logging.info("Stopping event loop...")

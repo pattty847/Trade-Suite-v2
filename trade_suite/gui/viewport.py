@@ -108,10 +108,12 @@ class Viewport:
         # We no longer set a primary window - all windows are equal and dockable
         # dpg.set_primary_window(self.primary_window_tag, True)
         
-        # Populate the Exchange menu with available exchanges
+        logging.info("Attempting to populate exchange menu...")
         self.populate_exchange_menu()
+        logging.info("Finished populating exchange menu.")
         
         # Setup viewport resize handler
+        logging.info("Attempting to set viewport resize callback...")
         dpg.set_viewport_resize_callback(
             lambda: self.data.emitter.emit(
                 Signals.VIEWPORT_RESIZED,
@@ -119,15 +121,14 @@ class Viewport:
                 height=dpg.get_viewport_height(),
             )
         )
-        
-        # Viewport creation and DPG setup moved to __enter__
-        # self.create_viewport_and_menubar()
-        # dpg.setup_dearpygui()
+        logging.info("Finished setting viewport resize callback.")
         
         dpg.show_viewport()
+        logging.info("Viewport shown.")
         
         # Maximize viewport for better docking experience
         dpg.maximize_viewport()
+        logging.info("Viewport maximized.")
         # dpg.set_exit_callback
 
         logging.info("Setup complete. Launching DPG.")
@@ -176,44 +177,89 @@ class Viewport:
 
     def populate_exchange_menu(self):
         """Populate the Exchange menu with available exchanges."""
-        if not self.data.exchanges:
-            logging.warning("No exchanges available to populate menu")
-            return
-            
-        # Now we can directly access the Exchange menu using the tag we stored
-        if not hasattr(self, 'exchange_menu_tag') or not dpg.does_item_exist(self.exchange_menu_tag):
-            logging.warning("Exchange menu tag not found or menu doesn't exist")
-            return
-            
-        exchange_menu = self.exchange_menu_tag
-        
-        # Clear existing items
-        try:
-            existing_items = dpg.get_item_children(exchange_menu)[1]
-            for item in existing_items:
-                dpg.delete_item(item)
-        except:
-            logging.warning("Error clearing Exchange menu items", exc_info=True)
-            
-        # Add search functionality
-        input_tag = dpg.add_input_text(label="Search", parent=exchange_menu)
-        
-        # Add exchange listbox
-        exchange_list_tag = dpg.add_listbox(
-            items=list(self.data.exchanges),
-            parent=exchange_menu,
-            callback=lambda s, a, u: self.data.emitter.emit(Signals.CREATE_EXCHANGE_TAB, exchange=a),
-            num_items=10,
-        )
-        
-        # Setup search callback
-        dpg.set_item_callback(
-            input_tag,
-            callback=lambda: searcher(
-                input_tag, exchange_list_tag, list(self.data.exchanges)
-            ),
-        )
+        logging.info("populate_exchange_menu: Entered function.")
 
+        # Use self.data.exchange_list (dict of loaded exchanges) instead of removed self.data.exchanges
+        if not self.data.exchange_list: 
+            logging.warning("populate_exchange_menu: No exchanges available (self.data.exchange_list is empty or None).")
+            return
+        logging.info(f"populate_exchange_menu: self.data.exchange_list = {self.data.exchange_list}")
+            
+        if not hasattr(self, 'exchange_menu_tag'):
+            logging.warning("populate_exchange_menu: self.exchange_menu_tag attribute does not exist.")
+            return
+        logging.info(f"populate_exchange_menu: self.exchange_menu_tag = {self.exchange_menu_tag}")
+
+        if not dpg.does_item_exist(self.exchange_menu_tag):
+            logging.warning(f"populate_exchange_menu: DPG item with tag '{self.exchange_menu_tag}' does not exist.")
+            return
+        logging.info(f"populate_exchange_menu: DPG item '{self.exchange_menu_tag}' confirmed to exist.")
+            
+        exchange_menu_parent_tag = self.exchange_menu_tag
+        
+        logging.info(f"populate_exchange_menu: Attempting to clear items from menu '{exchange_menu_parent_tag}'.")
+        try:
+            children_map = dpg.get_item_children(exchange_menu_parent_tag)
+            if 1 in children_map: # Check if child slot 1 (menu items) exists
+                existing_items = children_map[1]
+                logging.info(f"populate_exchange_menu: Found existing items to clear: {existing_items}")
+                for item in existing_items:
+                    if dpg.does_item_exist(item):
+                        logging.info(f"populate_exchange_menu: Deleting item {item}.")
+                        dpg.delete_item(item)
+                    else:
+                        logging.warning(f"populate_exchange_menu: Item {item} in children list but does not exist in DPG for deletion.")
+            else:
+                logging.info(f"populate_exchange_menu: No child slot 1 in children_map for '{exchange_menu_parent_tag}'. Map: {children_map}")
+        except Exception as e:
+            logging.error(f"populate_exchange_menu: Error clearing Exchange menu items from '{exchange_menu_parent_tag}'. Exception: {e}", exc_info=True)
+            return # Exit if clearing fails catastrophically
+        logging.info(f"populate_exchange_menu: Finished clearing items from menu '{exchange_menu_parent_tag}'.")
+
+        input_tag = None
+        exchange_list_tag = None
+
+        try:
+            logging.info(f"populate_exchange_menu: Adding input_text to '{exchange_menu_parent_tag}'.")
+            input_tag = dpg.add_input_text(label="Search", parent=exchange_menu_parent_tag)
+            logging.info(f"populate_exchange_menu: Added input_text with tag {input_tag}.")
+        except Exception as e:
+            logging.error(f"populate_exchange_menu: Error adding input_text. Exception: {e}", exc_info=True)
+            return 
+
+        try:
+            # Use keys from the exchange_list dictionary for item names
+            items_for_listbox = list(self.data.exchange_list.keys())
+            logging.info(f"populate_exchange_menu: Adding listbox to '{exchange_menu_parent_tag}' with items {items_for_listbox}.")
+            exchange_list_tag = dpg.add_listbox(
+                items=items_for_listbox,
+                parent=exchange_menu_parent_tag,
+                callback=lambda s, a, u: self.data.emitter.emit(Signals.CREATE_EXCHANGE_TAB, exchange=a),
+                num_items=10,
+            )
+            logging.info(f"populate_exchange_menu: Added listbox with tag {exchange_list_tag}.")
+        except Exception as e:
+            logging.error(f"populate_exchange_menu: Error adding listbox. Exception: {e}", exc_info=True)
+            return
+
+        try:
+            if input_tag and exchange_list_tag: 
+                logging.info(f"populate_exchange_menu: Setting item callback for input_tag {input_tag}.")
+                dpg.set_item_callback(
+                    input_tag,
+                    # Use keys from the exchange_list dictionary for searcher
+                    callback=lambda: searcher(
+                        input_tag, exchange_list_tag, list(self.data.exchange_list.keys())
+                    ),
+                )
+                logging.info("populate_exchange_menu: Set item callback successfully.")
+            else:
+                logging.warning("populate_exchange_menu: input_tag or exchange_list_tag is None or invalid, skipping set_item_callback.")
+        except Exception as e:
+            logging.error(f"populate_exchange_menu: Error setting item callback. Exception: {e}", exc_info=True)
+            return
+        
+        logging.info("populate_exchange_menu: Finished function successfully.")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """

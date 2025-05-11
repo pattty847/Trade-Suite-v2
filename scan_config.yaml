@@ -1,0 +1,53 @@
+# Defines a list of scans to run. Each scan has a name,
+# a minimum number of conditions that must be met,
+# and a list of specific conditions.
+scans:
+  - name: "Overbought_Extreme_V1"
+    description: "Looks for symbols that are highly overbought on multiple indicators."
+    min_flags_to_pass: 2
+    enabled: true # Allows you to easily enable/disable scans
+    conditions:
+      - metric: "RSI"
+        operator: ">" # (gt, lt, gte, lte, eq, ne, etc.)
+        value: 78
+        enabled: true
+      - metric: "zscore"
+        operator: ">"
+        value: 2.5
+        enabled: true
+      - metric: "ATRstretch"
+        operator: ">"
+        value: 3.0
+        enabled: true
+      - metric: "VWAPgap"
+        operator: ">" #  (close is > 15% above VWAP)
+        value: 0.15
+        enabled: true
+
+  - name: "Potential_Mean_Reversion_Short"
+    description: "Similar to Overbought_Extreme_V1 but might use slightly different thresholds or fewer flags."
+    min_flags_to_pass: 1
+    enabled: false # Example of a disabled scan
+    conditions:
+      - metric: "RSI"
+        operator: ">"
+        value: 75
+        enabled: true
+      - metric: "zscore"
+        operator: ">"
+        value: 2.0
+        enabled: true
+
+  - name: "Oversold_Interest"
+    description: "Looks for potentially oversold conditions."
+    min_flags_to_pass: 1
+    enabled: true
+    conditions:
+      - metric: "RSI"
+        operator: "<"
+        value: 30
+        enabled: true
+      - metric: "VWAPgap"
+        operator: "<" # close is < -5% below VWAP
+        value: -0.05
+        enabled: true 

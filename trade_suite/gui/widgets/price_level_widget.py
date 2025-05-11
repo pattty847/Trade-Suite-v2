@@ -3,6 +3,7 @@ import time
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 import dearpygui.dearpygui as dpg
+import numpy as np  # Local import to avoid global dependency issues if NumPy is unavailable at import time
 
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.widgets.base_widget import DockableWidget
@@ -62,6 +63,13 @@ class PriceLevelWidget(DockableWidget):
         self.symbol = symbol
         self.max_depth = max_depth
         self.tick_size = default_tick_size
+
+        # Price precision (could be fetched from exchange later); use tick_size as baseline
+        self.price_precision = default_tick_size if default_tick_size > 0 else 0.01
+
+        # Use shared OrderBookProcessor for fast NumPy aggregation & cumulative calcs
+        from trade_suite.analysis.orderbook_processor import OrderBookProcessor
+        self.processor = OrderBookProcessor(price_precision=self.price_precision, initial_tick_size=self.tick_size)
 
         # UI Tags
         self.table_tag = f"{self.window_tag}_table"
@@ -194,27 +202,38 @@ class PriceLevelWidget(DockableWidget):
         if not orderbook or not self.is_created:
             return
 
-        # Aggregate the order book using the current tick size
-        aggregated_book = self._aggregate_order_book(orderbook, self.tick_size)
+        raw_bids = orderbook.get("bids", [])
+        raw_asks = orderbook.get("asks", [])
 
-        # Extract and sort the aggregated bid and ask data
-        bids_agg = aggregated_book.get('bids_agg', [])
-        asks_agg = aggregated_book.get('asks_agg', [])
+        # Estimate midpoint for processor helper (optional but helps spread logic)
+        current_price = None
+        if raw_bids and raw_asks:
+            current_price = (raw_bids[0][0] + raw_asks[0][0]) / 2
 
-        # Sort bids descending (highest bid first)
-        bids_agg.sort(key=lambda x: x[0], reverse=True)
+        processed = self.processor.process_orderbook(raw_bids, raw_asks, current_price)
+        if not processed:
+            return
 
-        # Sort asks ascending (lowest ask first)
-        asks_agg.sort(key=lambda x: x[0])
+        import numpy as _np  # local alias to avoid global import cost each call
 
-        # Prepare asks for display (highest price at top row of asks section)
-        # asks_agg is lowest -> highest, we want highest -> lowest in display
-        # We fill from ask_cells[0] (top ask row) downwards
-        asks_display = list(reversed(asks_agg[:self.max_depth]))
+        # -----------------------------
+        # Fast-path: work directly with NumPy views that are already sorted by
+        # OrderBookProcessor (_vector_aggregate guarantees bids DESC, asks ASC).
+        # -----------------------------
+        bids_arr = _np.asarray(processed["bids_processed"], dtype=_np.float64)
+        asks_arr = _np.asarray(processed["asks_processed"], dtype=_np.float64)
+
+        # Slice out only price & *individual* qty columns (col 0,1).  No Python
+        # object creation, just a view.
+        bids_agg = bids_arr[:, :2]
+        asks_agg = asks_arr[:, :2]
+
+        # We want highest-priced ask at top, so take last N rows and reverse.
+        asks_display = asks_agg[-self.max_depth:][::-1]
 
         # Calculate spread
-        best_bid_price = bids_agg[0][0] if bids_agg else 0
-        best_ask_price = asks_agg[0][0] if asks_agg else 0
+        best_bid_price = bids_agg[0, 0] if bids_agg.size else 0
+        best_ask_price = asks_agg[0, 0] if asks_agg.size else 0
         spread = best_ask_price - best_bid_price if best_ask_price and best_bid_price else 0
 
         # Update ask cells (display highest asks first, going down)
@@ -226,30 +245,28 @@ class PriceLevelWidget(DockableWidget):
             price_cell, qty_cell = self.ask_cells[i]
             if not dpg.does_item_exist(price_cell): continue # Cell might be deleted
 
-            if i < len(asks_display):
-                price, quantity = asks_display[i]
+            if i < asks_display.shape[0]:
+                price, quantity = asks_display[i, 0], asks_display[i, 1]
                 # Highlight best ask (which is the last element in asks_display)
                 is_best_ask = (i == len(asks_display) - 1)
                 color = [255, 80, 80] if is_best_ask else [200, 100, 100]
 
-                dpg.set_value(price_cell, f"{price:,.8g}") # Use general format
-                dpg.set_value(qty_cell, f"{quantity:,.8g}")
-
-                # Update color only if changed
-                if self.last_colors.get(price_cell) != color:
-                    dpg.configure_item(price_cell, color=color)
-                    dpg.configure_item(qty_cell, color=color)
-                    self.last_colors[price_cell] = color
-
-                # Update value only if changed
+                # Pre-format outside DPG calls to avoid duplicate work
                 new_price_str = f"{price:,.8g}"
                 new_qty_str = f"{quantity:,.8g}"
+
                 if self.last_values.get(price_cell) != new_price_str:
                     dpg.set_value(price_cell, new_price_str)
                     self.last_values[price_cell] = new_price_str
                 if self.last_values.get(qty_cell) != new_qty_str:
                     dpg.set_value(qty_cell, new_qty_str)
                     self.last_values[qty_cell] = new_qty_str
+
+                # Update color only if changed
+                if self.last_colors.get(price_cell) != color:
+                    dpg.configure_item(price_cell, color=color)
+                    dpg.configure_item(qty_cell, color=color)
+                    self.last_colors[price_cell] = color
             else:
                 # Clear unused cells only if they aren't already cleared
                 if self.last_values.get(price_cell) != "":
@@ -278,30 +295,28 @@ class PriceLevelWidget(DockableWidget):
             price_cell, qty_cell = self.bid_cells[i]
             if not dpg.does_item_exist(price_cell): continue
 
-            if i < len(bids_agg):
-                price, quantity = bids_agg[i]
+            if i < bids_agg.shape[0]:
+                price, quantity = bids_agg[i, 0], bids_agg[i, 1]
                 # Highlight best bid (first element in bids_agg)
                 is_best_bid = (i == 0)
                 color = [80, 255, 80] if is_best_bid else [100, 200, 100]
 
-                dpg.set_value(price_cell, f"{price:,.8g}")
-                dpg.set_value(qty_cell, f"{quantity:,.8g}")
-
-                # Update color only if changed
-                if self.last_colors.get(price_cell) != color:
-                    dpg.configure_item(price_cell, color=color)
-                    dpg.configure_item(qty_cell, color=color)
-                    self.last_colors[price_cell] = color
-
-                # Update value only if changed
+                # Pre-format outside DPG calls to avoid duplicate work
                 new_price_str = f"{price:,.8g}"
                 new_qty_str = f"{quantity:,.8g}"
+
                 if self.last_values.get(price_cell) != new_price_str:
                     dpg.set_value(price_cell, new_price_str)
                     self.last_values[price_cell] = new_price_str
                 if self.last_values.get(qty_cell) != new_qty_str:
                     dpg.set_value(qty_cell, new_qty_str)
                     self.last_values[qty_cell] = new_qty_str
+
+                # Update color only if changed
+                if self.last_colors.get(price_cell) != color:
+                    dpg.configure_item(price_cell, color=color)
+                    dpg.configure_item(qty_cell, color=color)
+                    self.last_colors[price_cell] = color
             else:
                 # Clear unused cells only if they aren't already cleared
                 if self.last_values.get(price_cell) != "":
@@ -314,32 +329,11 @@ class PriceLevelWidget(DockableWidget):
                 if self.last_colors.get(price_cell) is not None:
                     self.last_colors[price_cell] = None
 
-    def _aggregate_order_book(self, orderbook, tick_size):
-        """Aggregate the order book based on tick size."""
-        def aggregate(orders):
-            if not orders or tick_size <= 0:
-                return []
-
-            aggregated = {}
-            for price, amount in orders:
-                # Group prices by tick size
-                grouped_price = round(price / tick_size) * tick_size
-                aggregated[grouped_price] = aggregated.get(grouped_price, 0) + amount
-
-            # Convert back to list of [price, amount] pairs
-            return [[price, amount] for price, amount in aggregated.items()]
-
-        bids = orderbook.get('bids', [])
-        asks = orderbook.get('asks', [])
-
-        return {
-            'bids_agg': aggregate(bids),
-            'asks_agg': aggregate(asks)
-        }
-
     def _on_tick_size_change(self, sender, app_data, user_data):
         """Handle tick size slider changes."""
         self.tick_size = app_data
+        # Keep processor in sync
+        self.processor.set_tick_size(self.tick_size)
         # Reprocess the last known orderbook with the new tick size immediately
         if self.last_orderbook:
             self._process_and_display_orderbook(self.last_orderbook)
