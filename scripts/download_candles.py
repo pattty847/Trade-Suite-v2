@@ -3,6 +3,9 @@ import sys
 import logging # Added for detailed error logging
 import traceback # Added for detailed error logging
 from dotenv import load_dotenv
+from tqdm import tqdm # Import tqdm
+
+from trade_suite.utils.market_utils import get_top_x_symbols_by_volume # Import the new function
 
 load_dotenv(override=True)
 
@@ -20,31 +23,38 @@ async def main():
         await data_handler.load_exchanges()
         print("Exchanges loaded successfully.")
 
+        # Get the Coinbase exchange object
+        coinbase_exchange = data_handler.exchange_list['coinbase']
+
+        # Get the top 200 symbols using the utility function
+        print("Attempting to fetch top X symbols from Coinbase by USD volume...")
+        top_20_symbols = await get_top_x_symbols_by_volume(
+            exchange=coinbase_exchange, 
+            quote_currency='USD', 
+            count=20,
+            volume_field='volume_24h' # Specific to Coinbase for USD volume
+        )
+
+        if not top_20_symbols:
+            print("Could not retrieve top 200 symbols. There might be an issue with market data or filtering. Exiting.")
+            return
+        elif len(top_20_symbols) < 200:
+            print(f"Warning: Fetched only {len(top_20_symbols)} symbols, less than the desired 200.")
+
+
         # Define the symbols, timeframes, and the start date for fetching data
-        
-        # 25 high-volume speculative coins on Coinbase
-        # IMPORTANT: Symbols should be in BASE/QUOTE format, e.g., 'PEPE/USD'
-        # Assuming USD as the quote currency. Adjust if needed.
-        shitcoins_base = [
-            "PEPE", "BONK", "DOGE", "WIF", "SHIB", "SUI", "ARB", "OP", 
-            "WLD", "SEI", "JASMY", "RENDER", "NEAR", "TIA", "XCN", "ENA"
-        ]
-        blue_chips_base = ["BTC", "ETH", "SOL", "ADA", "XRP"]
+        symbols_to_fetch = top_20_symbols
+        timeframes_to_fetch = ['1h'] # Changed to 1m
+        since_date = '2024-01-01T00:00:00Z'
 
-        # Assuming USD as the quote currency
-        quote_currency = "USD"
-        symbols_to_fetch = [f"{coin}/{quote_currency}" for coin in shitcoins_base + blue_chips_base]
-
-        timeframes_to_fetch = ['1d']
-        since_date = '2024-01-01T00:00:00Z' # Adjusted to a more recent year for potentially available data
-
-        print(f"Fetching candles for symbols: {symbols_to_fetch} on Coinbase")
+        print(f"Fetching 1m candles for top {len(symbols_to_fetch)} symbols on Coinbase (by 24h USD volume)")
         print(f"Timeframes: {timeframes_to_fetch}, Since: {since_date}")
 
         # Fetch the candles. The Data class will handle saving them to CSV in 'data/cache/'
+        # Wrap symbols_to_fetch with tqdm for a progress bar
         await data_handler.fetch_candles(
             exchanges=['coinbase'],
-            symbols=symbols_to_fetch,
+            symbols=tqdm(symbols_to_fetch, desc="Fetching candles per symbol"),
             since=since_date,
             timeframes=timeframes_to_fetch,
             write_to_db=False  # Set to False as we are not using InfluxDB here
