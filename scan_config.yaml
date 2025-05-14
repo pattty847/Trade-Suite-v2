@@ -5,9 +5,11 @@ data_fetching:
   enabled: true                 # Set to true to fetch/update data before scanning
   exchange: "coinbase"
   # target_timeframe will be taken from analysis.py's main setting
-  since_date: "2025-01-01T00:00:00Z" # How far back to fetch, if creating new files or filling gaps
+  since_date: "2025-05-01T00:00:00Z" # How far back to fetch, if creating new files or filling gaps (ISO 8601 format)
   
-  symbols_source: "top_x"       # How to get symbols: "top_x" or "explicit_list"
+  # Asset groups are defined in the asset_groups section below.
+  # This setting will fetch all symbols in the specified asset group.
+  symbols_source: "top_x"       # How to get symbols: "top_x" or "explicit_list" or "group:<group_name>"
   
   # Settings for "top_x"
   top_x_count: 20               # Number of top symbols by volume to fetch
@@ -18,6 +20,42 @@ data_fetching:
   symbols_list:               # Uncomment and use if symbols_source is "explicit_list"
     - "BTC/USD"
     - "PEPE/USD"
+
+output:
+  - format: "markdown" # For stdout, if you still want to pipe to a .md file
+    path: "analysis_scanner/output/scan_results.md"
+  - format: "csv"
+    path: "analysis_scanner/output/scan_results.csv" # All scan-specific tables will get a suffix based on this
+  - format: "json"
+    path: "analysis_scanner/output/scan_results.json" # Same here, e.g., output/scan_results_Overbought_Extreme_V1.json
+  - format: "text"
+    path: "analysis_scanner/output/scan_summary.txt" # And here 
+
+asset_groups:
+  majors:
+    - BTC/USD
+    - ETH/USD
+    - SOL/USD
+    - DOGE/USD
+    - AVAX/USD
+  defi_bluechips:
+    - UNI/USD
+    - AAVE/USD
+    - LINK/USD
+  my_watchlist:
+    - SOL/USD
+    - DOGE/USD
+    - AVAX/USD
+  memes:
+    - PEPE/USD
+    - SHIB/USD
+    - FLOW/USD
+
+
+scanner_options:
+  path_pattern: "data/cache/*.csv"
+  anchor_for_vwap: "2024-01-01"
+  max_rows_to_load: 1000 # Load last 1000 rows
 
 scans:
   - name: "Overbought_Extreme_V1"
@@ -123,3 +161,18 @@ scans:
         operator: "<"
         value: 40
         enabled: false # Optional: to find truly beaten down assets 
+
+  - name: "Volatility_Squeeze_Alert"
+    description: "Identifies symbols with very low Bollinger Band Width, indicating a potential for a volatility expansion."
+    min_flags_to_pass: 1
+    enabled: true
+    conditions:
+      - metric: "BBW" # Bollinger Band Width (Normalized)
+        operator: "<"
+        value: 0.05   # Example: BBW is less than 5% of the middle band (tight squeeze)
+        enabled: true
+      # You might add other conditions here, like ADX < 20 (non-trending during squeeze)
+      - metric: "ADX"
+        operator: "<"
+        value: 20
+        enabled: false # Optional: ensure it's in a low trend strength phase 

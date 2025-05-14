@@ -1,0 +1,5 @@
+--- Symbols meeting criteria for scan: 'Potential_Mean_Reversion_Short' ---
+exchange   symbol timeframe    close       volume       RSI   zscore       %B  ATRstretch  VWAPgap  VWAPgap_daily  BTC_rel_zscore  VolumeZScore     RVOL      BBW       ADX  flags_met
+coinbase  GST-USD        1h 0.012746 110829128.08 81.988306 3.497839 1.177773    3.557961 0.376562            0.0        3.512591      1.206100 1.981676 0.478967 46.762117          2
+coinbase DOGE-USD        1h 0.239030   5496966.10 61.217683 0.704820 0.753974    1.564498 0.352016            0.0        0.731250     -0.905989 0.428392 0.114900 25.383706          1
+-----------------------------------------------------------

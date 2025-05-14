@@ -233,19 +233,69 @@ def scan_folder(path="data/cache/*.csv", anchor="2024-01-01", target_timeframe="
         df.sort_index(inplace=True)
 
         # Check for minimum data length
-        min_length = 50  # Based on SMA50
-        if len(df) < min_length:
-            print(f"Warning: Not enough data in {fp} to calculate all indicators (have {len(df)}, need {min_length}). Skipping.")
+        min_length = 50  # Based on SMA50 and other rolling calcs
+        min_length_adx = 28 # ADX default window is 14, but it needs 2*window typically for stability
+        
+        effective_min_length = max(min_length, min_length_adx if 'volumes' in df.columns else min_length) 
+        # Only make effective_min_length depend on adx if volume exists for vol calcs too
+
+        if len(df) < effective_min_length:
+            print(f"Warning: Not enough data in {fp} to calculate all indicators (have {len(df)}, need {effective_min_length}). Skipping.")
             continue
 
-        # --- indicators ---
+        # --- basic price & TA-Lib indicators ---
         rsi = ta.momentum.RSIIndicator(df['closes']).rsi()
         sma20 = df['closes'].rolling(20).mean()
+        std20 = df['closes'].rolling(20).std() # For BB
         sma50 = df['closes'].rolling(50).mean()
         std50 = df['closes'].rolling(50).std()
-        bb_upper = sma20 + 2*df['closes'].rolling(20).std()
+        
+        bb_middle = sma20 # Bollinger Middle Band is SMA20
+        bb_upper = bb_middle + 2 * std20
+        bb_lower = bb_middle - 2 * std20
+        
         atr = ta.volatility.AverageTrueRange(df['highs'], df['lows'], df['closes']).average_true_range()
         vwap = anchored_vwap(df, pd.Timestamp(anchor))
+
+        # --- New Indicators ---
+        volume_zscore_value = np.nan
+        rvol_value = np.nan
+        bbw_value = np.nan
+        adx_value = np.nan
+
+        if 'volumes' in df.columns and df['volumes'].notna().sum() > 20: # Need enough volume data
+            vol_sma20 = df['volumes'].rolling(20, min_periods=10).mean()
+            vol_std20 = df['volumes'].rolling(20, min_periods=10).std()
+            current_volume = df['volumes'].iloc[-1]
+            latest_vol_sma20 = vol_sma20.iloc[-1]
+            latest_vol_std20 = vol_std20.iloc[-1]
+
+            if pd.notna(current_volume) and pd.notna(latest_vol_sma20) and pd.notna(latest_vol_std20) and latest_vol_std20 != 0:
+                volume_zscore_value = (current_volume - latest_vol_sma20) / latest_vol_std20
+            
+            if pd.notna(current_volume) and pd.notna(latest_vol_sma20) and latest_vol_sma20 != 0:
+                rvol_value = current_volume / latest_vol_sma20
+        
+        # Bollinger Bandwidth (Normalized)
+        if pd.notna(bb_upper.iloc[-1]) and pd.notna(bb_lower.iloc[-1]) and pd.notna(bb_middle.iloc[-1]) and bb_middle.iloc[-1] != 0:
+            bbw_value = (bb_upper.iloc[-1] - bb_lower.iloc[-1]) / bb_middle.iloc[-1]
+
+        # ADX
+        try:
+            # Ensure no NaNs in highs, lows, closes for ADX calculation for the required period
+            # ADX typically needs 2*window period of data to stabilize. Default window is 14.
+            # A simple check for enough non-NaN data in the involved columns up to the end.
+            if df['highs'].notna().sum() >= min_length_adx and \
+               df['lows'].notna().sum() >= min_length_adx and \
+               df['closes'].notna().sum() >= min_length_adx:
+                adx_indicator = ta.trend.ADXIndicator(df['highs'], df['lows'], df['closes'], window=14)
+                adx_series = adx_indicator.adx()
+                if adx_series is not None and not adx_series.empty and pd.notna(adx_series.iloc[-1]):
+                    adx_value = adx_series.iloc[-1]
+            # else:
+                # logging.debug(f"Skipping ADX for {symbol_name} due to insufficient non-NaN data for ADX window.")
+        except Exception as e:
+            logging.warning(f"Could not calculate ADX for {symbol_name}: {e}")
 
         # --- BTC Relative Z-Score ---
         btc_relative_zscore_value = np.nan
@@ -294,12 +344,17 @@ def scan_folder(path="data/cache/*.csv", anchor="2024-01-01", target_timeframe="
             "symbol": symbol_name, # This is BASE-QUOTE
             "timeframe": file_timeframe, # Use the timeframe parsed from the file (which matched target_timeframe)
             "close": latest.closes,
+            "volume": latest.volumes,
             "RSI": rsi.iloc[-1],
             "zscore": (latest.closes - sma50.iloc[-1]) / std50.iloc[-1],
             "%B": (latest.closes - bb_upper.iloc[-1]) / std50.iloc[-1],
             "ATRstretch": abs(latest.closes - sma20.iloc[-1]) / atr.iloc[-1],
             "VWAPgap": (latest.closes - vwap.iloc[-1]) / vwap.iloc[-1],
-            "BTC_rel_zscore": btc_relative_zscore_value, # Add the new metric
+            "BTC_rel_zscore": btc_relative_zscore_value,
+            "VolumeZScore": volume_zscore_value,
+            "RVOL": rvol_value,
+            "BBW": bbw_value,
+            "ADX": adx_value,
         }
         # OI & CVD need external feeds → merge later
         rows.append(factors)

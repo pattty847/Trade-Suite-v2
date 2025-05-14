@@ -550,6 +550,7 @@ class Data(CCXTInterface):
 
     async def fetch_and_process_candles(self, exchange, symbol, timeframe, since_timestamp, exchange_name, all_candles):
         """First fetch of a new symbol/timeframe pair."""
+        logging.info(f"Fetching {symbol} {timeframe} from {pd.to_datetime(since_timestamp, unit='ms', errors='coerce')} for {exchange.id}")
         key = self._generate_cache_key(exchange.id, symbol, timeframe)
         path = f"{self.cache_dir}/{key}.csv"
         timeframe_duration_in_seconds = exchange.parse_timeframe(timeframe)

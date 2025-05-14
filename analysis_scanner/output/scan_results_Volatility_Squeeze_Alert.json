@@ -1,0 +1,21 @@
+[
+  {
+    "exchange":"coinbase",
+    "symbol":"BTC-USD",
+    "timeframe":"1h",
+    "close":103890.04,
+    "volume":149.79935698,
+    "RSI":52.6964733084,
+    "zscore":0.4732360217,
+    "%B":0.5695330799,
+    "ATRstretch":0.3235543385,
+    "VWAPgap":0.171654599,
+    "VWAPgap_daily":0.0,
+    "BTC_rel_zscore":null,
+    "VolumeZScore":-1.0780418424,
+    "RVOL":0.3828321094,
+    "BBW":0.0264779823,
+    "ADX":16.641572975,
+    "flags_met":1
+  }
+]
