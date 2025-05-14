@@ -2,9 +2,10 @@
 
 # 🚧 WIP: Multi-Widget Streaming for Same Market
 
-![Screenshot](https://github.com/user-attachments/assets/80dcbe6b-ecdf-45e2-a9fa-f0b542088655)
-
+> This branch enables multiple widgets showing the **same market**  
 > across **different timeframes**, all sharing a unified data stream.
+
+![Screenshot](https://github.com/user-attachments/assets/80dcbe6b-ecdf-45e2-a9fa-f0b542088655)
 
 
 ## Architecture

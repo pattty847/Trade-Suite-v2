@@ -1,11 +1,15 @@
 import logging
 import dearpygui.dearpygui as dpg
 import numpy as np
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, TYPE_CHECKING
 
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.widgets.base_widget import DockableWidget
 from trade_suite.analysis.orderbook_processor import OrderBookProcessor
+
+# Forward declaration for type hinting
+if TYPE_CHECKING:
+    from trade_suite.gui.task_manager import TaskManager
 
 
 class OrderbookWidget(DockableWidget):
@@ -16,6 +20,7 @@ class OrderbookWidget(DockableWidget):
     def __init__(
         self,
         emitter: SignalEmitter,
+        task_manager: 'TaskManager',
         exchange: str,
         symbol: str,
         instance_id: Optional[str] = None,
@@ -27,6 +32,7 @@ class OrderbookWidget(DockableWidget):
         
         Args:
             emitter: Signal emitter
+            task_manager: Task manager instance
             exchange: Exchange name (e.g., 'coinbase')
             symbol: Trading pair (e.g., 'BTC/USD')
             instance_id: Optional unique instance identifier
@@ -41,6 +47,7 @@ class OrderbookWidget(DockableWidget):
             title=f"Orderbook - {exchange.upper()} {symbol}",
             widget_type="orderbook",
             emitter=emitter,
+            task_manager=task_manager,
             instance_id=instance_id,
             width=width,
             height=height,
@@ -74,6 +81,22 @@ class OrderbookWidget(DockableWidget):
         # Last data
         self.last_orderbook = None
         self.last_x_limits = (0, 0)
+    
+    def get_requirements(self) -> Dict[str, Any]:
+        """Define the data requirements for the OrderbookWidget."""
+        return {
+            "type": "orderbook",
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+            # No timeframe needed for orderbook
+        }
+    
+    def get_config(self) -> Dict[str, Any]:
+        """Returns the configuration needed to recreate this OrderbookWidget."""
+        return {
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+        }
     
     def build_menu(self) -> None:
         """Build the order book widget's menu bar."""
@@ -181,14 +204,19 @@ class OrderbookWidget(DockableWidget):
     def register_handlers(self) -> None:
         """Register event handlers for order book related signals."""
         self.emitter.register(Signals.ORDER_BOOK_UPDATE, self._on_order_book_update)
-        self.emitter.register(Signals.SYMBOL_CHANGED, self._on_symbol_change)
     
-    def _on_order_book_update(self, tab, exchange, orderbook):
+    def _on_order_book_update(self, exchange: str, orderbook: dict):
         """Handler for ORDER_BOOK_UPDATE signal."""
-        # Check if this update is for us
-        if exchange != self.exchange:
+        # Check if this update is for the correct market
+        orderbook_symbol = orderbook.get('symbol')
+        if exchange != self.exchange or orderbook_symbol != self.symbol:
+            # Log for debugging, might remove later
+            # logging.debug(f"OBWidget {self.window_tag} ignoring update for {exchange}/{orderbook_symbol}")
             return
-            
+        
+        # Log for debugging, might remove later
+        # logging.debug(f"OBWidget {self.window_tag} processing update for {self.exchange}/{self.symbol}")
+        
         # Extract raw data
         raw_bids = orderbook.get('bids', [])
         raw_asks = orderbook.get('asks', [])
@@ -298,7 +326,7 @@ class OrderbookWidget(DockableWidget):
         
         # Refresh using the last raw data
         if hasattr(self, 'last_orderbook') and self.last_orderbook:
-            self._on_order_book_update(self.window_tag, self.exchange, self.last_orderbook)
+            self._on_order_book_update(self.exchange, self.last_orderbook)
     
     def _set_ob_levels(self, sender, app_data, user_data=None):
         """Set order book spread percentage."""
@@ -307,29 +335,7 @@ class OrderbookWidget(DockableWidget):
         
         # If we have order book data, refresh the display
         if hasattr(self, 'last_orderbook') and self.last_orderbook:
-            self._on_order_book_update(self.window_tag, self.exchange, self.last_orderbook)
-    
-    def _on_symbol_change(self, exchange, tab, new_symbol):
-        """Handler for SYMBOL_CHANGED signal."""
-        if exchange != self.exchange:
-            return
-            
-        # Update symbol
-        self.symbol = new_symbol
-        
-        # Update window title
-        dpg.configure_item(
-            self.window_tag, 
-            label=f"Orderbook - {self.exchange.upper()} {new_symbol}"
-        )
-        
-        # Update tick size based on new symbol's price precision
-        # This would typically fetch from market info
-        self.processor.price_precision = self.price_precision
-        self.processor.set_tick_size(self.price_precision)
-        
-        # Update tick display
-        dpg.set_value(self.tick_display, f"{self.processor.tick_size:.8g}")
+            self._on_order_book_update(self.exchange, self.last_orderbook)
     
     def _decrease_tick_size(self):
         """Decrease order book tick size."""
@@ -347,7 +353,7 @@ class OrderbookWidget(DockableWidget):
         
         # Refresh orderbook display
         if hasattr(self, 'last_orderbook') and self.last_orderbook:
-            self._on_order_book_update(self.window_tag, self.exchange, self.last_orderbook)
+            self._on_order_book_update(self.exchange, self.last_orderbook)
     
     def _increase_tick_size(self):
         """Increase order book tick size."""
@@ -365,4 +371,10 @@ class OrderbookWidget(DockableWidget):
         
         # Refresh orderbook display
         if hasattr(self, 'last_orderbook') and self.last_orderbook:
-            self._on_order_book_update(self.window_tag, self.exchange, self.last_orderbook) 
+            self._on_order_book_update(self.exchange, self.last_orderbook)
+    
+    def close(self) -> None:
+        """Clean up orderbook-specific resources before closing."""
+        logging.info(f"Closing OrderbookWidget: {self.window_tag}")
+        # Add any specific cleanup here before calling base class close
+        super().close() # Call base class close to handle unsubscription and DPG item deletion 

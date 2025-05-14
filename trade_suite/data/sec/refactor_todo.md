@@ -34,7 +34,7 @@
     - [x] Delegate calls to appropriate components.
     - [x] Remove moved/deprecated methods and unused imports.
     - [x] Update imports.
-- [ ] **Phase 7: Cleanup**
-    - [ ] Review all files for imports, types, and connections.
-    - [ ] Ensure `await` is used correctly.
-    - [ ] Finalize constant placement (e.g., `FORM_TYPES`). 
+- [X] **Phase 7: Cleanup**
+    - [X] Review all files for imports, types, and connections.
+    - [X] Ensure `await` is used correctly.
+    - [X] Finalize constant placement (e.g., `FORM_TYPES`). 

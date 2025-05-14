@@ -1,0 +1,46 @@
+[
+    {
+        "instance_id": "coinbase_chart",
+        "widget_type": "chart",
+        "config": {
+            "exchange": "coinbase",
+            "symbol": "BTC/USD",
+            "timeframe": "1h"
+        }
+    },
+    {
+        "instance_id": "coinbase_orderbook",
+        "widget_type": "orderbook",
+        "config": {
+            "exchange": "coinbase",
+            "symbol": "BTC/USD"
+        }
+    },
+    {
+        "instance_id": "coinbase_trading",
+        "widget_type": "trading",
+        "config": {
+            "exchange": "coinbase",
+            "symbol": "BTC/USD"
+        }
+    },
+    {
+        "instance_id": "coinbase_price_level",
+        "widget_type": "price_level",
+        "config": {
+            "exchange": "coinbase",
+            "symbol": "BTC/USD",
+            "max_depth": 20,
+            "default_tick_size": 10.0
+        }
+    },
+    {
+        "instance_id": "coinbase_btc_usd_5m",
+        "widget_type": "chart",
+        "config": {
+            "exchange": "coinbase",
+            "symbol": "BTC/USD",
+            "timeframe": "5m"
+        }
+    }
+]

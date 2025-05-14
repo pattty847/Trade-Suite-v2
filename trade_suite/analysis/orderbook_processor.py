@@ -11,6 +11,11 @@ class OrderBookProcessor:
         self.price_precision = price_precision
         self.spread_percentage = 0.01
         self.min_visible_levels = 20
+        # Internal pre-allocated buffers (will resize on demand)
+        self._bid_buf = None  # shape (N, 2) -> price, qty
+        self._ask_buf = None  # shape (N, 2)
+        self._bid_len = 0
+        self._ask_len = 0
         
     def process_orderbook(self, raw_bids, raw_asks, current_price=None):
         """
@@ -34,9 +39,9 @@ class OrderBookProcessor:
             logging.debug(f"Empty order book data received. Skipping processing.")
             return None
             
-        # Convert to numpy arrays for faster processing
-        bids_arr = np.array(raw_bids, dtype=float)
-        asks_arr = np.array(raw_asks, dtype=float)
+        # Convert to numpy arrays for faster processing (reuse buffers)
+        bids_arr = self._copy_into_buffer('bid', raw_bids)
+        asks_arr = self._copy_into_buffer('ask', raw_asks)
             
         # Filter orderbook to reasonable range to avoid processing entire book
         price_range_percentage = 0.25  # 25% range to capture
@@ -412,3 +417,42 @@ class OrderBookProcessor:
         if idx > 0:  # Only decrease if not already at minimum
             self.tick_size = presets[idx-1]
         return self.tick_size
+
+    def _copy_into_buffer(self, side: str, data_list):
+        """Copy raw list [[price, qty], ...] into (potentially pre-allocated) NumPy buffer.
+
+        Args:
+            side: 'bid' or 'ask'
+            data_list: list[ [price, qty] ]
+
+        Returns:
+            view of the underlying buffer containing exactly len(data_list) rows.
+        """
+        import numpy as np  # local import to avoid global import issues
+
+        # Determine which buffer to use
+        if side == 'bid':
+            buf_attr = '_bid_buf'
+            len_attr = '_bid_len'
+        else:
+            buf_attr = '_ask_buf'
+            len_attr = '_ask_len'
+
+        curr_len = len(data_list)
+        # Lazily allocate / resize buffer if needed
+        buf = getattr(self, buf_attr)
+        if buf is None or buf.shape[0] < curr_len:
+            new_size = max(curr_len, 1024 if buf is None else buf.shape[0] * 2)
+            buf = np.empty((new_size, 2), dtype=np.float64)
+            setattr(self, buf_attr, buf)
+
+        # Fast path: no data → return empty view
+        if curr_len == 0:
+            setattr(self, len_attr, 0)
+            return buf[:0]
+
+        # Copy into buffer – use vectorised assignment for speed
+        view = np.asarray(data_list, dtype=np.float64)
+        buf[:curr_len, :] = view
+        setattr(self, len_attr, curr_len)
+        return buf[:curr_len]

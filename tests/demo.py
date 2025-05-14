@@ -176,7 +176,6 @@ class WidgetsDemoApp:
         # Send initial candle data
         self.emitter.emit(
             Signals.NEW_CANDLES,
-            tab=None,  # Will be handled by all widgets
             exchange="coinbase",
             candles=df,
         )
@@ -184,7 +183,6 @@ class WidgetsDemoApp:
         # Send initial orderbook data
         self.emitter.emit(
             Signals.ORDER_BOOK_UPDATE,
-            tab=None,
             exchange="coinbase",
             orderbook=self.generate_sample_orderbook(),
         )
@@ -279,7 +277,6 @@ class WidgetsDemoApp:
         # Emit trade update
         self.emitter.emit(
             Signals.NEW_TRADE,
-            tab=None,
             exchange="coinbase",
             trade_data=trade_data,
         )
@@ -288,7 +285,6 @@ class WidgetsDemoApp:
         if dpg.get_frame_count() % 60 == 0:
             self.emitter.emit(
                 Signals.ORDER_BOOK_UPDATE,
-                tab=None,
                 exchange="coinbase",
                 orderbook=self.generate_sample_orderbook(),
             )

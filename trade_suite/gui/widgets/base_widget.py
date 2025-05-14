@@ -1,11 +1,15 @@
 import logging
 import dearpygui.dearpygui as dpg
 from typing import Dict, Any, Optional, Callable
+from abc import ABC, abstractmethod
 
 from trade_suite.gui.signals import SignalEmitter
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from trade_suite.gui.task_manager import TaskManager
 
 
-class DockableWidget:
+class DockableWidget(ABC):
     """Base class for all dockable widgets in the application.
     
     Provides common functionality for creating, managing, and docking widgets.
@@ -17,6 +21,7 @@ class DockableWidget:
         title: str, 
         widget_type: str, # e.g., 'chart', 'orderbook'
         emitter: SignalEmitter, 
+        task_manager: 'TaskManager', # Add TaskManager dependency
         instance_id: Optional[str] = None, # e.g., 'default', 'coinbase_BTC/USD'
         width: int = 400,
         height: int = 300,
@@ -28,6 +33,7 @@ class DockableWidget:
             title: Window title (used as label)
             widget_type: Type identifier for the widget (e.g., 'chart')
             emitter: Signal emitter for event communication
+            task_manager: Task manager for handling subscriptions
             instance_id: Unique ID for this specific instance (e.g., 'coinbase_BTC/USD')
             width: Initial window width
             height: Initial window height
@@ -44,6 +50,7 @@ class DockableWidget:
 
         self.title = title # This will be the 'label'
         self.emitter = emitter
+        self.task_manager = task_manager
         self.width = width
         self.height = height
         self.kwargs = kwargs
@@ -57,7 +64,7 @@ class DockableWidget:
         self.status_bar_tag = f"{self.window_tag}_status"
         
     def create(self, parent: Optional[int] = None) -> str: # Return type is string tag
-        """Create the dockable widget window.
+        """Create the dockable widget window. 
         
         Args:
             parent: Optional parent container
@@ -73,13 +80,17 @@ class DockableWidget:
             else:
                 logging.warning(f"Widget {self.title} (tag: {self.window_tag}) marked as created but DPG item doesn't exist. Recreating.")
                 self.is_created = False # Force recreation
-            
+        
+        # --- Create the window ---
+        # DearPyGUI window kwargs
         window_kwargs = {
             "label": self.title, # User-friendly label
             "tag": self.window_tag,   # Stable, predictable string tag
             "width": self.width,
             "height": self.height,
-            "no_saved_settings": False # Ensure saving is enabled (default)
+            "no_saved_settings": False, # Ensure saving is enabled (default)
+            # Add a close callback to handle unsubscription
+            "on_close": self._on_window_close 
         }
         window_kwargs.update(self.kwargs)
         
@@ -118,6 +129,16 @@ class DockableWidget:
             self.is_created = True
             logging.debug(f"Successfully created window with tag: {self.window_tag}")
             
+            # Subscribe to data streams after successful creation
+            try:
+                requirements = self.get_requirements()
+                self.task_manager.subscribe(self, requirements)
+                logging.info(f"Widget {self.window_tag} subscribed with requirements: {requirements}")
+            except Exception as e:
+                logging.error(f"Error subscribing widget {self.window_tag}: {e}", exc_info=True)
+                # Should we attempt to close/cleanup if subscription fails?
+                # self.close() # This might be too aggressive
+            
             return self.window_tag
 
         except Exception as e:
@@ -131,6 +152,18 @@ class DockableWidget:
     def build_content(self) -> None:
         """Build the widget's main content. Must be implemented by derived classes."""
         raise NotImplementedError("Subclasses must implement build_content()")
+    
+    @abstractmethod
+    def get_requirements(self) -> Dict[str, Any]:
+        """Define the data requirements for this widget. Must be implemented by derived classes."""
+        raise NotImplementedError("Subclasses must implement get_requirements()")
+
+    @abstractmethod
+    def get_config(self) -> Dict[str, Any]:
+        """Returns a dictionary containing the necessary configuration
+        to recreate this specific widget instance.
+        """
+        raise NotImplementedError("Subclasses must implement get_config()")
     
     def build_menu(self) -> None:
         """Build the widget's menu bar. Optional for derived classes."""
@@ -163,8 +196,38 @@ class DockableWidget:
         """
         pass
     
+    def _on_window_close(self) -> None:
+        """Callback function executed when the widget window is closed via DPG."""
+        logging.info(f"Window close detected for widget {self.window_tag}. Cleaning up...")
+        # Unsubscribe before fully closing/deleting DPG item
+        try:
+            self.task_manager.unsubscribe(self)
+            logging.info(f"Widget {self.window_tag} unsubscribed.")
+        except Exception as e:
+            logging.error(f"Error unsubscribing widget {self.window_tag}: {e}", exc_info=True)
+            
+        # Set is_created to false as the window item will be gone after this callback finishes
+        self.is_created = False
+        # Note: DashboardManager might also remove this widget instance from its registry
+        # after the close event, or rely on this callback. Let's assume for now this
+        # handles the necessary TaskManager interaction.
+
     def close(self) -> None:
         """Close and destroy the widget."""
+        # This method might be called programmatically (e.g., by DashboardManager.remove_widget)
+        # The _on_window_close callback handles user-initiated closes.
+        # Both should result in unsubscription. Call unsubscribe here too for robustness,
+        # TaskManager.unsubscribe should be idempotent.
         if self.is_created:
-            dpg.delete_item(self.window_tag)
-            self.is_created = False 
+            logging.info(f"Programmatic close called for widget {self.window_tag}. Unsubscribing and deleting item.")
+            try:
+                self.task_manager.unsubscribe(self)
+                logging.info(f"Widget {self.window_tag} unsubscribed (programmatic close).")
+            except Exception as e:
+                logging.error(f"Error unsubscribing widget {self.window_tag} (programmatic close): {e}", exc_info=True)
+                
+            if dpg.does_item_exist(self.window_tag):
+                dpg.delete_item(self.window_tag)
+            self.is_created = False
+        else:
+            logging.debug(f"Programmatic close called for widget {self.window_tag}, but it was not marked as created.") 

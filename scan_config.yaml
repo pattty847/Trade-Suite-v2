@@ -1,0 +1,178 @@
+# Defines a list of scans to run. Each scan has a name,
+# a minimum number of conditions that must be met,
+# and a list of specific conditions.
+data_fetching:
+  enabled: true                 # Set to true to fetch/update data before scanning
+  exchange: "coinbase"
+  # target_timeframe will be taken from analysis.py's main setting
+  since_date: "2025-05-01T00:00:00Z" # How far back to fetch, if creating new files or filling gaps (ISO 8601 format)
+  
+  # Asset groups are defined in the asset_groups section below.
+  # This setting will fetch all symbols in the specified asset group.
+  symbols_source: "top_x"       # How to get symbols: "top_x" or "explicit_list" or "group:<group_name>"
+  
+  # Settings for "top_x"
+  top_x_count: 20               # Number of top symbols by volume to fetch
+  top_x_quote_currency: "USD"   # Quote currency for top_x (e.g., USD, USDT)
+  top_x_volume_field: "volume_24h" # Exchange-specific field for volume (e.g., 'volume_24h' for Coinbase)
+
+  # Settings for "explicit_list"
+  symbols_list:               # Uncomment and use if symbols_source is "explicit_list"
+    - "BTC/USD"
+    - "PEPE/USD"
+
+output:
+  - format: "markdown" # For stdout, if you still want to pipe to a .md file
+    path: "analysis_scanner/output/scan_results.md"
+  - format: "csv"
+    path: "analysis_scanner/output/scan_results.csv" # All scan-specific tables will get a suffix based on this
+  - format: "json"
+    path: "analysis_scanner/output/scan_results.json" # Same here, e.g., output/scan_results_Overbought_Extreme_V1.json
+  - format: "text"
+    path: "analysis_scanner/output/scan_summary.txt" # And here 
+
+asset_groups:
+  majors:
+    - BTC/USD
+    - ETH/USD
+    - SOL/USD
+    - DOGE/USD
+    - AVAX/USD
+  defi_bluechips:
+    - UNI/USD
+    - AAVE/USD
+    - LINK/USD
+  my_watchlist:
+    - SOL/USD
+    - DOGE/USD
+    - AVAX/USD
+  memes:
+    - PEPE/USD
+    - SHIB/USD
+    - FLOW/USD
+
+
+scanner_options:
+  path_pattern: "data/cache/*.csv"
+  anchor_for_vwap: "2024-01-01"
+  max_rows_to_load: 1000 # Load last 1000 rows
+
+scans:
+  - name: "Overbought_Extreme_V1"
+    description: "Looks for symbols that are highly overbought on multiple indicators."
+    min_flags_to_pass: 2
+    enabled: true # Allows you to easily enable/disable scans
+    conditions:
+      - metric: "RSI"
+        operator: ">" # (gt, lt, gte, lte, eq, ne, etc.)
+        value: 78
+        enabled: true
+      - metric: "zscore"
+        operator: ">"
+        value: 2.5
+        enabled: true
+      - metric: "ATRstretch"
+        operator: ">"
+        value: 3.0
+        enabled: true
+      - metric: "VWAPgap"
+        operator: ">" #  (close is > 15% above VWAP)
+        value: 0.15
+        enabled: true
+
+  - name: "Potential_Mean_Reversion_Short"
+    description: "Similar to Overbought_Extreme_V1 but might use slightly different thresholds or fewer flags."
+    min_flags_to_pass: 1
+    enabled: true # Example of a disabled scan
+    conditions:
+      - metric: "RSI"
+        operator: ">"
+        value: 60
+        enabled: true
+      - metric: "zscore"
+        operator: ">"
+        value: 2.0
+        enabled: true
+
+  - name: "Oversold_Interest"
+    description: "Looks for potentially oversold conditions."
+    min_flags_to_pass: 1
+    enabled: true
+    conditions:
+      - metric: "RSI"
+        operator: "<"
+        value: 40
+        enabled: true
+      - metric: "VWAPgap"
+        operator: "<" # close is < -5% below VWAP
+        value: -0.05
+        enabled: true 
+
+  - name: "BTC_Strong_Outperformers"
+    description: "Looks for symbols significantly outperforming Bitcoin and showing own strength."
+    min_flags_to_pass: 2
+    enabled: true
+    conditions:
+      - metric: "BTC_rel_zscore"
+        operator: ">" 
+        value: 1.5 # Symbol's price ratio to BTC is 1.5+ std devs above its mean
+        enabled: true
+      - metric: "RSI" # Symbol's own RSI
+        operator: ">"
+        value: 55 
+        enabled: true
+      - metric: "zscore" # Symbol's own price z-score vs its SMA50
+        operator: ">"
+        value: 0.5 # Symbol is also above its own 50-period mean
+        enabled: false # Optional: make it 3 flags to pass if this is enabled
+
+  - name: "BTC_Potential_Catch_Up"
+    description: "Looks for symbols that might be starting to outperform BTC after a period of underperformance, or are showing general strength aligned with BTC."
+    min_flags_to_pass: 2 # Could be 3 if VWAPgap is critical
+    enabled: true
+    conditions:
+      - metric: "BTC_rel_zscore"
+        operator: ">" 
+        value: 0.25 # Ratio is starting to move above its mean, or is positive
+        enabled: true
+      - metric: "RSI" # Symbol's own RSI
+        operator: ">"
+        value: 50
+        enabled: true
+      - metric: "VWAPgap" # Symbol's price relative to its anchored VWAP
+        operator: ">" 
+        value: 0.00 # Price is above its VWAP
+        enabled: true
+      - metric: "zscore" # Symbol's own price z-score
+        operator: ">"
+        value: 0
+        enabled: false # Optional additional filter
+
+  - name: "BTC_Extreme_Underperformers"
+    description: "Looks for symbols significantly underperforming Bitcoin. Could be for fading or bottom fishing if other metrics align."
+    min_flags_to_pass: 1
+    enabled: true
+    conditions:
+      - metric: "BTC_rel_zscore"
+        operator: "<"
+        value: -1.5 # Symbol's price ratio to BTC is 1.5+ std devs below its mean
+        enabled: true
+      - metric: "RSI" # Check if it's also oversold on its own
+        operator: "<"
+        value: 40
+        enabled: false # Optional: to find truly beaten down assets 
+
+  - name: "Volatility_Squeeze_Alert"
+    description: "Identifies symbols with very low Bollinger Band Width, indicating a potential for a volatility expansion."
+    min_flags_to_pass: 1
+    enabled: true
+    conditions:
+      - metric: "BBW" # Bollinger Band Width (Normalized)
+        operator: "<"
+        value: 0.05   # Example: BBW is less than 5% of the middle band (tight squeeze)
+        enabled: true
+      # You might add other conditions here, like ADX < 20 (non-trending during squeeze)
+      - metric: "ADX"
+        operator: "<"
+        value: 20
+        enabled: false # Optional: ensure it's in a low trend strength phase 

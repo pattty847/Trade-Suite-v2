@@ -1,9 +1,13 @@
 import logging
 import dearpygui.dearpygui as dpg
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, TYPE_CHECKING
 
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.widgets.base_widget import DockableWidget
+
+# Forward declaration for type hinting
+if TYPE_CHECKING:
+    from trade_suite.gui.task_manager import TaskManager
 
 
 class TradingWidget(DockableWidget):
@@ -14,6 +18,7 @@ class TradingWidget(DockableWidget):
     def __init__(
         self,
         emitter: SignalEmitter,
+        task_manager: 'TaskManager',
         exchange: str,
         symbol: str,
         instance_id: Optional[str] = None,
@@ -25,6 +30,7 @@ class TradingWidget(DockableWidget):
         
         Args:
             emitter: Signal emitter
+            task_manager: Task manager instance
             exchange: Exchange name (e.g., 'coinbase')
             symbol: Trading pair (e.g., 'BTC/USD')
             instance_id: Optional unique instance identifier
@@ -39,6 +45,7 @@ class TradingWidget(DockableWidget):
             title=f"Trading - {exchange.upper()} {symbol}",
             widget_type="trading",
             emitter=emitter,
+            task_manager=task_manager,
             instance_id=instance_id,
             width=width,
             height=height,
@@ -58,6 +65,31 @@ class TradingWidget(DockableWidget):
         # UI component tags
         self.position_table_tag = f"{self.window_tag}_positions"
         self.order_table_tag = f"{self.window_tag}_orders"
+        self.price_display = f"{self.window_tag}_price_display"
+        self.price_input = f"{self.window_tag}_price_input"
+        self.quantity_input = f"{self.window_tag}_quantity_input"
+        self.position_size_display = f"{self.window_tag}_pos_size"
+        self.position_entry_display = f"{self.window_tag}_pos_entry"
+        self.position_pnl_display = f"{self.window_tag}_pos_pnl"
+        self.exchange_status = f"{self.window_tag}_exch_status"
+        self.last_order_status = f"{self.window_tag}_last_order"
+    
+    def get_requirements(self) -> Dict[str, Any]:
+        """Define the data requirements for the TradingWidget."""
+        # Trading widget primarily needs real-time trades for price updates
+        return {
+            "type": "trades",
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+            # No timeframe needed
+        }
+    
+    def get_config(self) -> Dict[str, Any]:
+        """Returns the configuration needed to recreate this TradingWidget."""
+        return {
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+        }
     
     def build_menu(self) -> None:
         """Build the trading widget's menu bar."""
@@ -80,7 +112,7 @@ class TradingWidget(DockableWidget):
                     # Price display
                     with dpg.group(horizontal=True):
                         dpg.add_text("Current Price:")
-                        self.price_display = dpg.add_text("0.00")
+                        dpg.add_text("0.00", tag=self.price_display)
                     
                     # Order type selector
                     dpg.add_combo(
@@ -92,21 +124,23 @@ class TradingWidget(DockableWidget):
                     )
                     
                     # Order price (for limit/stop orders)
-                    self.price_input = dpg.add_input_float(
+                    dpg.add_input_float(
                         label="Price",
                         default_value=0.0,
                         format="%.2f",
                         width=150,
-                        enabled=False  # Disabled for market orders
+                        enabled=False,  # Disabled for market orders
+                        tag=self.price_input
                     )
                     
                     # Quantity
-                    self.quantity_input = dpg.add_input_float(
+                    dpg.add_input_float(
                         label="Quantity",
                         default_value=self.order_quantity,
                         format="%.4f",
                         width=150,
-                        callback=self._on_quantity_change
+                        callback=self._on_quantity_change,
+                        tag=self.quantity_input
                     )
                     
                     # Buttons for common quantities
@@ -139,15 +173,15 @@ class TradingWidget(DockableWidget):
                     with dpg.group():
                         with dpg.group(horizontal=True):
                             dpg.add_text("Size:")
-                            self.position_size_display = dpg.add_text("0.0")
+                            dpg.add_text("0.0", tag=self.position_size_display)
                         
                         with dpg.group(horizontal=True):
                             dpg.add_text("Entry:")
-                            self.position_entry_display = dpg.add_text("0.00")
+                            dpg.add_text("0.00", tag=self.position_entry_display)
                         
                         with dpg.group(horizontal=True):
                             dpg.add_text("P&L:")
-                            self.position_pnl_display = dpg.add_text("$0.00")
+                            dpg.add_text("$0.00", tag=self.position_pnl_display)
                         
                         # Close position button
                         dpg.add_button(
@@ -186,21 +220,21 @@ class TradingWidget(DockableWidget):
     def build_status_bar(self) -> None:
         """Build the trading widget's status bar."""
         dpg.add_text("Exchange Status:")
-        self.exchange_status = dpg.add_text("Connected")
+        dpg.add_text("Connected", tag=self.exchange_status)
         dpg.add_spacer(width=20)
         dpg.add_text("Last Order:")
-        self.last_order_status = dpg.add_text("None")
+        dpg.add_text("None", tag=self.last_order_status)
     
     def register_handlers(self) -> None:
         """Register event handlers for trading related signals."""
         self.emitter.register(Signals.NEW_TRADE, self._on_new_trade)
-        self.emitter.register(Signals.SYMBOL_CHANGED, self._on_symbol_change)
         # More handlers would be registered for actual trading functionality
     
-    def _on_new_trade(self, tab, exchange, trade_data):
+    def _on_new_trade(self, exchange: str, trade_data: dict):
         """Handler for new trade data."""
-        # We only care about trades for our exchange/symbol
-        if exchange != self.exchange:
+        # Filter trades based on the widget's configured exchange and symbol
+        trade_symbol = trade_data.get('symbol')
+        if exchange != self.exchange or trade_symbol != self.symbol:
             return
             
         # Update current price
@@ -210,24 +244,6 @@ class TradingWidget(DockableWidget):
         # Update position P&L if we have a position
         if self.position_size != 0:
             self._update_position_pnl()
-    
-    def _on_symbol_change(self, exchange, tab, new_symbol):
-        """Handler for symbol change."""
-        if exchange != self.exchange:
-            return
-            
-        # Update symbol
-        self.symbol = new_symbol
-        
-        # Update window title
-        dpg.configure_item(
-            self.window_tag, 
-            label=f"Trading - {self.exchange.upper()} {new_symbol}"
-        )
-        
-        # Reset position and orders for the new symbol
-        self._reset_position()
-        self._clear_orders()
     
     def _on_order_type_change(self, order_type):
         """Handler for order type change."""
@@ -444,4 +460,10 @@ class TradingWidget(DockableWidget):
     def _show_order_history(self):
         """Show the order history dialog."""
         # In a real implementation, would create an order history popup
-        logging.info("Order history not implemented yet") 
+        logging.info("Order history not implemented yet")
+
+    def close(self) -> None:
+        """Clean up trading-specific resources before closing."""
+        logging.info(f"Closing TradingWidget: {self.window_tag}")
+        # Add any specific cleanup here before calling base class close
+        super().close() # Call base class close to handle unsubscription and DPG item deletion 

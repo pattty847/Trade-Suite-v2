@@ -1,0 +1,4 @@
+--- Symbols meeting criteria for scan: 'Volatility_Squeeze_Alert' ---
+exchange  symbol timeframe     close     volume       RSI   zscore       %B  ATRstretch  VWAPgap  VWAPgap_daily  BTC_rel_zscore  VolumeZScore     RVOL      BBW       ADX  flags_met
+coinbase BTC-USD        1h 103890.04 149.799357 52.696473 0.473236 0.569533    0.323554 0.171655            0.0             NaN     -1.078042 0.382832 0.026478 16.641573          1
+-----------------------------------------------------------

@@ -51,6 +51,7 @@ class SECFilingViewer(DockableWidget):
         sec_fetcher: SECDataFetcher,
         task_manager: TaskManager,
         instance_id: Optional[str] = None,
+        ticker: Optional[str] = None,
         **kwargs
     ):
         """Initializes the SECFilingViewer widget.
@@ -61,16 +62,24 @@ class SECFilingViewer(DockableWidget):
             task_manager (TaskManager): An instance of the application's task manager.
             instance_id (Optional[str], optional): A unique identifier for this widget instance.
                                                    Defaults to None (will be auto-generated).
+            ticker (Optional[str], optional): The initial ticker symbol to load. Defaults to None.
             **kwargs: Additional keyword arguments passed to the base DockableWidget constructor.
         """
+        # Store the initial ticker value *before* calling super()
+        # Convert to uppercase and handle None
+        self._last_requested_ticker: Optional[str] = ticker.upper() if ticker else None
+        # Pass other kwargs to the base class, excluding 'ticker' if it was somehow in kwargs
+        kwargs.pop('ticker', None) # Ensure ticker is not passed to super
+
         super().__init__(
             title="SEC Filing Viewer",
             widget_type=self.WIDGET_TYPE,
+            task_manager=task_manager,
             emitter=emitter,
             instance_id=instance_id,
             width=600,
             height=500,
-            **kwargs
+            **kwargs # Pass the cleaned kwargs
         )
         self.sec_fetcher = sec_fetcher
         self.task_manager = task_manager
@@ -84,19 +93,26 @@ class SECFilingViewer(DockableWidget):
         self.status_text_tag = f"{self.content_tag}_status_text"
 
         # Store the last requested ticker to avoid race conditions in UI updates
-        self._last_requested_ticker: Optional[str] = None
+        # self._last_requested_ticker: Optional[str] = None # This is now set above before super()
         # Store last fetched data for debugging
         self._last_fetched_filings: List[Dict] = []
         self._last_fetched_transactions: List[Dict] = []
         self._last_fetched_financials: Optional[Dict] = None
         self._is_loading: bool = False # Flag to track if a load is in progress
 
-        logging.info(f"SECFilingViewer instance {self.instance_id} created.")
+        logging.info(f"SECFilingViewer instance {self.instance_id} created with ticker: {self._last_requested_ticker}")
 
     def build_content(self) -> None:
         """Builds the DearPyGui elements within the widget's content area."""
         with dpg.group(horizontal=True):
-            dpg.add_input_text(tag=self.ticker_input_tag, label="Ticker", hint="Enter Ticker (e.g., AAPL)", width=150, callback=self._clear_on_ticker_change)
+            dpg.add_input_text(
+                tag=self.ticker_input_tag,
+                label="Ticker",
+                hint="Enter Ticker (e.g., AAPL)",
+                width=150,
+                callback=self._clear_on_ticker_change,
+                default_value=self._last_requested_ticker or "" # Set initial value
+            )
 
             # Form type selector dropdown
             # Filter out Form 4 as it has its own button
@@ -909,7 +925,24 @@ class SECFilingViewer(DockableWidget):
         # Auto-adjust height based on content? DPG might not support this easily for modals.
         # dpg.configure_item(content_area_id, height=dpg.get_text_size(content, wrap_width=width-20)[1] + 40)
         # dpg.configure_item(modal_id, height=dpg.get_item_height(content_area_id) + 60)
+    
+    def get_requirements(self) -> Dict[str, Any]:
+        """SECFilingViewer does not directly subscribe to market data streams via TaskManager.
 
+        Its data fetching is triggered by user actions.
+        Returns an empty dictionary.
+        """
+        return {}
+
+    def get_config(self) -> Dict[str, Any]:
+        """Returns the configuration needed to recreate this SECFilingViewer.
+
+        In this case, it includes the last successfully requested ticker.
+        """
+        return {
+            "ticker": self._last_requested_ticker if self._last_requested_ticker else "" # Return empty string if None
+        }
+        
 # Example Integration (in Viewport or DashboardManager):
 # from trade_suite.gui.widgets.sec_filing_viewer import SECFilingViewer
 #
