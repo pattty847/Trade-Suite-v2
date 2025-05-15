@@ -132,79 +132,108 @@ class Data(CCXTInterface):
         track_stats: bool = False,
         write_trades: bool = False,
         write_stats: bool = False,
+        sink: asyncio.coroutine = None,
+        queue: asyncio.Queue = None
     ):
         """
         The watch_trades function is a method of the Data class that watches for trades on a specific exchange and symbol.
         It uses the ccxt library to connect to the exchange, then loops indefinitely, waiting for new trades.
-        When new trades are received, they are processed and emitted via the NEW_TRADE signal.
+        When new trades are received, they are either passed to a sink/queue (if provided) 
+        or emitted via the NEW_TRADE signal (if emitter is configured).
 
         :param self: Refer to the object itself
         :param symbol: str: Specify the symbol to watch trades for
         :param exchange: str: Identify which exchange the data is coming from
         :param stop_event: asyncio.Event: Event to signal when to stop the stream.
-        :param track_stats: bool: Determine whether or not we want to track statistics
-        :param write_trades: bool: Write the trades to influxdb
-        :param write_stats: bool: Write the statistics to a database
+        :param track_stats: bool: Determine whether or not we want to track statistics (via emitter)
+        :param write_trades: bool: Write the trades to influxdb (via self.influx, if configured)
+        :param write_stats: bool: Write the statistics to a database (via self.influx, if configured)
+        :param sink: Callable: An async callable (coroutine function) to send trade data to.
+                         Expected signature: async def sink(trade_event_dict: Dict)
+        :param queue: asyncio.Queue: An asyncio.Queue to put trade data onto.
         :return: The following:
         :doc-author: Trelent
         """
+        if sink and queue:
+            raise ValueError("Provide either a sink or a queue, not both.")
+
         exchange_object = self.exchange_list[exchange]
         logging.info(f"Starting trade stream for {symbol} on {exchange}")
         stop_event.clear() # Ensure the event is clear initially
-        # TODO: Add a condition to streaming
+        
         while not stop_event.is_set():
             try:
-                # trades: Contains a dictionary with all the below information. Because we are passing a list of symbols the 'watchTradesForSymbols' function
-                # returns whatever the latest tick was for whichever coin for the exchange.
-                # list[dict_keys(['id', 'order', 'info', 'timestamp', 'datetime', 'symbol', 'type', 'takerOrMaker', 'side', 'price', 'amount', 'fee', 'cost', 'fees'])]
-                logging.debug(f"Awaiting trades for {symbol}...")
-                trades = await exchange_object.watch_trades(symbol)
-                logging.debug(f"Received trades: {'Yes' if trades else 'No'}, Count: {len(trades) if trades else 0}")
+                logging.debug(f"Awaiting trades for {symbol} on {exchange} via watch_trades...")
+                # watch_trades from ccxt returns a list of trades
+                trades_list = await exchange_object.watch_trades(symbol) 
+                logging.debug(f"Received {len(trades_list) if trades_list else 0} trades for {symbol} on {exchange}.")
 
-                if trades:
-                    logging.debug(f"Emitting NEW_TRADE signal...")
-                    # Ensure we explicitly pass the exchange and trade_data parameters
-                    if self._ui_loop:
-                        # Fast-path: schedule directly on the UI loop.
-                        self.emitter.emit_threadsafe(
-                            self._ui_loop,
-                            Signals.NEW_TRADE,
-                            exchange=exchange,
-                            trade_data=trades[0],
-                        )
-                    else:
-                        # Fallback to queue-based emission.
-                        self.emitter.emit(
-                            Signals.NEW_TRADE,
-                            exchange=exchange,
-                            trade_data=trades[0],
-                        )
+                if trades_list:
+                    for trade_data in trades_list: # Process each trade in the list
+                        trade_event_dict = {'exchange': exchange, 'trade_data': trade_data}
 
-                if track_stats:
-                    symbol_key, stats = self.agg.calc_trade_stats(exchange, trades)
-                    # self.agg.report_statistics() # logging.info to console
-                    if self._ui_loop:
-                        self.emitter.emit_threadsafe(
-                            self._ui_loop,
-                            Signals.TRADE_STAT_UPDATE,
-                            symbol=symbol_key,
-                            stats=stats,
-                        )
-                    else:
-                        self.emitter.emit(
-                            Signals.TRADE_STAT_UPDATE,
-                            symbol=symbol_key,
-                            stats=stats,
-                        )
+                        if sink:
+                            await sink(trade_event_dict)
+                        elif queue:
+                            await queue.put(trade_event_dict)
+                        elif self.emitter: # Fallback to emitter if no sink/queue and emitter exists
+                            logging.debug(f"Emitting NEW_TRADE signal for {symbol} on {exchange}...")
+                            if self._ui_loop and self.emitter.emit_threadsafe.__name__ != '_do_not_use_emit_threadsafe': # Check if it's a real method
+                                self.emitter.emit_threadsafe(
+                                    self._ui_loop,
+                                    Signals.NEW_TRADE,
+                                    exchange=exchange, # Pass individual args
+                                    trade_data=trade_data
+                                )
+                            else:
+                                self.emitter.emit(
+                                    Signals.NEW_TRADE,
+                                    exchange=exchange, # Pass individual args
+                                    trade_data=trade_data
+                                )
+                        else:
+                            logging.debug(f"No sink, queue, or emitter configured for trade data for {symbol} on {exchange}.")
 
-                if write_stats and write_trades:
-                    await self.influx.write_trades(exchange, trades)
-                    await self.influx.write_stats(exchange, stats, symbol_key)
+                        # Legacy direct InfluxDB write (only if specified and no sink/queue)
+                        if write_trades and self.influx and not (sink or queue):
+                            await self.influx.write_trades(exchange, [trade_data]) # write_trades expects a list
+
+                        # Stats tracking (only if specified and emitter is available)
+                        if track_stats and self.emitter: # Depends on emitter for now
+                            # Assuming calc_trade_stats can take a single trade_data or list
+                            # For simplicity, we pass it as a list containing the single trade
+                            symbol_key, stats = self.agg.calc_trade_stats(exchange, [trade_data]) 
+                            if self._ui_loop and self.emitter.emit_threadsafe.__name__ != '_do_not_use_emit_threadsafe':
+                                self.emitter.emit_threadsafe(
+                                    self._ui_loop,
+                                    Signals.TRADE_STAT_UPDATE,
+                                    symbol=symbol_key,
+                                    stats=stats,
+                                )
+                            else:
+                                self.emitter.emit(
+                                    Signals.TRADE_STAT_UPDATE,
+                                    symbol=symbol_key,
+                                    stats=stats,
+                                )
+                            # Legacy direct InfluxDB write for stats
+                            if write_stats and self.influx and not (sink or queue):
+                                await self.influx.write_stats(exchange, stats, symbol_key)
+                
             except asyncio.CancelledError:
                 logging.info(f"Trade stream for {symbol} on {exchange} cancelled.")
                 break # Exit loop on cancellation
+            except ccxt.NetworkError as e:
+                logging.warning(f"NetworkError in watch_trades for {symbol} on {exchange}: {e}. Retrying after delay...")
+                await asyncio.sleep(exchange_object.rateLimit / 1000 if exchange_object.rateLimit > 0 else 5) # Use exchange's rateLimit or default
+            except ccxt.ExchangeError as e:
+                logging.error(f"ExchangeError in watch_trades for {symbol} on {exchange}: {e}. Might stop or retry depending on error.")
+                # Depending on the severity, you might want to break or sleep and retry
+                await asyncio.sleep(5) # Basic retry delay
             except Exception as e:
-                logging.error(e)
+                logging.error(f"Unexpected error in watch_trades for {symbol} on {exchange}: {e}", exc_info=True)
+                # Implement more specific error handling or backoff as needed
+                await asyncio.sleep(5) # Basic retry delay for unexpected errors
         logging.info(f"Trade stream for {symbol} on {exchange} stopped.")
 
     async def watch_orderbooks(self, symbols: List[str], stop_event: asyncio.Event):
@@ -256,72 +285,99 @@ class Data(CCXTInterface):
                     break # Exit outer loop if event is cleared
             logging.info(f"Orderbook list stream for {symbols} on {exchange_id} stopped.")
 
-    async def watch_orderbook(self, exchange: str, symbol: str, stop_event: asyncio.Event):
+    async def watch_orderbook(self, exchange: str, symbol: str, stop_event: asyncio.Event,
+                              sink: asyncio.coroutine = None, # New: for direct callback
+                              queue: asyncio.Queue = None,     # New: for asyncio.Queue
+                              cadence_ms: int = 500         # New: configurable cadence, default 500ms
+                              ):
         """
         The watch_orderbook function is a coroutine that takes in the exchange and symbol as parameters.
         It then creates an exchange_object variable which is equal to the ccxt object of the given exchange.
         Then it logs that it has started streaming orderbooks for a given symbol on a given exchange.
         Next, while True: (meaning forever) try: to create an orderbook variable which is equal to await
-        the watch_orderbook function from ccxt with the parameter of symbol (which was passed into this function).
-        Then emit Signals.ORDER_BOOK_UPDATE with parameters exchange and orderbook.
+        the watch_order_book function from ccxt with the parameter of symbol (which was passed into this function).
+        If a sink or queue is provided, the orderbook data is passed there. Otherwise, if an emitter is configured,
+        it emits Signals.ORDER_BOOK_UPDATE with parameters exchange and orderbook, throttled by `cadence_ms`.
 
         :param self: Access the class attributes and methods
         :param exchange: str: Identify the exchange that we want to get the orderbook from
         :param symbol: str: Specify what symbol to watch
         :param stop_event: asyncio.Event: Event to signal when to stop the stream.
+        :param sink: Callable: An async callable (coroutine function) to send order book data to.
+                         Expected signature: async def sink(orderbook_event_dict: Dict)
+        :param queue: asyncio.Queue: An asyncio.Queue to put order book data onto.
+        :param cadence_ms: int: The desired minimum interval in milliseconds between sending order book updates (for sink/queue/emitter).
         :return: A dictionary with the following keys:
         :doc-author: Trelent
         """
+        if sink and queue:
+            raise ValueError("Provide either a sink or a queue, not both.")
+
         exchange_object = self.exchange_list[exchange]
-        logging.info(f"Starting orderbook stream for {symbol} on {exchange}")
+        logging.info(f"Starting orderbook stream for {symbol} on {exchange} with {cadence_ms}ms cadence.")
         stop_event.clear() # Ensure the event is clear initially
         
-        # Throttle orderbook signal emission
         last_emit_time = 0
-        throttle_interval = 0.5  # Emit max 2 times per second (500ms interval)
-        latest_orderbook = None # Store the most recent orderbook
+        throttle_interval_seconds = cadence_ms / 1000.0
+        latest_orderbook_raw = None # Store the most recent raw orderbook from ccxt
         
         while not stop_event.is_set():
             try:
-                # logging.debug(f"Awaiting order book for {symbol}...") # Changed from INFO to DEBUG
-                orderbook = await exchange_object.watch_order_book(symbol)
-                # logging.debug(f"Received order book: {'Yes' if orderbook else 'No'}") # Changed from INFO to DEBUG
+                # Fetch the raw order book data
+                current_orderbook_data = await exchange_object.watch_order_book(symbol)
 
-                if orderbook:
-                    latest_orderbook = orderbook # Always store the latest received book
+                if current_orderbook_data:
+                    latest_orderbook_raw = current_orderbook_data # Always store the latest received book
 
                 # Check if throttle interval has passed and we have a book to send
                 current_time = asyncio.get_event_loop().time()
-                if latest_orderbook and (current_time - last_emit_time >= throttle_interval):
-                    logging.debug(f"Throttled emit: Emitting ORDER_BOOK_UPDATE signal...")
-                    # This emit call now seems redundant as TaskManager handles queuing and emission.
-                    # However, keeping it for now preserves original logic flow if direct calls were intended.
-                    # TODO: Review if this emit call can be removed entirely after TaskManager refactor.
-                    if self._ui_loop:
-                        self.emitter.emit_threadsafe(
-                            self._ui_loop,
-                            Signals.ORDER_BOOK_UPDATE,
-                            exchange=exchange,
-                            orderbook=latest_orderbook,  # Emit the latest stored book
-                        )
+                if latest_orderbook_raw and (current_time - last_emit_time >= throttle_interval_seconds):
+                    orderbook_event_dict = {'exchange': exchange, 'orderbook': latest_orderbook_raw}
+                    
+                    if sink:
+                        await sink(orderbook_event_dict)
+                    elif queue:
+                        await queue.put(orderbook_event_dict)
+                    elif self.emitter: # Fallback to emitter if no sink/queue and emitter exists
+                        logging.debug(f"Throttled emit: Emitting ORDER_BOOK_UPDATE signal for {symbol} on {exchange}...")
+                        if self._ui_loop and self.emitter.emit_threadsafe.__name__ != '_do_not_use_emit_threadsafe':
+                            self.emitter.emit_threadsafe(
+                                self._ui_loop,
+                                Signals.ORDER_BOOK_UPDATE,
+                                exchange=exchange,
+                                orderbook=latest_orderbook_raw, 
+                            )
+                        else:
+                            self.emitter.emit(
+                                Signals.ORDER_BOOK_UPDATE,
+                                exchange=exchange,
+                                orderbook=latest_orderbook_raw,
+                            )
                     else:
-                        self.emitter.emit(
-                            Signals.ORDER_BOOK_UPDATE,
-                            exchange=exchange,
-                            orderbook=latest_orderbook,  # Emit the latest stored book
-                        )
+                        logging.debug(f"No sink, queue, or emitter configured for order book data for {symbol} on {exchange}.")
+                    
                     last_emit_time = current_time
-                    latest_orderbook = None # Clear after sending to avoid re-sending same data if no new book arrives
-
-                # No explicit sleep needed here as watch_order_book implicitly waits
+                    latest_orderbook_raw = None # Clear after sending/emitting to process fresh data next interval
+                
+                # If not sending data this iteration (due to throttling), 
+                # a small sleep can prevent a tight loop if watch_order_book returns very quickly with no new data.
+                # However, watch_order_book itself should block until there's an update or timeout.
+                # If cadence is very frequent (e.g., 100ms), this sleep might be detrimental.
+                # Consider if ccxt's watch_order_book has internal timeouts or how it behaves on no-update.
+                # For now, no explicit sleep if not emitting, relying on watch_order_book's blocking.
 
             except asyncio.CancelledError:
                 logging.info(f"Orderbook stream for {symbol} on {exchange} cancelled.")
                 break # Exit the loop if task is cancelled
+            except ccxt.NetworkError as e:
+                logging.warning(f"NetworkError in watch_orderbook for {symbol} on {exchange}: {e}. Retrying after delay...")
+                await asyncio.sleep(exchange_object.rateLimit / 1000 if exchange_object.rateLimit > 0 else 5) # Use exchange's rateLimit or default
+            except ccxt.ExchangeError as e:
+                logging.error(f"ExchangeError in watch_orderbook for {symbol} on {exchange}: {e}. Might stop or retry.")
+                await asyncio.sleep(5) # Basic retry delay
             except Exception as e:
-                logging.error(f"Error in orderbook stream for {symbol} on {exchange}: {e}")
-                # Optional: Add a delay before retrying after an error
-                await asyncio.sleep(1)
+                logging.error(f"Error in orderbook stream for {symbol} on {exchange}: {e}", exc_info=True)
+                await asyncio.sleep(1) # Optional: Add a delay before retrying after an error
         logging.info(f"Orderbook stream for {symbol} on {exchange} stopped.")
 
     async def fetch_candles(

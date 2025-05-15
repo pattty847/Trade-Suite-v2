@@ -1,0 +1,1179 @@
+# sentinel/collectors/coinbase.py
+import asyncio
+import logging
+from typing import Callable # For type hinting the sink
+
+from trade_suite.data.data_source import Data # Assuming Data class is accessible
+from sentinel import schema # For LP building
+from sentinel import config # For constants like CADENCE_MS
+
+async def stream_data_to_queues(
+    data_source: Data,
+    symbol: str,
+    stop_event: asyncio.Event,
+    trade_queue: asyncio.Queue,
+    order_book_queue: asyncio.Queue,
+    is_raw_enabled: bool, # New: To control raw book processing
+    raw_order_book_queue: asyncio.Queue | None = None, # New: Queue for raw order book LP
+    exchange_name: str = config.TARGET_EXCHANGE,
+    order_book_cadence_ms: int = config.CADENCE_MS,
+    max_queue_retries: int = 3, # Max retries for putting on queue if full
+    queue_retry_delay: float = 0.01 # Delay between retries in seconds
+):
+    """
+    Uses the Data class to watch trades and order books, 
+    formats them into Line Protocol, and puts them onto asyncio Queues.
+    Includes queue overflow checks and optional raw order book processing.
+
+    Args:
+        data_source: An initialized instance of the Data class.
+        symbol: The trading symbol (e.g., 'BTC/USD').
+        stop_event: asyncio.Event to signal when to stop streaming.
+        trade_queue: asyncio.Queue to send trade Line Protocol strings to.
+        order_book_queue: asyncio.Queue to send binned order book Line Protocol strings to.
+        is_raw_enabled: Boolean indicating if raw order book data should be processed.
+        raw_order_book_queue: Optional asyncio.Queue for raw order book LP strings.
+        exchange_name: The name of the exchange to stream from.
+        order_book_cadence_ms: The cadence for order book updates in milliseconds.
+        max_queue_retries: How many times to retry putting on a full queue.
+        queue_retry_delay: Delay between queue put retries.
+    """
+    logger = logging.getLogger(__name__) # Get a logger specific to this module/function
+    dropped_trades_count = 0
+    dropped_binned_books_count = 0
+    dropped_raw_books_count = 0
+
+    if is_raw_enabled and raw_order_book_queue is None:
+        logger.warning(f"[{exchange_name.upper()}] Raw order book is enabled, but no raw_order_book_queue provided. Raw data will not be processed.")
+        is_raw_enabled = False # Disable if queue is missing
+
+    logger.info(f"[{exchange_name.upper()}] Starting data collection for {symbol}. Raw enabled: {is_raw_enabled}")
+
+    async def _safe_put_to_queue(q: asyncio.Queue, item: any, item_type: str) -> bool:
+        nonlocal dropped_trades_count, dropped_binned_books_count, dropped_raw_books_count
+        for attempt in range(max_queue_retries):
+            if q.full():
+                logger.warning(f"Queue for {item_type} is full (size: {q.qsize()}). Attempt {attempt + 1}/{max_queue_retries}. Retrying after {queue_retry_delay}s...")
+                if attempt == max_queue_retries - 1: # Last attempt failed
+                    logger.critical(f"CRITICAL: Queue for {item_type} remained full after {max_queue_retries} attempts. Dropping data for {symbol} on {exchange_name}.")
+                    if item_type == 'trade': dropped_trades_count += 1
+                    elif item_type == 'binned_book': dropped_binned_books_count += 1
+                    elif item_type == 'raw_book': dropped_raw_books_count += 1
+                    # TODO: Expose these counts to healthz or metrics
+                    return False # Failed to put
+                await asyncio.sleep(queue_retry_delay)
+            else:
+                await q.put(item)
+                return True # Successfully put
+        return False # Should be unreachable if loop logic is correct
+
+    async def trade_sink(trade_event_dict):
+        try:
+            exchange = trade_event_dict['exchange']
+            trade = trade_event_dict['trade_data']
+            
+            # Extract sequence if available (though typically not in simple trade data from watch_trades)
+            # sequence = trade.get('info', {}).get('sequence') # Example path, adjust as needed
+            
+            timestamp_ns = int(trade['timestamp']) * 1_000_000
+            lp = schema.build_trade_lp(
+                exchange=exchange,
+                symbol=trade['symbol'],
+                side=trade['side'],
+                size=trade['amount'],
+                price=trade['price'],
+                trade_id=str(trade['id']),
+                timestamp_ns=timestamp_ns
+            )
+            await _safe_put_to_queue(trade_queue, lp, 'trade')
+        except Exception as e:
+            logger.error(f"[{exchange_name.upper()}] Error processing trade data for sink: {e} - Data: {trade_event_dict}", exc_info=True)
+
+    async def order_book_sink(order_book_event_dict):
+        try:
+            exchange = order_book_event_dict['exchange']
+            book = order_book_event_dict['orderbook']
+            timestamp_ms = book['timestamp']
+            timestamp_ns = int(timestamp_ms) * 1_000_000
+            
+            # Attempt to get sequence number (highly exchange-specific for full books from watchOrderBook)
+            # For Coinbase, `nonce` is often the sequence for snapshots, or info.sequence for L2 updates.
+            # This needs verification for what `watch_order_book` provides from `trade_suite.data_source`
+            sequence = book.get('nonce') # Common for CCXT snapshots
+            if sequence is None and 'info' in book and isinstance(book['info'], dict):
+                sequence = book['info'].get('sequence') # Try info.sequence (e.g. Coinbase Pro REST snapshot)
+            
+            # Binned order book processing
+            binned_lp_lines = schema.build_book_lp(
+                exchange=exchange,
+                symbol=book['symbol'],
+                bids=book['bids'],
+                asks=book['asks'],
+                timestamp_ns=timestamp_ns,
+                sequence=sequence
+            )
+            if binned_lp_lines:
+                await _safe_put_to_queue(order_book_queue, binned_lp_lines, 'binned_book')
+
+            # Raw order book processing (if enabled)
+            if is_raw_enabled and raw_order_book_queue:
+                raw_lp_lines = schema.build_raw_book_lp(
+                    exchange=exchange,
+                    symbol=book['symbol'],
+                    bids=book['bids'],
+                    asks=book['asks'],
+                    timestamp_ns=timestamp_ns,
+                    top_n=config.RAW_BOOK_TOP_N,
+                    sequence=sequence
+                )
+                if raw_lp_lines:
+                    await _safe_put_to_queue(raw_order_book_queue, raw_lp_lines, 'raw_book')
+                    
+        except Exception as e:
+            logger.error(f"[{exchange_name.upper()}] Error processing order book data for sink: {e} - Data: {order_book_event_dict}", exc_info=True)
+
+    # Create tasks for watching trades and order books
+    # NOTE: data_source.watch_trades and data_source.watch_orderbook need to be updated
+    # to accept `sink` and `cadence_ms` parameters respectively.
+    trade_watcher_task = asyncio.create_task(
+        data_source.watch_trades(
+            symbol=symbol,
+            exchange=exchange_name, 
+            stop_event=stop_event,
+            track_stats=False, # Sentinel does not need stats from data_source
+            write_trades=False, # Sentinel handles its own writing
+            write_stats=False, # Sentinel handles its own writing
+            sink=trade_sink
+        )
+    )
+    # Pass the specific cadence for order books to watch_orderbook
+    order_book_watcher_task = asyncio.create_task(
+        data_source.watch_orderbook(
+            exchange=exchange_name,
+            symbol=symbol,
+            stop_event=stop_event,
+            sink=order_book_sink,
+            cadence_ms=order_book_cadence_ms
+        )
+    )
+
+    logger.info(f"[{exchange_name.upper()}] Trade and order book watchers for {symbol} started.")
+
+    try:
+        # Wait for tasks to complete or stop_event to be set
+        # This can be managed by the supervisor which calls this function
+        await asyncio.gather(trade_watcher_task, order_book_watcher_task)
+    except asyncio.CancelledError:
+        logger.info(f"[{exchange_name.upper()}] Data collection for {symbol} cancelled.")
+    finally:
+        if not trade_watcher_task.done():
+            trade_watcher_task.cancel()
+        if not order_book_watcher_task.done():
+            order_book_watcher_task.cancel()
+        logger.info(f"[{exchange_name.upper()}] Data collection for {symbol} stopped.")
+
+# Placeholder for Binance or other exchange collectors
+# async def stream_btc_binance(queue: asyncio.Queue):
+#     pass 
+
+
+
+import unittest
+from sentinel import schema
+from sentinel import config # For accessing constants like RAW_BOOK_TOP_N for tests
+
+class TestSchemaBuilders(unittest.TestCase):
+
+    def test_build_trade_lp_example(self):
+        exchange = "coinbase"
+        symbol = "BTC/USD" # CCXT format
+        safe_symbol_expected = "BTC-USD"
+        side = "buy"
+        size = 0.1
+        price = 50000.0
+        trade_id = "trd123"
+        timestamp_ns = 1678886400123456789
+
+        lp = schema.build_trade_lp(exchange, symbol, side, size, price, trade_id, timestamp_ns)
+        
+        expected_tags = f"trades,exchange={exchange},symbol={safe_symbol_expected},side={side}"
+        expected_fields = f"trade_id=\"{trade_id}\",price={float(price)},size={float(size)}"
+        expected_timestamp = str(timestamp_ns)
+
+        self.assertTrue(lp.startswith(expected_tags))
+        self.assertIn(expected_fields, lp)
+        self.assertTrue(lp.endswith(expected_timestamp))
+        self.assertEqual(lp.count(' '), 2) # Tags, Fields, Timestamp
+
+    def test_build_book_lp_binned_example(self):
+        exchange = "testex"
+        symbol = "ETH/USD"
+        safe_symbol_expected = "ETH-USD"
+        # Bids sorted high to low, Asks sorted low to high
+        bids = [(2998.0, 0.5), (2997.0, 1.0)] 
+        asks = [(3002.0, 0.3), (3003.0, 0.8)]
+        timestamp_ns = 1678886500987654321
+        sequence = 12345
+
+        # Expected mid_price = (2998.0 + 3002.0) / 2.0 = 3000.0
+        # With BIN_BPS = 5 (0.05%), one bin width is 3000 * 0.0005 = 1.5 USD
+        # Max bins per side = 5
+
+        lp_lines = schema.build_book_lp(exchange, symbol, bids, asks, timestamp_ns, sequence)
+
+        # Expected number of lines: (MAX_BINS_PER_SIDE * 2) + 1 (for mid_bin)
+        expected_line_count = config.ORDER_BOOK_MAX_BINS_PER_SIDE * 2 + 1
+        self.assertEqual(len(lp_lines), expected_line_count)
+
+        found_specific_bid_bin = False
+        found_specific_ask_bin = False
+        found_mid_bin = False
+
+        for lp in lp_lines:
+            self.assertIn(f"order_book,exchange={exchange},symbol={safe_symbol_expected}", lp)
+            self.assertIn(f"sequence={sequence}i", lp) # Check sequence field
+            self.assertTrue(lp.endswith(str(timestamp_ns)))
+
+            # Example check for a bid at 2998.0: (2998 - 3000) / 3000 * 10000 / 5 = -0.66 / 5 = -1.33 -> round = -1
+            if f"side=bid,bps_offset_idx=-1" in lp:
+                self.assertIn(f"total_qty=0.5", lp) # Approx, need to sum if multiple fall in same bin
+                found_specific_bid_bin = True
+            # Example check for an ask at 3002.0: (3002 - 3000) / 3000 * 10000 / 5 = 0.66 / 5 = 1.33 -> round = 1
+            if f"side=ask,bps_offset_idx=1" in lp:
+                self.assertIn(f"total_qty=0.3", lp)
+                found_specific_ask_bin = True
+            if f"side=mid_bin,bps_offset_idx=0" in lp:
+                # qty might be 0 or sum of items very close to mid depending on exact rounding and data
+                found_mid_bin = True
+        
+        self.assertTrue(found_specific_bid_bin, "Specific bid bin not found or incorrect.")
+        self.assertTrue(found_specific_ask_bin, "Specific ask bin not found or incorrect.")
+        self.assertTrue(found_mid_bin, "Mid bin not found.")
+
+    def test_build_book_lp_binned_empty_input(self):
+        lp_lines = schema.build_book_lp("test", "SYM", [], [], 123)
+        self.assertEqual(len(lp_lines), 0)
+        lp_lines = schema.build_book_lp("test", "SYM", [(1,1)], [], 123)
+        self.assertEqual(len(lp_lines), 0)
+
+    def test_build_raw_book_lp_example(self):
+        exchange = "rawex"
+        symbol = "ADA/USDT"
+        safe_symbol_expected = "ADA-USDT"
+        bids = [(1.00, 100.0), (0.99, 50.0)] * (config.RAW_BOOK_TOP_N // 2) # Ensure enough data
+        asks = [(1.01, 80.0), (1.02, 60.0)] * (config.RAW_BOOK_TOP_N // 2)
+        timestamp_ns = 1678886600000000000
+        sequence = 54321
+
+        lp_lines = schema.build_raw_book_lp(exchange, symbol, bids, asks, timestamp_ns, top_n=config.RAW_BOOK_TOP_N, sequence=sequence)
+        
+        expected_line_count = config.RAW_BOOK_TOP_N * 2 # N bids + N asks
+        self.assertEqual(len(lp_lines), expected_line_count)
+
+        for i in range(config.RAW_BOOK_TOP_N):
+            bid_lp = lp_lines[i]
+            ask_lp = lp_lines[i + config.RAW_BOOK_TOP_N]
+
+            self.assertTrue(bid_lp.startswith(f"raw_order_book,exchange={exchange},symbol={safe_symbol_expected},side=bid,level={i}"))
+            self.assertIn(f"price={float(bids[i][0])},amount={bids[i][1]:.8f}", bid_lp)
+            self.assertIn(f"sequence={sequence}i", bid_lp)
+            self.assertTrue(bid_lp.endswith(str(timestamp_ns)))
+
+            self.assertTrue(ask_lp.startswith(f"raw_order_book,exchange={exchange},symbol={safe_symbol_expected},side=ask,level={i}"))
+            self.assertIn(f"price={float(asks[i][0])},amount={asks[i][1]:.8f}", ask_lp)
+            self.assertIn(f"sequence={sequence}i", ask_lp)
+            self.assertTrue(ask_lp.endswith(str(timestamp_ns)))
+
+    def test_build_raw_book_lp_less_data_than_top_n(self):
+        bids = [(1.0, 10.0)]
+        asks = [(1.1, 11.0)]
+        lp_lines = schema.build_raw_book_lp("test", "SYM", bids, asks, 123, top_n=5)
+        self.assertEqual(len(lp_lines), 2) # 1 bid + 1 ask
+        self.assertIn("level=0", lp_lines[0])
+        self.assertIn("level=0", lp_lines[1])
+
+if __name__ == '__main__':
+    unittest.main() 
+
+
+
+
+# sentinel/writers/influx_writer.py
+import asyncio
+import logging
+import os
+from typing import List, Union, Any # Union for queue item type, Any for InfluxDB client
+
+from influxdb_client import InfluxDBClient, Point, WritePrecision, InfluxDBError
+from influxdb_client.client.write_api import ASYNCHRONOUS, WriteOptions
+
+from sentinel import config
+
+class InfluxWriter:
+    def __init__(self, influx_url: str, influx_token: str, influx_org: str):
+        """
+        Initializes the InfluxWriter with connection details for InfluxDB.
+
+        Args:
+            influx_url: URL of the InfluxDB instance.
+            influx_token: Authentication token for InfluxDB.
+            influx_org: Organization name in InfluxDB.
+        """
+        self.influx_url = influx_url
+        self.influx_token = influx_token
+        self.influx_org = influx_org
+        self.client: InfluxDBClient | None = None
+        self.write_api = None
+        self._connect()
+
+    def _connect(self):
+        """Establishes connection to InfluxDB and initializes the write_api."""
+        try:
+            self.client = InfluxDBClient(
+                url=self.influx_url,
+                token=self.influx_token,
+                org=self.influx_org
+            )
+            # Configure WriteOptions for batching
+            # Using batch_size from config, flush_interval from config
+            # jitter_interval and retry_interval can be added for more robust retries by the client library
+            write_options = WriteOptions(
+                batch_size=config.WRITER_BATCH_SIZE_POINTS,
+                flush_interval=config.WRITER_FLUSH_INTERVAL_MS,
+                write_type=ASYNCHRONOUS
+            )
+            self.write_api = self.client.write_api(write_options=write_options)
+            logging.info("InfluxDB client initialized and write_api configured.")
+            # Verify connection (optional, but good for early feedback)
+            if not self.client.ping():
+                 logging.warning("InfluxDB ping failed. Check connection and credentials.")
+        except Exception as e:
+            logging.error(f"Failed to connect to InfluxDB or initialize write_api: {e}")
+            self.client = None # Ensure client is None if connection fails
+            self.write_api = None
+
+    async def write_batch(self, bucket: str, data_points: List[str]):
+        """
+        Writes a batch of Line Protocol data points to the specified InfluxDB bucket.
+        Includes basic retry logic.
+
+        Args:
+            bucket: The InfluxDB bucket to write to.
+            data_points: A list of strings, where each string is in Line Protocol format.
+        """
+        if not self.write_api:
+            logging.error("InfluxDB write_api not initialized. Cannot write data.")
+            return
+        if not data_points:
+            return
+
+        max_retries = 3
+        retry_delay = 2  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                # The ASYNCHRONOUS write_api handles batching and flushing based on WriteOptions.
+                # We are just passing the prepared line protocol strings.
+                self.write_api.write(bucket=bucket, org=self.influx_org, record=data_points)
+                # logging.debug(f"Successfully wrote {len(data_points)} points to bucket '{bucket}'.")
+                return # Success
+            except InfluxDBError as e:
+                logging.error(f"InfluxDBError writing to bucket '{bucket}' (attempt {attempt + 1}/{max_retries}): {e}")
+                if e.response and e.response.status == 401:
+                    logging.error("InfluxDB authentication error (401). Check token.")
+                    break # No point retrying auth error
+                if e.response and e.response.status == 404:
+                    logging.error(f"InfluxDB bucket '{bucket}' not found (404).")
+                    break # No point retrying if bucket doesn't exist
+                # For other errors, retry after a delay
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (2 ** attempt)) # Exponential backoff
+                else:
+                    logging.error(f"Failed to write to bucket '{bucket}' after {max_retries} attempts.")
+            except Exception as e:
+                logging.error(f"Unexpected error writing to bucket '{bucket}' (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                else:
+                    logging.error(f"Failed to write to bucket '{bucket}' after {max_retries} attempts due to unexpected error.")
+
+    async def run_queue_consumer(self, data_queue: asyncio.Queue, bucket_name: str, stop_event: asyncio.Event):
+        """
+        Continuously consumes data from an asyncio.Queue and writes it to InfluxDB.
+        Manages batching based on size or time.
+
+        Args:
+            data_queue: The asyncio.Queue to read data from.
+                       Expected items: single LP string for trades, list of LP strings for order books.
+            bucket_name: The InfluxDB bucket to write the data to.
+            stop_event: An asyncio.Event to signal when to stop the consumer.
+        """
+        if not self.write_api:
+            logging.error(f"InfluxWriter not connected. Cannot start consumer for bucket '{bucket_name}'.")
+            return
+
+        logging.info(f"Starting InfluxDB writer for bucket: {bucket_name}")
+        local_batch = []
+        last_flush_time = asyncio.get_event_loop().time()
+
+        try:
+            while not stop_event.is_set():
+                try:
+                    # Wait for an item from the queue with a timeout
+                    # This allows the loop to check stop_event and flush interval periodically
+                    item = await asyncio.wait_for(data_queue.get(), timeout=0.05) # 50ms timeout
+                    
+                    if isinstance(item, str): # Single trade LP
+                        local_batch.append(item)
+                    elif isinstance(item, list): # List of order book LPs
+                        local_batch.extend(item)
+                    else:
+                        logging.warning(f"Received unexpected data type in queue for bucket {bucket_name}: {type(item)}")
+                        data_queue.task_done()
+                        continue
+
+                    data_queue.task_done()
+
+                except asyncio.TimeoutError:
+                    # No item received, proceed to check flush conditions
+                    pass 
+                except asyncio.CancelledError:
+                    logging.info(f"Writer for bucket '{bucket_name}' received cancellation.")
+                    break # Exit if the task is cancelled
+                except Exception as e:
+                    logging.error(f"Error getting item from queue for bucket {bucket_name}: {e}")
+                    # Potentially add a small sleep to prevent tight loop on persistent queue errors
+                    await asyncio.sleep(0.1)
+                    continue
+
+                current_time = asyncio.get_event_loop().time()
+                time_since_last_flush_ms = (current_time - last_flush_time) * 1000
+
+                # Flush conditions
+                if local_batch and \
+                   (len(local_batch) >= config.WRITER_BATCH_SIZE_POINTS or \
+                    time_since_last_flush_ms >= config.WRITER_FLUSH_INTERVAL_MS):
+                    
+                    logging.debug(f"Flushing batch to '{bucket_name}'. Size: {len(local_batch)}, Interval: {time_since_last_flush_ms:.0f}ms")
+                    await self.write_batch(bucket_name, list(local_batch)) # Pass a copy
+                    local_batch.clear()
+                    last_flush_time = current_time
+            
+            # Final flush for any remaining items after stop_event is set
+            if local_batch:
+                logging.info(f"Flushing remaining {len(local_batch)} items from '{bucket_name}' before shutdown.")
+                await self.write_batch(bucket_name, list(local_batch))
+                local_batch.clear()
+
+        except asyncio.CancelledError:
+            logging.info(f"Writer for bucket '{bucket_name}' task cancelled externally.")
+            # Final flush for any remaining items
+            if local_batch:
+                logging.info(f"Flushing remaining {len(local_batch)} items from '{bucket_name}' due to cancellation.")
+                await self.write_batch(bucket_name, list(local_batch))
+                local_batch.clear()
+        finally:
+            logging.info(f"InfluxDB writer for bucket '{bucket_name}' stopped.")
+
+    def close(self):
+        """Closes the InfluxDB client and write_api."""
+        if self.write_api:
+            try:
+                self.write_api.close() # Flushes any pending writes and closes
+                logging.info("InfluxDB write_api closed.")
+            except Exception as e:
+                logging.error(f"Error closing InfluxDB write_api: {e}")
+            self.write_api = None
+        if self.client:
+            try:
+                self.client.close()
+                logging.info("InfluxDB client closed.")
+            except Exception as e:
+                logging.error(f"Error closing InfluxDB client: {e}")
+            self.client = None
+
+# Example usage (for testing, typically part of supervisor.py)
+async def main_writer_test():
+    # Ensure INFLUXDB_TOKEN_LOCAL is set in your environment for this test
+    influx_token = os.getenv("INFLUXDB_TOKEN_LOCAL")
+    if not influx_token:
+        print("INFLUXDB_TOKEN_LOCAL environment variable not set. Skipping writer test.")
+        return
+
+    writer = InfluxWriter(
+        influx_url=config.INFLUX_URL_LOCAL,
+        influx_token=influx_token,
+        influx_org=config.INFLUX_ORG
+    )
+
+    if not writer.write_api:
+        print("InfluxWriter failed to initialize. Exiting test.")
+        return
+
+    test_trade_queue = asyncio.Queue()
+    stop_event = asyncio.Event()
+
+    # Start the consumer task
+    writer_task = asyncio.create_task(
+        writer.run_queue_consumer(test_trade_queue, config.INFLUX_BUCKET_TR, stop_event)
+    )
+
+    # Simulate putting some data
+    await test_trade_queue.put("trades,exchange=test,symbol=BTC-USD,side=buy price=1.0,size=1.0 1678886400000000000")
+    await test_trade_queue.put("trades,exchange=test,symbol=BTC-USD,side=sell price=2.0,size=0.5 1678886400000001000")
+    
+    # Test with list for order book data (if bucket is configured)
+    # await test_trade_queue.put(["test_ob,level=1 price=1,amount=1 1678886400000000000", "test_ob,level=2 price=2,amount=2 1678886400000000000"])
+
+    await asyncio.sleep(2) # Let it process
+
+    stop_event.set() # Signal the writer to stop
+    await writer_task # Wait for the writer to finish
+    writer.close()
+    print("Writer test completed.")
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    # To run this test: python -m sentinel.writers.influx_writer
+    # Ensure InfluxDB is running locally and INFLUXDB_TOKEN_LOCAL is set.
+    asyncio.run(main_writer_test()) 
+
+
+
+
+
+# sentinel/config.py
+
+# Websocket and data processing configuration
+CADENCE_MS = 100  # Target time in milliseconds for order book snapshots (10 Hz)
+DEPTH_BINS = 5  # Number of price bins on each side (bids/asks) of the mid-price
+SNAPSHOT_POINTS = 10  # Total data points for an order book snapshot (2 * DEPTH_BINS typically)
+
+# Order book binning configuration (New)
+ORDER_BOOK_BIN_BPS = 5          # Basis points for each bin width (e.g., 5 bps = 0.05%)
+ORDER_BOOK_MAX_BINS_PER_SIDE = 5 # Number of bins to generate on each side of the mid-price (e.g., 5 bins for bids, 5 for asks)
+
+# Raw Order Book configuration (New)
+RAW_BOOK_TOP_N = 10             # Number of top bid/ask levels for raw order book data
+INFLUX_BUCKET_OB_RAW = "raw_order_book" # Bucket for raw order book data
+
+# InfluxDB configuration
+INFLUX_BUCKET_OB = "order_book"       # Bucket for order book data
+INFLUX_BUCKET_TR = "trades"           # Bucket for trade data
+INFLUX_ORG = "pepe"                   # InfluxDB organization (as per your existing InfluxDB class)
+INFLUX_URL_LOCAL = "http://localhost:8086"
+# INFLUX_URL_CLOUD = "https://us-east-1-1.aws.cloud2.influxdata.com" # Example, if you use cloud
+# INFLUX_TOKEN_ENV_VAR_LOCAL = "INFLUXDB_TOKEN_LOCAL" # Environment variable for local token
+# INFLUX_TOKEN_ENV_VAR_CLOUD = "INFLUXDB"           # Environment variable for cloud token
+
+# Collector/Writer behavior
+WS_RECONNECT_BACKOFF = [1, 2, 5, 10]  # Seconds to wait before WebSocket reconnection attempts
+WRITER_BATCH_SIZE_POINTS = 5000       # Max points to batch before writing to InfluxDB
+WRITER_FLUSH_INTERVAL_MS = 100      # Max time to wait before flushing batch to InfluxDB
+
+# Logging configuration
+LOG_FILE = "./sentinel.log"         # Path to the log file
+LOG_LEVEL = "INFO"                  # Default logging level (e.g., DEBUG, INFO, WARNING, ERROR)
+
+# Run configuration
+RUN_DURATION_SECONDS_DRY_RUN = 30
+RUN_DURATION_SECONDS_LIVE = 48 * 60 * 60  # 48 hours
+
+# Targetted assets and exchanges
+TARGET_EXCHANGE = "coinbase"
+TARGET_SYMBOL_CCXT = "BTC/USD" # CCXT format
+TARGET_SYMBOL_INFLUX = "BTC-USD" # Format for InfluxDB tags/fields if different 
+
+
+
+
+
+# sentinel/run.py
+import asyncio
+import argparse
+import logging
+import signal
+import os
+
+from sentinel.supervisor import Supervisor
+from sentinel import config
+
+# Logger setup is handled in supervisor.py, but run.py can also use it.
+logger = logging.getLogger("sentinel.run")
+
+async def main(args):
+    """Main function to initialize and run the Supervisor."""
+    supervisor = None # Initialize to None for finally block
+    try:
+        supervisor = Supervisor(is_raw_enabled=args.raw)
+    except ValueError as e:
+        logger.critical(f"Failed to initialize Supervisor: {e}. Ensure INFLUXDB_TOKEN_LOCAL is set.")
+        return # Exit if supervisor cannot be initialized
+    
+    # Handle graceful shutdown on SIGINT and SIGTERM
+    loop = asyncio.get_event_loop()
+    
+    def signal_handler():
+        logger.info("Signal received, initiating graceful shutdown...")
+        asyncio.create_task(supervisor.stop()) # Schedule stop without blocking handler
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, signal_handler)
+        except NotImplementedError:
+            # Windows does not support add_signal_handler for SIGINT/SIGTERM in the same way
+            # For Windows, KeyboardInterrupt is the primary way to stop for SIGINT.
+            # SIGTERM might need other platform-specific handling if strictly required.
+            logger.warning(f"Signal handler for {sig.name} could not be set (likely on Windows).")
+            pass
+
+    duration = None
+    if args.dry_run:
+        logger.info("Executing DRAGON dry run... I mean DRY RUN.")
+        duration = config.RUN_DURATION_SECONDS_DRY_RUN
+        # In a true dry run, we might also redirect InfluxWriter to a mock or stdout.
+        # For now, it will run for a short duration.
+    elif args.live:
+        logger.info("Executing LIVE run... Strap in!")
+        duration = config.RUN_DURATION_SECONDS_LIVE # 48 hours as per plan
+    else:
+        # Default to a short dry run if no mode is specified
+        logger.info("No run mode specified, defaulting to a short dry run.")
+        duration = config.RUN_DURATION_SECONDS_DRY_RUN
+
+    try:
+        await supervisor.start(duration_seconds=duration)
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received by run.py. Supervisor should handle shutdown.")
+        # Supervisor's signal handler or its own KeyboardInterrupt handling should manage this.
+        # If supervisor.start() is still running, it will eventually call supervisor.stop()
+        # or the signal handler will.
+    except Exception as e:
+        logger.exception(f"Unhandled exception in run.py main loop: {e}")
+    finally:
+        logger.info("Run.py main function cleanup starting...")
+        if supervisor and not supervisor.stop_event.is_set():
+            logger.info("Ensuring supervisor is stopped in finally block.")
+            # This call is a safeguard. Ideally, supervisor.start or signal handler manages stop.
+            await supervisor.stop() 
+        logger.info("Run.py main function finished.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Sentinel: BTC Order Book and Trade Recorder.")
+    group = parser.add_mutually_exclusive_group() # Allow either --dry-run or --live, but not both
+    group.add_argument("--dry-run", action="store_true", help="Run for a short duration (30s) and print logs.")
+    group.add_argument("--live", action="store_true", help="Run continuously for the configured duration (e.g., 48h).")
+    parser.add_argument("--raw", action="store_true", help="Enable collection and writing of raw top-N order book data to a separate bucket.")
+
+    args = parser.parse_args()
+
+    # Ensure INFLUXDB_TOKEN_LOCAL is available before trying to run
+    if not os.getenv("INFLUXDB_TOKEN_LOCAL"):
+        print("CRITICAL: INFLUXDB_TOKEN_LOCAL environment variable is not set. Sentinel cannot run.")
+        print("Please set this environment variable with your local InfluxDB token.")
+    else:
+        try:
+            asyncio.run(main(args))
+        except KeyboardInterrupt:
+            logger.info("Application terminated by KeyboardInterrupt at the top level.")
+        except Exception as e:
+            logger.critical(f"Top-level unhandled exception: {e}", exc_info=True) 
+
+
+
+
+
+
+# sentinel/schema.py
+from typing import List, Tuple, Dict
+
+# Expected trade data structure from data_source.watch_trades
+# trade_event = {
+#     'exchange': str, # e.g., 'coinbase'
+#     'trade_data': {
+#         'id': str, # Trade ID
+#         'timestamp': int, # Milliseconds since epoch
+#         'datetime': str, # ISO8601 datetime string
+#         'symbol': str, # e.g., 'BTC/USD'
+#         'side': str, # 'buy' or 'sell'
+#         'price': float,
+#         'amount': float,
+#         'cost': float, # price * amount
+#         # 'takerOrMaker': str, (optional)
+#         # 'fee': { 'cost': float, 'currency': str }, (optional)
+#         # 'info': dict (original exchange response)
+#     }
+# }
+
+def build_trade_lp(exchange: str, symbol: str, side: str, size: float, price: float, trade_id: str, timestamp_ns: int) -> str:
+    """
+    Builds a InfluxDB Line Protocol string for a single trade.
+
+    Args:
+        exchange: Name of the exchange (e.g., 'coinbase').
+        symbol: Trading symbol (e.g., 'BTC-USD', sanitized for InfluxDB).
+        side: 'buy' or 'sell'.
+        size: Quantity of the trade.
+        price: Price of the trade.
+        trade_id: Unique identifier for the trade from the exchange.
+        timestamp_ns: Timestamp of the trade in nanoseconds.
+
+    Returns:
+        A string formatted for InfluxDB Line Protocol.
+        Example: trades,exchange=coinbase,symbol=BTC-USD,side=buy trade_id="12345",price=50000.1,size=0.01 1678886400000000000
+    """
+    # Sanitize symbol: CCXT uses 'BTC/USD', InfluxDB prefers 'BTC-USD' or similar for tags
+    safe_symbol = symbol.replace("/", "-")
+    # Fields must be float, int, bool, or string. Strings need to be double-quoted.
+    # Tags are not quoted.
+    lp = f"trades,exchange={exchange},symbol={safe_symbol},side={side} " \
+         f"trade_id=\"{trade_id}\",price={float(price)},size={float(size)} " \
+         f"{timestamp_ns}"
+    return lp
+
+
+# Expected order book data structure from data_source.watch_orderbook
+# orderbook_event = {
+#     'exchange': str, # e.g., 'coinbase'
+#     'orderbook': {
+#         'symbol': str, # e.g., 'BTC/USD'
+#         'timestamp': int, # Milliseconds since epoch for the snapshot
+#         'datetime': str, # ISO8601 string
+#         'bids': List[Tuple[float, float]], # List of [price, amount]
+#         'asks': List[Tuple[float, float]], # List of [price, amount]
+#         # 'nonce': int (optional)
+#         # 'info': { 'sequence': int } (for Coinbase Pro, sequence is often in info for snapshots from REST)
+#     }
+# }
+
+from sentinel import config # For binning constants
+import math # For rounding
+
+def build_book_lp(
+    exchange: str, 
+    symbol: str, 
+    bids: List[Tuple[float, float]], 
+    asks: List[Tuple[float, float]], 
+    timestamp_ns: int,
+    sequence: int | None = None # Optional: sequence number for the book snapshot
+) -> List[str]:
+    """
+    Builds InfluxDB Line Protocol strings for an order book snapshot, binned by basis points (bps) from mid-price.
+    Generates a fixed number of points based on config.ORDER_BOOK_MAX_BINS_PER_SIDE.
+
+    Args:
+        exchange: Name of the exchange.
+        symbol: Trading symbol (e.g., 'BTC-USD').
+        bids: Raw list of [price, amount] for bids, sorted best (highest price) first.
+        asks: Raw list of [price, amount] for asks, sorted best (lowest price) first.
+        timestamp_ns: Timestamp of the snapshot in nanoseconds.
+        sequence: Optional sequence number of this order book state.
+
+    Returns:
+        A list of strings formatted for InfluxDB Line Protocol for binned book data.
+        Example: order_book,exchange=cb,symbol=BTC-USD,side=bid,bin_bps_offset=-1 total_qty=1.23 1678886400000000000
+    """
+    lines = []
+    safe_symbol = symbol.replace("/", "-")
+
+    if not bids or not asks or not bids[0] or not asks[0]:
+        # logging.warning(f"[{exchange}-{safe_symbol}] Insufficient data for binned order book: bids or asks empty or invalid.")
+        return [] # Cannot calculate mid-price or meaningful book
+
+    mid_price = (bids[0][0] + asks[0][0]) / 2.0
+    if mid_price == 0: # Avoid division by zero
+        # logging.warning(f"[{exchange}-{safe_symbol}] Mid price is zero, cannot bin order book.")
+        return []
+
+    # Initialize bins: keys are bps offsets from -MAX_BINS to +MAX_BINS (relative to BIN_BPS)
+    # e.g., if MAX_BINS_PER_SIDE = 5, bins from -5 to 5.
+    # Bin 0 represents quotes closest to mid-price within +/- (BIN_BPS/2).
+    num_bins_total = config.ORDER_BOOK_MAX_BINS_PER_SIDE * 2 + 1 # e.g., 5 for bids, 5 for asks, 1 for zero-offset
+    # bins will store total quantity for each bps_offset bin
+    # We will create MAX_BINS_PER_SIDE on bid side (negative offsets) and MAX_BINS_PER_SIDE on ask side (positive offsets)
+    # Bin 0 represents the very center (e.g. -2.5bps to +2.5bps if BIN_BPS is 5)
+    # Let's use MAX_BINS_PER_SIDE for each side, so -5 to -1 for bids, 1 to 5 for asks, bin 0 for center.
+    
+    # bins dict: key is integer bps_offset_index, value is aggregated quantity.
+    # bps_offset_index ranges from -config.ORDER_BOOK_MAX_BINS_PER_SIDE to +config.ORDER_BOOK_MAX_BINS_PER_SIDE.
+    binned_quantities = {i: 0.0 for i in range(-config.ORDER_BOOK_MAX_BINS_PER_SIDE, config.ORDER_BOOK_MAX_BINS_PER_SIDE + 1)}
+
+    # Process bids
+    for price, qty in bids:
+        if price <= 0: continue
+        # bps_offset = (price - mid_price) / mid_price * 10000 # Raw BPS offset
+        # bps_offset_index = math.floor(bps_offset / config.ORDER_BOOK_BIN_BPS) # Gist example used round
+        # Let's follow the gist's rounding logic: int(round((price - mid) / mid * 1e4 / BIN_BPS))
+        bps_offset_index = int(round((price - mid_price) / mid_price * 10000 / config.ORDER_BOOK_BIN_BPS))
+        
+        # Clamp to the defined bin range
+        if bps_offset_index < -config.ORDER_BOOK_MAX_BINS_PER_SIDE:
+            bps_offset_index = -config.ORDER_BOOK_MAX_BINS_PER_SIDE
+        elif bps_offset_index > config.ORDER_BOOK_MAX_BINS_PER_SIDE: # This case mainly for asks, but good to be robust
+            bps_offset_index = config.ORDER_BOOK_MAX_BINS_PER_SIDE
+        
+        if -config.ORDER_BOOK_MAX_BINS_PER_SIDE <= bps_offset_index <= config.ORDER_BOOK_MAX_BINS_PER_SIDE:
+            binned_quantities[bps_offset_index] += qty
+
+    # Process asks
+    for price, qty in asks:
+        if price <= 0: continue
+        bps_offset_index = int(round((price - mid_price) / mid_price * 10000 / config.ORDER_BOOK_BIN_BPS))
+        
+        if bps_offset_index < -config.ORDER_BOOK_MAX_BINS_PER_SIDE:
+            bps_offset_index = -config.ORDER_BOOK_MAX_BINS_PER_SIDE
+        elif bps_offset_index > config.ORDER_BOOK_MAX_BINS_PER_SIDE:
+            bps_offset_index = config.ORDER_BOOK_MAX_BINS_PER_SIDE
+
+        if -config.ORDER_BOOK_MAX_BINS_PER_SIDE <= bps_offset_index <= config.ORDER_BOOK_MAX_BINS_PER_SIDE:
+            binned_quantities[bps_offset_index] += qty
+    
+    # Generate Line Protocol for each bin that has quantity or all defined bins
+    # The gist implies emitting all defined bins, even if quantity is 0, for constant cardinality.
+    for bps_offset_idx, total_qty in binned_quantities.items():
+        # Determine side based on offset. Bin 0 can be considered neutral or assigned based on convention.
+        # For simplicity, let's say negative is bid, positive is ask. Bin 0 can be split or reported as 'mid'.
+        # The gist example: side = "bid" if off_bp < 0 else "ask"
+        # This means bin 0 is 'ask'. If that's not desired, adjust.
+        # Let's adjust so bin 0 is 'mid', <0 is 'bid', >0 is 'ask' for clarity in tags.
+        if bps_offset_idx < 0:
+            side = "bid"
+        elif bps_offset_idx > 0:
+            side = "ask"
+        else: # bps_offset_idx == 0
+            side = "mid_bin" # A neutral bin at the center
+        
+        # Measurement: order_book_binned (or just order_book if only one type of book data per bucket)
+        lp = f"order_book,exchange={exchange},symbol={safe_symbol},side={side},bps_offset_idx={bps_offset_idx} " \
+             f"total_qty={total_qty:.8f}" # Format quantity to a reasonable precision
+        if sequence is not None:
+            lp += f",sequence={sequence}i" # Add sequence as an integer field
+        lp += f" {timestamp_ns}"
+        lines.append(lp)
+
+    return lines
+
+
+def build_raw_book_lp(
+    exchange: str, 
+    symbol: str, 
+    bids: List[Tuple[float, float]], 
+    asks: List[Tuple[float, float]], 
+    timestamp_ns: int,
+    top_n: int = config.RAW_BOOK_TOP_N, # Use constant from config
+    sequence: int | None = None # Optional: sequence number
+) -> List[str]:
+    """
+    Builds InfluxDB Line Protocol strings for the top N raw levels of an order book snapshot.
+
+    Args:
+        exchange: Name of the exchange.
+        symbol: Trading symbol (e.g., 'BTC-USD').
+        bids: Raw list of [price, amount] for bids, sorted best (highest price) first.
+        asks: Raw list of [price, amount] for asks, sorted best (lowest price) first.
+        timestamp_ns: Timestamp of the snapshot in nanoseconds.
+        top_n: Number of top bid and ask levels to include.
+        sequence: Optional sequence number of this order book state.
+
+    Returns:
+        A list of strings formatted for InfluxDB Line Protocol for raw book data.
+        Example: raw_order_book,exchange=cb,symbol=BTC-USD,side=bid,level=0 price=49999.0,amount=0.5 1678886400000000000
+    """
+    lines = []
+    safe_symbol = symbol.replace("/", "-")
+
+    # Process top N bids
+    for i, (price, amount) in enumerate(bids[:top_n]):
+        lp = f"raw_order_book,exchange={exchange},symbol={safe_symbol},side=bid,level={i} " \
+             f"price={float(price)},amount={float(amount):.8f}" # Format amount
+        if sequence is not None:
+            lp += f",sequence={sequence}i"
+        lp += f" {timestamp_ns}"
+        lines.append(lp)
+
+    # Process top N asks
+    for i, (price, amount) in enumerate(asks[:top_n]):
+        lp = f"raw_order_book,exchange={exchange},symbol={safe_symbol},side=ask,level={i} " \
+             f"price={float(price)},amount={float(amount):.8f}" # Format amount
+        if sequence is not None:
+            lp += f",sequence={sequence}i"
+        lp += f" {timestamp_ns}"
+        lines.append(lp)
+        
+    return lines 
+
+
+
+
+# sentinel/supervisor.py
+import asyncio
+import logging
+import os
+import signal # For graceful shutdown
+import logging.handlers # For RotatingFileHandler
+
+from trade_suite.data.data_source import Data as TradeSuiteData # Alias to avoid confusion
+from sentinel.collectors.coinbase import stream_data_to_queues
+from sentinel.writers.influx_writer import InfluxWriter
+from sentinel import config
+
+# Basic logging setup - consider using structlog as planned for richer logs
+# Get the root logger
+root_logger = logging.getLogger() 
+root_logger.setLevel(getattr(logging, config.LOG_LEVEL.upper(), logging.INFO))
+
+# File Handler with Rotation
+file_handler = logging.handlers.RotatingFileHandler(
+    config.LOG_FILE, 
+    maxBytes=10*1024*1024, # e.g., 10 MB per file
+    backupCount=5          # Keep 5 backup files
+)
+file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+root_logger.addHandler(file_handler)
+
+# Console Handler
+console_handler = logging.StreamHandler()
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s') # Simpler format for console
+console_handler.setFormatter(console_formatter)
+root_logger.addHandler(console_handler)
+
+logger = logging.getLogger(__name__) # Supervisor specific logger
+
+class Supervisor:
+    def __init__(self, is_raw_enabled: bool = False): # Accept is_raw_enabled
+        self.is_raw_enabled = is_raw_enabled
+        self.trade_queue = asyncio.Queue(maxsize=10000)
+        self.order_book_queue = asyncio.Queue(maxsize=10000)
+        self.raw_order_book_queue = asyncio.Queue(maxsize=10000) if self.is_raw_enabled else None
+        self.stop_event = asyncio.Event()
+        self.tasks = []
+
+        # For healthz
+        self.dropped_trades_count = 0
+        self.dropped_binned_books_count = 0
+        self.dropped_raw_books_count = 0
+        # The collector will have its own counters, this is illustrative
+        # The actual counters should be accessed from collector or passed via a shared mechanism if needed here
+
+        # Initialize InfluxWriter
+        influx_token = os.getenv("INFLUXDB_TOKEN_LOCAL") # Or your preferred token env var
+        if not influx_token:
+            logger.critical("INFLUXDB_TOKEN_LOCAL environment variable not set. Sentinel cannot start.")
+            raise ValueError("InfluxDB token not found in environment.")
+        
+        self.influx_writer = InfluxWriter(
+            influx_url=config.INFLUX_URL_LOCAL,
+            influx_token=influx_token,
+            influx_org=config.INFLUX_ORG
+        )
+
+        # Initialize TradeSuiteData (DataSource)
+        # No emitter needed for sentinel's use case. Influx client is managed by InfluxWriter.
+        self.data_source = TradeSuiteData(influx=None, emitter=None, exchanges=[config.TARGET_EXCHANGE], force_public=True)
+
+    async def _run_with_restart(self, coro_func, *args, name="UnnamedTask"):
+        """Runs a coroutine and restarts it with exponential backoff on failure."""
+        backoff_times = config.WS_RECONNECT_BACKOFF
+        attempt = 0
+        while not self.stop_event.is_set():
+            try:
+                logger.info(f"Starting task: {name}")
+                await coro_func(*args)
+                # If the coro_func returns normally, it might mean it completed (e.g. stop_event was set internally)
+                # or an unexpected exit. If it's not due to stop_event, we might want to restart.
+                if self.stop_event.is_set():
+                    logger.info(f"Task {name} stopped gracefully via stop_event.")
+                    break
+                else:
+                    logger.warning(f"Task {name} exited unexpectedly. Restarting after delay...")
+                    # This case might need specific handling based on why a task would exit normally
+                    # without stop_event being set.
+            except asyncio.CancelledError:
+                logger.info(f"Task {name} was cancelled.")
+                break # Do not restart if explicitly cancelled
+            except Exception as e:
+                logger.error(f"Task {name} failed with error: {e}. Attempt {attempt + 1}.")
+            
+            if self.stop_event.is_set():
+                break
+
+            if attempt < len(backoff_times):
+                delay = backoff_times[attempt]
+                logger.info(f"Restarting {name} in {delay} seconds...")
+                await asyncio.sleep(delay)
+                attempt += 1
+            else:
+                logger.error(f"Task {name} failed maximum restart attempts. Giving up.")
+                self.stop_event.set() # Signal other tasks to stop as a critical component failed
+                break
+        logger.info(f"Task {name} has finished its lifecycle.")
+
+    async def _healthz(self, interval_seconds: int = 30):
+        """Periodically logs queue sizes and other health metrics."""
+        logger.info("Healthz monitor started.")
+        while not self.stop_event.is_set():
+            try:
+                # Note: Accessing internal collector counters directly isn't clean.
+                # Ideally, collector exposes these or healthz is part of the collector, 
+                # or metrics are pushed to a central place (like Prometheus later).
+                # For now, logging queue sizes is a good start.
+                trade_q_size = self.trade_queue.qsize()
+                binned_book_q_size = self.order_book_queue.qsize()
+                raw_book_q_size = self.raw_order_book_queue.qsize() if self.raw_order_book_queue else 'N/A'
+                
+                logger.info(
+                    f"[Healthz] Queues - Trades: {trade_q_size}, BinnedBooks: {binned_book_q_size}, RawBooks: {raw_book_q_size}"
+                    # f", Dropped - Trades: {self.dropped_trades_count}, Binned: {self.dropped_binned_books_count}, Raw: {self.dropped_raw_books_count}"
+                )
+                # Resetting supervisor-level counters would require collector to update them.
+                # For simplicity, we'll rely on collector logs for drops for now.
+                
+                await asyncio.sleep(interval_seconds)
+            except asyncio.CancelledError:
+                logger.info("Healthz monitor cancelled.")
+                break
+            except Exception as e:
+                logger.error(f"Healthz monitor encountered an error: {e}", exc_info=True)
+                # Avoid healthz crashing the supervisor; wait and continue
+                await asyncio.sleep(interval_seconds) 
+        logger.info("Healthz monitor stopped.")
+
+    async def start(self, duration_seconds: float | None = None):
+        """Starts the collector and writer tasks and manages them."""
+        logger.info("Supervisor starting...")
+        if not self.influx_writer or not self.influx_writer.write_api:
+            logger.critical("InfluxWriter not properly initialized. Supervisor cannot start data flow.")
+            return
+
+        await self.data_source.load_exchanges() # Important: Load exchange details
+        if config.TARGET_EXCHANGE not in self.data_source.exchange_list:
+            logger.critical(f"Target exchange '{config.TARGET_EXCHANGE}' not loaded in DataSource. Aborting.")
+            return
+
+        # Collector task
+        collector_task = asyncio.create_task(
+            self._run_with_restart(
+                stream_data_to_queues,
+                self.data_source,
+                config.TARGET_SYMBOL_CCXT,
+                self.stop_event,
+                self.trade_queue,
+                self.order_book_queue,
+                self.is_raw_enabled, # Pass is_raw_enabled
+                self.raw_order_book_queue, # Pass raw queue
+                config.TARGET_EXCHANGE,
+                config.CADENCE_MS,
+                name="DataCollector"
+            )
+        )
+        self.tasks.append(collector_task)
+
+        # Writer task for trades
+        trade_writer_task = asyncio.create_task(
+            self._run_with_restart(
+                self.influx_writer.run_queue_consumer,
+                self.trade_queue,
+                config.INFLUX_BUCKET_TR,
+                self.stop_event,
+                name="TradeInfluxWriter"
+            )
+        )
+        self.tasks.append(trade_writer_task)
+
+        # Writer task for order books
+        ob_writer_task = asyncio.create_task(
+            self._run_with_restart(
+                self.influx_writer.run_queue_consumer,
+                self.order_book_queue,
+                config.INFLUX_BUCKET_OB,
+                self.stop_event,
+                name="OrderBookInfluxWriter"
+            )
+        )
+        self.tasks.append(ob_writer_task)
+
+        # Writer task for raw order books (if enabled)
+        if self.is_raw_enabled and self.raw_order_book_queue:
+            raw_ob_writer_task = asyncio.create_task(
+                self._run_with_restart(
+                    self.influx_writer.run_queue_consumer,
+                    self.raw_order_book_queue,
+                    config.INFLUX_BUCKET_OB_RAW, # Use the new raw bucket config
+                    self.stop_event,
+                    name="RawOrderBookInfluxWriter"
+                )
+            )
+            self.tasks.append(raw_ob_writer_task)
+            logger.info("Raw order book writer task created.")
+
+        # Healthz task
+        healthz_task = asyncio.create_task(self._healthz())
+        self.tasks.append(healthz_task)
+
+        logger.info("All tasks created. Supervisor is running.")
+
+        if duration_seconds:
+            logger.info(f"Running for a specified duration: {duration_seconds} seconds.")
+            await asyncio.sleep(duration_seconds)
+            logger.info("Specified duration ended. Initiating shutdown.")
+            await self.stop()
+        else:
+            # Keep running until stop_event is set (e.g., by signal handler or error)
+            await self.stop_event.wait()
+            logger.info("Stop event received. Initiating shutdown.")
+            # Ensure stop is called if loop exited due to stop_event
+            # This path is taken if stop() is called from elsewhere, like a signal handler
+
+        # Fallback: if duration_seconds was None and stop_event was set, ensure cleanup
+        # await self.stop() # This might be redundant if stop() is what set the event
+
+    async def stop(self):
+        logger.info("Supervisor stopping... Setting stop event.")
+        self.stop_event.set()
+
+        # Wait for tasks to complete with a timeout
+        # Give some time for tasks to handle the stop_event and flush
+        logger.info(f"Waiting for {len(self.tasks)} tasks to finish...")
+        done, pending = await asyncio.wait(self.tasks, timeout=10.0) # 10s timeout for graceful shutdown
+
+        for task in pending:
+            logger.warning(f"Task {task.get_name()} did not finish in time. Cancelling...")
+            task.cancel()
+        
+        # Re-await pending tasks to process cancellations
+        if pending:
+             await asyncio.wait(pending, timeout=5.0) 
+
+        logger.info("Closing InfluxWriter...")
+        if self.influx_writer:
+            self.influx_writer.close()
+        
+        logger.info("Closing DataSource connections...")
+        await self.data_source.close_all_exchanges() # Ensure data_source has this method or adapt
+
+        logger.info("Supervisor stopped.")
+
+# Main execution / CLI entry point would typically be in run.py
+# This is just for structure
+async def main_supervisor_test(duration=10, is_raw_enabled_test=False):
+    s = Supervisor(is_raw_enabled=is_raw_enabled_test)
+    try:
+        await s.start(duration_seconds=duration)
+    except ValueError as e:
+        logger.critical(f"Supervisor initialization failed: {e}")
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received. Stopping supervisor...")
+        await s.stop()
+    except Exception as e:
+        logger.exception(f"Unhandled exception in supervisor main: {e}")
+        await s.stop() # Attempt graceful shutdown
+    finally:
+        # Ensure cleanup happens even if start() wasn't awaited (e.g. init error)
+        if not s.stop_event.is_set(): 
+            await s.stop() # Call stop if it wasn't called yet
+
+if __name__ == "__main__":
+    # This is a basic test run
+    # In a real scenario, run.py would handle argparse and call this.
+    asyncio.run(main_supervisor_test(duration=20, is_raw_enabled_test=True)) # Run for 20s for testing with raw enabled 
