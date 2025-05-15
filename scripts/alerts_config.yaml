@@ -5,8 +5,10 @@ BTC/USD:
     - price: 101000
       condition: below
   percentage_changes:
-    - percentage: 2
+    - percentage: 1
       timeframe: 30
+    - percentage: 2
+      timeframe: 60
   volatility:
     - threshold: 2
       timeframe: 5
@@ -18,8 +20,8 @@ PEPE/USD:
     - price: 0.00001280
       condition: below
   percentage_changes:
-    - percentage: 2
-      timeframe: 30
+    - percentage: 3
+      timeframe: 15
   volatility:
     - threshold: 2
       timeframe: 5
