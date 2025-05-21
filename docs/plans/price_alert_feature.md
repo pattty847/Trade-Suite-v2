@@ -12,7 +12,7 @@ This feature is intended to provide timely updates on significant market movemen
 
 ## 2. Features
 
-*   **Configuration-Driven:** All symbols and alert parameters are defined in a YAML file (`scripts/alerts_config.yaml` by default).
+*   **Configuration-Driven:** All symbols and alert parameters are defined in a YAML file (`sentinel/alert_bot/alerts_config.yaml` by default).
 *   **Multiple Symbol Monitoring:** Tracks any number of trading pairs (e.g., BTC/USD, ETH/USD, PEPE/USD) simultaneously.
 *   **Price Level Alerts:** Triggers alerts when a symbol's price crosses above or below a specified level.
 *   **Percentage Change Alerts:** Triggers alerts when a symbol's price changes by a specified percentage over a defined timeframe (e.g., 5% change in 30 minutes). Uses OHLCV data.
@@ -73,7 +73,7 @@ This feature is intended to provide timely updates on significant market movemen
 
 ## 4. Configuration (`alerts_config.yaml`)
 
-The script is configured using a YAML file (default: `scripts/alerts_config.yaml`).
+The script is configured using a YAML file (default: `sentinel/alert_bot/alerts_config.yaml`).
 
 ```yaml
 SYMBOL_1/PAIR:  # e.g., BTC/USD
@@ -146,7 +146,7 @@ Crypto Price Alert Monitor - Config Driven
 
 options:
   -h, --help            show this help message and exit
-  --config CONFIG       Path to YAML configuration file (default: scripts/alerts_config.yaml)
+  --config CONFIG       Path to YAML configuration file (default: sentinel/alert_bot/alerts_config.yaml)
   --main-loop-interval MAIN_LOOP_INTERVAL
                         Main loop check interval in seconds (default: 60)
   --create-config       Create an example configuration file and exit

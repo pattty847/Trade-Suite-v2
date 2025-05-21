@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+"""
+!!! DEPRECATED !!!
+
+This module has been refactored into a more modular structure.
+Please use the new implementation in the sentinel/alert_bot/ package:
+
+    python -m sentinel.alert_bot.main
+
+This monolithic version is kept for backwards compatibility only
+and will be removed in a future release.
+
+New code should be added to the modular implementation.
+"""
+
 import ccxt
 import time
 import smtplib
@@ -14,6 +28,14 @@ import yaml
 from pathlib import Path
 import logging
 import statistics # Added for volatility calculation
+import warnings
+
+# Show deprecation warning
+warnings.warn(
+    "The price_alert.py module is deprecated. "
+    "Please use the new implementation in sentinel.alert_bot.main", 
+    DeprecationWarning, stacklevel=2
+)
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -88,24 +110,25 @@ class PriceAlert:
     def _format_price(self, symbol: str, price: float) -> str:
         """Formats the price according to the symbol's precision."""
         try:
-            if hasattr(self.exchange, 'markets') and self.exchange.markets and symbol in self.exchange.markets and self.exchange.markets[symbol]:
-                precision_info = self.exchange.markets[symbol].get('precision')
-                if precision_info and 'price' in precision_info:
-                    price_precision = precision_info['price']
-                    if price_precision is not None:
-                        if isinstance(price_precision, float): # e.g., 0.00000001 for PEPE/USD
-                            s = format(price_precision, '.10f') # Format to avoid scientific notation for small floats
-                            if '.' in s:
-                                decimal_places = len(s.split('.')[1].rstrip('0'))
-                                return f"{price:.{decimal_places}f}"
-                            else: # Should not happen for float precision if it has decimals
-                                return f"{price:.2f}" # fallback
-                        else: # Integer precision (number of decimal places)
-                            return f"{price:.{int(price_precision)}f}"
-            # Fallback if market data or precision is not available
-            if abs(price) > 0 and abs(price) < 0.001: # For very small prices like PEPE
-                 return f"{price:.8f}" 
-            return f"{price:.2f}"
+            # Get market precision from CCXT if available
+            if symbol in self.exchange.markets:
+                precision_info = self.exchange.markets[symbol].get('precision', {})
+                price_precision = precision_info.get('price')
+                
+                if price_precision is not None:
+                    # Handle float precision (e.g., 0.00000001)
+                    if isinstance(price_precision, float):
+                        decimal_places = len(format(price_precision, '.10f').split('.')[1].rstrip('0'))
+                        return f"{price:.{decimal_places}f}"
+                    # Handle integer precision (number of decimal places)
+                    else:
+                        return f"{price:.{int(price_precision)}f}"
+                        
+            # Fallbacks based on price value if no precision info
+            if abs(price) > 0 and abs(price) < 0.001:  # Very small prices
+                return f"{price:.8f}"
+            return f"{price:.2f}"  # Default format
+            
         except Exception as e:
             logger.error(f"Error formatting price for {symbol} ({price}): {e}. Defaulting to .2f")
             return f"{price:.2f}"
@@ -374,10 +397,10 @@ def create_example_config():
                 {'price': 50000, 'condition': 'above'},
                 {'price': 45000, 'condition': 'below'}
             ],
-            'percentage_changes': [ # Example structure for future use
+            'percentage_changes': [
                 {'percentage': 5, 'timeframe': 10} # 10 minutes
             ],
-            'volatility': [ # Example structure for future use
+            'volatility': [
                 {'threshold': 2, 'timeframe': 5} # 5 minutes
             ]
         },
@@ -401,14 +424,21 @@ def create_example_config():
         }
     }
     
-    config_path = Path('scripts/alerts_config.yaml')
+    # Write the config to the new location used by the refactored code
+    config_path = Path('sentinel/alert_bot/config/alerts_config.yaml')
     with open(config_path, 'w') as f:
         yaml.dump(example_config, f, default_flow_style=False)
     logger.info(f"Created example configuration file at {config_path}")
+    
+    # DEPRECATED: Also write to the old location for backward compatibility
+    old_config_path = Path('sentinel/alert_bot/alerts_config.yaml')
+    with open(old_config_path, 'w') as f:
+        yaml.dump(example_config, f, default_flow_style=False)
+    logger.info(f"Also created config file at {old_config_path} (deprecated location)")
 
 def main():
     parser = argparse.ArgumentParser(description='Crypto Price Alert Monitor - Config Driven')
-    parser.add_argument('--config', type=str, default='scripts/alerts_config.yaml', help='Path to YAML configuration file (default: scripts/alerts_config.yaml)')
+    parser.add_argument('--config', type=str, default='sentinel/alert_bot/config/alerts_config.yaml', help='Path to YAML configuration file (default: sentinel/alert_bot/config/alerts_config.yaml)')
     parser.add_argument('--main-loop-interval', type=int, default=60, help='Main loop check interval in seconds (default: 60)')
     parser.add_argument('--create-config', action='store_true', help='Create an example configuration file and exit')
     parser.add_argument('--test-email', action='store_true', help='Send a test email to verify credentials and exit')

@@ -1,0 +1,27 @@
+BTC/USD:
+  price_levels:
+    - price: 108000
+      condition: above
+    - price: 105000
+      condition: below
+  percentage_changes:
+    - percentage: 0.5
+      timeframe: 5
+    - percentage: 2
+      timeframe: 60
+  volatility:
+    - threshold: 2
+      timeframe: 5
+
+PEPE/USD:
+  price_levels:
+    - price: 0.000015
+      condition: above
+    - price: 0.000013
+      condition: below
+  percentage_changes:
+    - percentage: 3
+      timeframe: 15
+  volatility:
+    - threshold: 2
+      timeframe: 5
