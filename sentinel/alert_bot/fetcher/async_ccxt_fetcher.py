@@ -44,6 +44,31 @@ class AsyncCCXTFetcher:
         except Exception as e:
             logger.error(f"Error loading markets from {self.exchange_id}: {e}")
         
+    def _convert_symbol_format(self, symbol: str) -> str:
+        """
+        Convert symbol format if needed for specific exchanges
+        
+        Args:
+            symbol: Trading symbol (e.g., BTC/USD)
+            
+        Returns:
+            Properly formatted symbol for the current exchange
+        """
+        # Check if the symbol exists as-is in the markets
+        if symbol in self.markets:
+            return symbol
+            
+        # Try different formats based on exchange
+        if self.exchange_id == 'coinbase':
+            # Try with dash instead of slash
+            alt_symbol = symbol.replace('/', '-')
+            if alt_symbol in self.markets:
+                logger.debug(f"Converted symbol format from {symbol} to {alt_symbol}")
+                return alt_symbol
+        
+        # Default to original symbol if no conversion worked
+        return symbol
+        
     async def close(self):
         """Close the exchange connection"""
         await self.exchange.close()
@@ -66,7 +91,23 @@ class AsyncCCXTFetcher:
             Exception if fetch fails
         """
         try:
-            ticker = await self.exchange.fetch_ticker(symbol)
+            # Use the symbol as is in the cache
+            formatted_symbol = symbol
+            
+            # Try to fetch with the original symbol
+            try:
+                ticker = await self.exchange.fetch_ticker(symbol)
+            except Exception as first_error:
+                # If that fails, try with an alternative format
+                logger.debug(f"Initial fetch for {symbol} failed, trying alternative format")
+                formatted_symbol = self._convert_symbol_format(symbol)
+                
+                if formatted_symbol != symbol:
+                    ticker = await self.exchange.fetch_ticker(formatted_symbol)
+                else:
+                    # If no alternative format was found, re-raise the original error
+                    raise first_error
+                
             self.last_ticker_prices[symbol] = ticker
             await asyncio.sleep(self.rate_limit_sleep)  # Avoid rate limits
             logger.debug(f"Fetched ticker for {symbol}: {ticker['last']}")
@@ -137,8 +178,20 @@ class AsyncCCXTFetcher:
                 self.ohlcv_data[symbol] = {}
             if symbol not in self.last_ohlcv_fetch_time:
                 self.last_ohlcv_fetch_time[symbol] = {}
+            
+            # Try with original symbol first
+            try:
+                candles = await self.exchange.fetch_ohlcv(symbol, timeframe=ccxt_tf, limit=limit)
+            except Exception as first_error:
+                # If that fails, try with an alternative format
+                formatted_symbol = self._convert_symbol_format(symbol)
                 
-            candles = await self.exchange.fetch_ohlcv(symbol, timeframe=ccxt_tf, limit=limit)
+                if formatted_symbol != symbol:
+                    candles = await self.exchange.fetch_ohlcv(formatted_symbol, timeframe=ccxt_tf, limit=limit)
+                else:
+                    # If no alternative format was found, re-raise the original error
+                    raise first_error
+                    
             self.ohlcv_data[symbol][ccxt_tf] = candles
             self.last_ohlcv_fetch_time[symbol][ccxt_tf] = datetime.now()
             
