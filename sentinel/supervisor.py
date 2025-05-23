@@ -15,6 +15,11 @@ from sentinel import config
 root_logger = logging.getLogger() 
 root_logger.setLevel(getattr(logging, config.LOG_LEVEL.upper(), logging.INFO))
 
+# Quieten noisy libraries if root is DEBUG
+if root_logger.level == logging.DEBUG:
+    for lib_name in ["ccxt", "aiohttp", "websockets"]:
+        logging.getLogger(lib_name).setLevel(logging.INFO)
+
 # File Handler with Rotation
 file_handler = logging.handlers.RotatingFileHandler(
     config.LOG_FILE, 
@@ -264,7 +269,7 @@ async def main_supervisor_test(duration=10, is_raw_enabled_test=False):
     finally:
         # Ensure cleanup happens even if start() wasn't awaited (e.g. init error)
         if not s.stop_event.is_set(): 
-            await s.stop() # Call stop if it wasn't called yet
+            await s.stop() # Call stop if it wasn't called yet)
 
 if __name__ == "__main__":
     # This is a basic test run

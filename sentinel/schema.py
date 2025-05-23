@@ -159,7 +159,7 @@ def build_book_lp(
         
         # Measurement: order_book_binned (or just order_book if only one type of book data per bucket)
         lp = f"order_book,exchange={exchange},symbol={safe_symbol},side={side},bps_offset_idx={bps_offset_idx} " \
-             f"total_qty={total_qty:.8f}" # Format quantity to a reasonable precision
+             f"total_qty={total_qty:.8f},mid_price={mid_price:.2f}" # Added mid_price, formatted to 2 decimal places
         if sequence is not None:
             lp += f",sequence={sequence}i" # Add sequence as an integer field
         lp += f" {timestamp_ns}"

@@ -1,4 +1,4 @@
 --- Symbols meeting criteria for scan: 'Volatility_Squeeze_Alert' ---
-exchange  symbol timeframe     close     volume       RSI   zscore       %B  ATRstretch  VWAPgap  VWAPgap_daily  BTC_rel_zscore  VolumeZScore     RVOL      BBW       ADX  flags_met
-coinbase BTC-USD        1h 103890.04 149.799357 52.696473 0.473236 0.569533    0.323554 0.171655            0.0             NaN     -1.078042 0.382832 0.026478 16.641573          1
+exchange  symbol timeframe     close     volume       RSI   zscore       %B  ATRstretch  VWAPgap  VWAPgap_daily  BTC_rel_zscore  VolumeZScore     RVOL      BBW       ADX  delta_RSI  delta_zscore  delta_RVOL  delta_VWAPgap  delta_VWAPgap_daily  delta_BBW  delta_BTC_rel_zscore  delta_VolumeZScore  delta_%B  delta_ATRstretch  delta_ADX  flags_met
+coinbase BTC-USD        1h 103863.55 215.336251 57.688638 0.892058 0.869749    1.510257 0.158222       0.008332             NaN     -0.549907 0.646643 0.028352 20.525414   4.992165      0.418822    0.263811      -0.013433             0.008332   0.001874                   NaN            0.528135  0.300216          1.186703   3.883841          1
 -----------------------------------------------------------

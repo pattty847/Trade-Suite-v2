@@ -132,7 +132,7 @@ class Data(CCXTInterface):
         track_stats: bool = False,
         write_trades: bool = False,
         write_stats: bool = False,
-        sink: asyncio.coroutine = None,
+        sink: asyncio.coroutines = None,
         queue: asyncio.Queue = None
     ):
         """
@@ -286,7 +286,7 @@ class Data(CCXTInterface):
             logging.info(f"Orderbook list stream for {symbols} on {exchange_id} stopped.")
 
     async def watch_orderbook(self, exchange: str, symbol: str, stop_event: asyncio.Event,
-                              sink: asyncio.coroutine = None, # New: for direct callback
+                              sink: asyncio.coroutines = None, # New: for direct callback
                               queue: asyncio.Queue = None,     # New: for asyncio.Queue
                               cadence_ms: int = 500         # New: configurable cadence, default 500ms
                               ):

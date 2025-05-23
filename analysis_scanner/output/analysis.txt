@@ -1,0 +1,1340 @@
+--- File: __init__.py ---
+# This file makes Python treat the directory as a package. 
+--- End File: {relative_path} ---
+
+--- File: analysis_backup.py ---
+import pandas as pd
+import glob
+from datetime import datetime
+import ta   # pip install ta
+import numpy as np
+import os # Added import
+import yaml # For YAML configuration
+import operator # For mapping operator strings to functions
+import asyncio # Added import
+import logging # Added import for fetching
+from tqdm import tqdm # Added import for fetching progress
+from typing import List
+
+from trade_suite.data.data_source import Data # Added import
+from trade_suite.utils.market_utils import get_top_x_symbols_by_volume # Added import
+
+# --- Operator mapping for dynamic condition evaluation ---
+OPERATOR_MAP = {
+    '>': operator.gt,
+    '<': operator.lt,
+    '>=': operator.ge,
+    '<=': operator.le,
+    '==': operator.eq,
+    '!=': operator.ne
+}
+
+def load_scan_config(config_path='scan_config.yaml'):
+    """Loads the scan configuration from a YAML file."""
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        return config
+    except FileNotFoundError:
+        print(f"Error: Scan configuration file not found at {config_path}")
+        return None
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML configuration file {config_path}: {e}")
+        return None
+
+def anchored_vwap(df, anchor_time):
+    anchor = df[df.index >= anchor_time].iloc[0]
+    num = (df.loc[anchor_time:, 'closes'] * df.loc[anchor_time:, 'volumes']).cumsum()
+    denom = df.loc[anchor_time:, 'volumes'].cumsum()
+    return num / denom
+
+async def fetch_data_for_analysis(config: dict, target_timeframe: str) -> List[str] | None:
+    """Fetches or updates candle data based on the provided configuration.
+    Returns a list of symbol names (in filename format, e.g., BASE-QUOTE) that were targeted for fetching, 
+    an empty list if no symbols were fetched, or None if fetching was disabled or a critical error occurred.
+    """
+    if not config.get('enabled', False):
+        print("Data fetching is disabled in the configuration.")
+        return None
+
+    exchange_name = config.get('exchange')
+    since_date = config.get('since_date')
+    symbols_source = config.get('symbols_source')
+
+    if not all([exchange_name, since_date, symbols_source]):
+        logging.error("Data fetching configuration is incomplete (exchange, since_date, symbols_source). Skipping fetch.")
+        return None
+
+    print(f"Starting data fetch/update for {exchange_name}, timeframe: {target_timeframe}, since: {since_date}")
+
+    data_handler = None
+    # Initialize to None; will be set to list on success, or remain None on error, or empty list if no symbols.
+    filename_formatted_symbols_result: List[str] | None = None 
+    
+    try:
+        data_handler = Data(influx=None, emitter=None, exchanges=[exchange_name], force_public=True)
+        await data_handler.load_exchanges()
+        exchange_object = data_handler.exchange_list[exchange_name]
+
+        symbols_to_fetch = []
+        if symbols_source == "top_x":
+            count = config.get('top_x_count', 20)
+            quote_currency = config.get('top_x_quote_currency', 'USD')
+            volume_field = config.get('top_x_volume_field', 'volume_24h')
+            print(f"Fetching top {count} symbols from {exchange_name} by {quote_currency} volume (field: {volume_field})...")
+            symbols_to_fetch = await get_top_x_symbols_by_volume(
+                exchange=exchange_object,
+                quote_currency=quote_currency,
+                count=count,
+                volume_field=volume_field
+            )
+        elif symbols_source == "explicit_list":
+            symbols_to_fetch = config.get('symbols_list', [])
+            print(f"Fetching specified list of symbols: {symbols_to_fetch}")
+        else:
+            logging.error(f"Unknown symbols_source: {symbols_source}. Skipping fetch.")
+            # filename_formatted_symbols_result remains None due to early exit logic implies error
+            # but to be explicit for this path:
+            filename_formatted_symbols_result = None 
+            # Jump to finally, then return filename_formatted_symbols_result (which is None)
+            raise Exception(f"Unknown symbols_source: {symbols_source}") # To ensure finally runs and then return path is clean
+
+        # Ensure Bitcoin is included
+        btc_quote_curr = config.get('top_x_quote_currency', config.get('quote_currency_for_btc', 'USD'))
+        btc_pair_ccxt_format = f"BTC/{btc_quote_curr}"
+        if symbols_to_fetch is None: # Should only happen if get_top_x_symbols_by_volume somehow returns None
+             symbols_to_fetch = []
+            
+        if btc_pair_ccxt_format not in symbols_to_fetch:
+            print(f"Ensuring {btc_pair_ccxt_format} is included in fetch list for BTC relative analysis.")
+            symbols_to_fetch.append(btc_pair_ccxt_format)
+
+        if not symbols_to_fetch:
+            logging.warning("No symbols determined for fetching (even after BTC check). Skipping candle download.")
+            filename_formatted_symbols_result = [] # Successfully determined no symbols to fetch
+        else:
+            print(f"Proceeding to fetch/update candles for {len(symbols_to_fetch)} symbols: {symbols_to_fetch}")
+            await data_handler.fetch_candles(
+                exchanges=[exchange_name],
+                symbols=tqdm(symbols_to_fetch, desc=f"Fetching {target_timeframe} candles"),
+                since=since_date,
+                timeframes=[target_timeframe],
+                write_to_db=False 
+            )
+            print("Candle data fetching/updating complete.")
+            filename_formatted_symbols_result = [s.replace('/', '-') for s in symbols_to_fetch]
+
+    except Exception as e:
+        # If the exception was the one we raised for "Unknown symbols_source", don't re-log.
+        if not str(e).startswith("Unknown symbols_source"):
+            logging.error(f"An error occurred during data fetching: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+        # For any exception in the try block, result is None (failure)
+        filename_formatted_symbols_result = None
+    finally:
+        if data_handler and hasattr(data_handler, 'close_all_exchanges'):
+            print("Closing exchange connections after fetching...")
+            await data_handler.close_all_exchanges()
+            print("Exchange connections closed.")
+            
+    return filename_formatted_symbols_result
+
+def scan_folder(path="data/cache/*.csv", anchor="2024-01-01", target_timeframe="1d", symbols_to_process: List[str] | None = None, data_fetching_config: dict | None = None):
+    rows = []
+    if symbols_to_process is not None:
+        print(f"Scanning for timeframe: {target_timeframe} in path: {path}, focusing on {len(symbols_to_process)} specific symbol(s).")
+    else:
+        print(f"Scanning for timeframe: {target_timeframe} in path: {path} for all matching files.")
+    
+    processed_symbols_count = 0
+
+    # --- Load Bitcoin data for relative Z-score calculation ---
+    btc_closes_series = None
+    btc_target_symbol_name_for_comparison = None # e.g., BTC-USD
+
+    if data_fetching_config and data_fetching_config.get('enabled', False): # Only try if fetching was enabled
+        btc_exchange_name = data_fetching_config.get('exchange')
+        # Use the same quote currency logic as in fetch_data_for_analysis or a dedicated one
+        btc_quote_currency = data_fetching_config.get('top_x_quote_currency', data_fetching_config.get('quote_currency_for_btc', 'USD'))
+        
+        if btc_exchange_name and btc_quote_currency:
+            btc_target_symbol_name_for_comparison = f"BTC-{btc_quote_currency}"
+            # Construct path: data/cache/EXCHANGE_BTC-QUOTE_TIMEFRAME.csv
+            # Ensure path variable from glob.glob is used for dirname
+            # The `path` argument to scan_folder is like "data/cache/*.csv"
+            cache_directory = os.path.dirname(path) # "data/cache"
+            if not cache_directory: # If path was just "*.csv"
+                cache_directory = "." # Assume current directory or adjust as needed
+
+            btc_csv_filename = f"{btc_exchange_name}_{btc_target_symbol_name_for_comparison}_{target_timeframe}.csv"
+            btc_csv_full_path = os.path.join(cache_directory, btc_csv_filename)
+
+            if os.path.exists(btc_csv_full_path):
+                try:
+                    btc_df = pd.read_csv(btc_csv_full_path)
+                    if 'dates' in btc_df.columns and 'closes' in btc_df.columns:
+                        btc_df['dates'] = pd.to_numeric(btc_df['dates'], errors='coerce')
+                        btc_df['dates'] = pd.to_datetime(btc_df['dates'], unit='ms', errors='coerce')
+                        btc_df = btc_df.dropna(subset=['dates'])
+                        btc_df = btc_df.set_index("dates").sort_index()
+                        if not btc_df.empty and len(btc_df) >= 50: # Min length for reliable SMA/STD
+                            btc_closes_series = btc_df['closes']
+                            print(f"Successfully loaded Bitcoin data for relative analysis from: {btc_csv_full_path}")
+                        else:
+                            logging.warning(f"Bitcoin data file {btc_csv_full_path} has insufficient data after processing.")
+                    else:
+                        logging.warning(f"Bitcoin data file {btc_csv_full_path} is missing 'dates' or 'closes' column.")
+                except Exception as e:
+                    logging.error(f"Error loading or processing Bitcoin data from {btc_csv_full_path}: {e}")
+            else:
+                logging.warning(f"Bitcoin data file not found at {btc_csv_full_path}. BTC relative Z-score will not be calculated.")
+        else:
+            logging.warning("Bitcoin exchange or quote currency not found in data_fetching_config. Cannot load BTC data.")
+    else:
+        logging.info("Data fetching config not provided or not enabled; BTC relative Z-score will not be calculated.")
+
+    for fp in glob.glob(path, recursive=True):
+        filename = os.path.basename(fp)
+        name_part = filename.replace(".csv", "")
+        parts = name_part.split('_', 2) # Expect EXCHANGE_SYMBOL-QUOTE_TIMEFRAME
+
+        exchange_name = "UnknownExchange"
+        symbol_name = "UnknownSymbol" # Parsed symbol, e.g., BTC-USD
+        file_timeframe = "UnknownTF"
+
+        if len(parts) == 3:
+            exchange_name = parts[0]
+            symbol_name = parts[1] # This is BASE-QUOTE, e.g., BTC-USD
+            file_timeframe = parts[2]
+        else:
+            # logging.debug(f"Skipping file {filename}: does not match expected format 'EXCHANGE_SYMBOL_TIMEFRAME'.")
+            continue # Skip files not matching the strict format
+
+        # Filter by target_timeframe (ensure file's timeframe matches the scan's target)
+        if file_timeframe != target_timeframe:
+            # logging.debug(f"Skipping {filename}: its timeframe '{file_timeframe}' ('{symbol_name}') does not match target '{target_timeframe}'.")
+            continue
+        
+        # Filter by symbols_to_process if provided
+        # symbol_name is parsed in BASE-QUOTE format (e.g., BTC-USD)
+        if symbols_to_process is not None and symbol_name not in symbols_to_process:
+            # print(f"Skipping {filename}, symbol '{symbol_name}' not in the process list for this run.")
+            continue
+
+        print(f"Processing: {filename} (Exchange: {exchange_name}, Symbol: {symbol_name}, Parsed TF: {file_timeframe})")
+        processed_symbols_count += 1
+
+        # Read CSV and handle dates more robustly
+        df = pd.read_csv(fp)
+        if 'dates' not in df.columns:
+            print(f"Warning: 'dates' column not found in {fp}. Skipping.")
+            continue
+        
+        df['dates'] = pd.to_numeric(df['dates'], errors='coerce')
+        df['dates'] = pd.to_datetime(df['dates'], unit='ms', errors='coerce')
+        df = df.dropna(subset=['dates']) # Remove rows where date conversion failed
+        df = df.set_index("dates")
+        df.sort_index(inplace=True)
+
+        # Check for minimum data length
+        min_length = 50  # Based on SMA50 and other rolling calcs
+        min_length_adx = 28 # ADX default window is 14, but it needs 2*window typically for stability
+        
+        effective_min_length = max(min_length, min_length_adx if 'volumes' in df.columns else min_length) 
+        # Only make effective_min_length depend on adx if volume exists for vol calcs too
+
+        if len(df) < effective_min_length:
+            print(f"Warning: Not enough data in {fp} to calculate all indicators (have {len(df)}, need {effective_min_length}). Skipping.")
+            continue
+
+        # --- basic price & TA-Lib indicators ---
+        rsi = ta.momentum.RSIIndicator(df['closes']).rsi()
+        sma20 = df['closes'].rolling(20).mean()
+        std20 = df['closes'].rolling(20).std() # For BB
+        sma50 = df['closes'].rolling(50).mean()
+        std50 = df['closes'].rolling(50).std()
+        
+        bb_middle = sma20 # Bollinger Middle Band is SMA20
+        bb_upper = bb_middle + 2 * std20
+        bb_lower = bb_middle - 2 * std20
+        
+        atr = ta.volatility.AverageTrueRange(df['highs'], df['lows'], df['closes']).average_true_range()
+        vwap = anchored_vwap(df, pd.Timestamp(anchor))
+
+        # --- New Indicators ---
+        volume_zscore_value = np.nan
+        rvol_value = np.nan
+        bbw_value = np.nan
+        adx_value = np.nan
+
+        if 'volumes' in df.columns and df['volumes'].notna().sum() > 20: # Need enough volume data
+            vol_sma20 = df['volumes'].rolling(20, min_periods=10).mean()
+            vol_std20 = df['volumes'].rolling(20, min_periods=10).std()
+            current_volume = df['volumes'].iloc[-1]
+            latest_vol_sma20 = vol_sma20.iloc[-1]
+            latest_vol_std20 = vol_std20.iloc[-1]
+
+            if pd.notna(current_volume) and pd.notna(latest_vol_sma20) and pd.notna(latest_vol_std20) and latest_vol_std20 != 0:
+                volume_zscore_value = (current_volume - latest_vol_sma20) / latest_vol_std20
+            
+            if pd.notna(current_volume) and pd.notna(latest_vol_sma20) and latest_vol_sma20 != 0:
+                rvol_value = current_volume / latest_vol_sma20
+        
+        # Bollinger Bandwidth (Normalized)
+        if pd.notna(bb_upper.iloc[-1]) and pd.notna(bb_lower.iloc[-1]) and pd.notna(bb_middle.iloc[-1]) and bb_middle.iloc[-1] != 0:
+            bbw_value = (bb_upper.iloc[-1] - bb_lower.iloc[-1]) / bb_middle.iloc[-1]
+
+        # ADX
+        try:
+            # Ensure no NaNs in highs, lows, closes for ADX calculation for the required period
+            # ADX typically needs 2*window period of data to stabilize. Default window is 14.
+            # A simple check for enough non-NaN data in the involved columns up to the end.
+            if df['highs'].notna().sum() >= min_length_adx and \
+               df['lows'].notna().sum() >= min_length_adx and \
+               df['closes'].notna().sum() >= min_length_adx:
+                adx_indicator = ta.trend.ADXIndicator(df['highs'], df['lows'], df['closes'], window=14)
+                adx_series = adx_indicator.adx()
+                if adx_series is not None and not adx_series.empty and pd.notna(adx_series.iloc[-1]):
+                    adx_value = adx_series.iloc[-1]
+            # else:
+                # logging.debug(f"Skipping ADX for {symbol_name} due to insufficient non-NaN data for ADX window.")
+        except Exception as e:
+            logging.warning(f"Could not calculate ADX for {symbol_name}: {e}")
+
+        # --- BTC Relative Z-Score ---
+        btc_relative_zscore_value = np.nan
+        if btc_closes_series is not None and symbol_name != btc_target_symbol_name_for_comparison:
+            try:
+                # Ensure df.index is datetime before merge if not already
+                if not isinstance(df.index, pd.DatetimeIndex):
+                     # This should already be handled by earlier date processing for the symbol's df
+                     logging.warning(f"Index for {symbol_name} is not DatetimeIndex prior to BTC merge. This is unexpected.")
+                
+                # Align current symbol's closes with BTC closes on the datetime index
+                temp_symbol_closes = df[['closes']].copy() # Operate on a copy
+                merged_df = pd.merge(temp_symbol_closes, btc_closes_series.rename('btc_closes'), 
+                                     left_index=True, right_index=True, how='inner')
+
+                if not merged_df.empty and len(merged_df) >= 50 and 'closes' in merged_df.columns and 'btc_closes' in merged_df.columns:
+                    # Avoid division by zero if btc_closes has zeros, though highly unlikely for BTC price.
+                    merged_df['price_ratio'] = merged_df['closes'] / merged_df['btc_closes'].replace(0, np.nan)
+                    merged_df.replace([np.inf, -np.inf], np.nan, inplace=True) # Handle potential infinities
+                    merged_df.dropna(subset=['price_ratio'], inplace=True) # Remove rows where ratio couldn't be computed
+
+                    if len(merged_df) >= 50: # Check length again after potential drops from NaN ratio
+                        ratio_sma = merged_df['price_ratio'].rolling(window=50, min_periods=20).mean()
+                        ratio_std = merged_df['price_ratio'].rolling(window=50, min_periods=20).std()
+                        
+                        latest_ratio = merged_df['price_ratio'].iloc[-1]
+                        latest_ratio_sma = ratio_sma.iloc[-1]
+                        latest_ratio_std = ratio_std.iloc[-1]
+
+                        if pd.notna(latest_ratio) and pd.notna(latest_ratio_sma) and pd.notna(latest_ratio_std) and latest_ratio_std != 0:
+                            btc_relative_zscore_value = (latest_ratio - latest_ratio_sma) / latest_ratio_std
+                        # else:
+                            # logging.debug(f"Could not calculate BTC_rel_zscore for {symbol_name}: NaN in ratio SMA/STD or STD is zero.")
+                    # else:
+                        # logging.debug(f"Not enough overlapping data points with BTC for {symbol_name} to calculate ratio Z-score after merge ({len(merged_df)} points).")
+                # else:
+                    # logging.debug(f"Not enough overlapping data points with BTC for {symbol_name} to calculate ratio Z-score ({len(merged_df)} points), or missing columns.")
+            except Exception as e:
+                logging.error(f"Error calculating BTC relative Z-score for {symbol_name}: {e}")
+                # import traceback
+                # logging.error(traceback.format_exc())
+
+        latest = df.iloc[-1]
+        factors = {
+            "exchange": exchange_name,
+            "symbol": symbol_name, # This is BASE-QUOTE
+            "timeframe": file_timeframe, # Use the timeframe parsed from the file (which matched target_timeframe)
+            "close": latest.closes,
+            "volume": latest.volumes,
+            "RSI": rsi.iloc[-1],
+            "zscore": (latest.closes - sma50.iloc[-1]) / std50.iloc[-1],
+            "%B": (latest.closes - bb_upper.iloc[-1]) / std50.iloc[-1],
+            "ATRstretch": abs(latest.closes - sma20.iloc[-1]) / atr.iloc[-1],
+            "VWAPgap": (latest.closes - vwap.iloc[-1]) / vwap.iloc[-1],
+            "BTC_rel_zscore": btc_relative_zscore_value,
+            "VolumeZScore": volume_zscore_value,
+            "RVOL": rvol_value,
+            "BBW": bbw_value,
+            "ADX": adx_value,
+        }
+        # OI & CVD need external feeds → merge later
+        rows.append(factors)
+    print(f"Finished scanning. Processed {processed_symbols_count} files for the specified criteria.")
+    return pd.DataFrame(rows)
+
+async def main_analysis_workflow(config_path='scan_config.yaml', default_timeframe="1h"):
+    """Main workflow to optionally fetch data and then run scans."""
+    full_config = load_scan_config(config_path)
+    if not full_config:
+        print("Failed to load configuration. Exiting.")
+        return
+
+    data_fetching_config = full_config.get('data_fetching', {})
+    scans_config = full_config.get('scans', [])
+    
+    # Determine timeframe: config can override default, or use script's default
+    # For simplicity, we'll use default_timeframe passed to this function for both fetching and scanning.
+    # A more advanced setup could allow separate timeframes in config.
+    timeframe_to_process = default_timeframe 
+    print(f"Analysis workflow starting for timeframe: {timeframe_to_process}")
+
+    symbols_targeted_by_fetch = None # Initialize
+    if data_fetching_config.get('enabled', False):
+        symbols_targeted_by_fetch = await fetch_data_for_analysis(data_fetching_config, timeframe_to_process)
+        if symbols_targeted_by_fetch is None:
+            print("Data fetching was enabled but encountered an issue or returned no symbols. Analysis might be on existing cache data only.")
+        elif not symbols_targeted_by_fetch:
+             print("Data fetching was enabled but no symbols were identified for fetching (e.g., top_x returned empty). Analysis will be on existing cache data only.")
+        else:
+            print(f"Data fetching targeted {len(symbols_targeted_by_fetch)} symbol(s). Scan will focus on these if found.")
+    else:
+        print("Data fetching is disabled. Proceeding directly to analysis of all matching files in cache.")
+
+    # Proceed with scanning the folder
+    print(f"Starting folder scan for timeframe: {timeframe_to_process}...")
+    df_results = scan_folder(
+        target_timeframe=timeframe_to_process, 
+        symbols_to_process=symbols_targeted_by_fetch, # Pass the list here
+        data_fetching_config=data_fetching_config # Pass the data fetching config
+    )
+
+    if df_results.empty:
+        print("No symbols found with sufficient data to calculate all indicators for the scan.")
+        return # No need to proceed if no data
+    
+    if not scans_config:
+        print("No scans defined in the configuration. Displaying all processed symbols.")
+        print("\n--- All Processed Symbols & Indicators (no filtering) ---")
+        print(df_results.to_markdown())
+        print("-----------------------------------------------------------\n")
+        return
+
+    print("\n--- All Processed Symbols & Indicators (before scan filtering) ---")
+    print(df_results.to_markdown())
+    print("-----------------------------------------------------------\n")
+
+    any_scan_passed = False
+    for scan_details in scans_config: # Renamed from scan to scan_details to avoid conflict
+        if not scan_details.get('enabled', False):
+            print(f"Scan '{scan_details.get('name', 'Unnamed Scan')}' is disabled. Skipping.")
+            continue
+
+        scan_name = scan_details.get('name', 'Unnamed Scan')
+        scan_description = scan_details.get('description', '')
+        min_flags = scan_details.get('min_flags_to_pass', 1)
+        conditions = scan_details.get('conditions', [])
+
+        if not conditions:
+            print(f"Scan '{scan_name}' has no conditions defined. Skipping.")
+            continue
+
+        current_scan_df = df_results.copy()
+        current_scan_df['flags_met'] = 0 
+
+        print(f"\n--- Evaluating Scan: {scan_name} ---")
+        if scan_description:
+            print(f"Description: {scan_description}")
+        print(f"Minimum flags to pass: {min_flags}")
+
+        for cond in conditions:
+            if not cond.get('enabled', False):
+                continue 
+            
+            metric = cond.get('metric')
+            op_str = cond.get('operator')
+            value = cond.get('value')
+
+            if not all([metric, op_str, value is not None]):
+                print(f"Warning: Incomplete condition in scan '{scan_name}': {cond}. Skipping condition.")
+                continue
+            
+            if metric not in current_scan_df.columns:
+                print(f"Warning: Metric '{metric}' not found in DataFrame columns for scan '{scan_name}'. Skipping condition.")
+                continue
+            
+            op_func = OPERATOR_MAP.get(op_str)
+            if not op_func:
+                print(f"Warning: Invalid operator '{op_str}' in scan '{scan_name}'. Skipping condition.")
+                continue
+            
+            try:
+                condition_passed_mask = op_func(current_scan_df[metric].astype(float), float(value))
+                current_scan_df['flags_met'] += condition_passed_mask.astype(int)
+            except Exception as e:
+                print(f"Error applying condition {cond} for metric '{metric}' in scan '{scan_name}': {e}. Skipping condition.")
+
+        passed_this_scan_df = current_scan_df[current_scan_df['flags_met'] >= min_flags]
+
+        if passed_this_scan_df.empty:
+            print(f"No symbols met the criteria for scan: '{scan_name}'.")
+        else:
+            any_scan_passed = True
+            print(f"\nSymbols meeting criteria for scan: '{scan_name}'")
+            display_columns = [col for col in df_results.columns if col != 'flags_met'] + ['flags_met'] # Ensure flags_met is last
+            print(passed_this_scan_df[display_columns].sort_values(by='flags_met', ascending=False).head(20).to_markdown())
+
+    if not any_scan_passed:
+        print("\nNo symbols passed any of the enabled scans.")
+
+if __name__ == "__main__":
+    # Setup basic logging to see the output from traceback and fetching
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(name)s:%(message)s')
+
+    # --- Configuration for which timeframe to scan --- 
+    timeframe_to_analyze = "5m"  # This will be used for both fetching and scanning
+    
+    # Set the event loop policy for Windows if applicable
+    if os.name == 'nt': # Check for Windows NT (covers modern Windows)
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    asyncio.run(main_analysis_workflow(default_timeframe=timeframe_to_analyze))
+
+--- End File: {relative_path} ---
+
+--- File: config_utils.py ---
+import yaml
+import operator
+
+# --- Operator mapping for dynamic condition evaluation ---
+OPERATOR_MAP = {
+    '>': operator.gt,
+    '<': operator.lt,
+    '>=': operator.ge,
+    '<=': operator.le,
+    '==': operator.eq,
+    '!=': operator.ne
+}
+
+def load_scan_config(config_path='scan_config.yaml'):
+    """Loads the scan configuration from a YAML file."""
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        return config
+    except FileNotFoundError:
+        print(f"Error: Scan configuration file not found at {config_path}")
+        return None
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML configuration file {config_path}: {e}")
+        return None 
+--- End File: {relative_path} ---
+
+--- File: data_handler.py ---
+import asyncio
+import logging
+from tqdm import tqdm
+from typing import List
+
+from trade_suite.data.data_source import Data
+from trade_suite.utils.market_utils import get_top_x_symbols_by_volume
+
+async def fetch_data_for_analysis(config: dict, target_timeframe: str, full_config: dict | None = None) -> List[str] | None:
+    """Fetches or updates candle data based on the provided configuration.
+    Returns a list of symbol names (in filename format, e.g., BASE-QUOTE) that were targeted for fetching, 
+    an empty list if no symbols were fetched, or None if fetching was disabled or a critical error occurred.
+    """
+    if not config.get('enabled', False):
+        print("Data fetching is disabled in the configuration.")
+        return None
+
+    exchange_name = config.get('exchange')
+    since_date = config.get('since_date')
+    symbols_source = config.get('symbols_source')
+
+    if not all([exchange_name, since_date, symbols_source]):
+        logging.error("Data fetching configuration is incomplete (exchange, since_date, symbols_source). Skipping fetch.")
+        return None
+
+    print(f"Starting data fetch/update for {exchange_name}, timeframe: {target_timeframe}, since: {since_date}")
+
+    data_handler = None
+    # Initialize to None; will be set to list on success, or remain None on error, or empty list if no symbols.
+    filename_formatted_symbols_result: List[str] | None = None 
+    
+    try:
+        data_handler = Data(influx=None, emitter=None, exchanges=[exchange_name], force_public=True)
+        await data_handler.load_exchanges()
+        exchange_object = data_handler.exchange_list[exchange_name]
+
+        symbols_to_fetch = []
+        if symbols_source == "top_x":
+            count = config.get('top_x_count', 20)
+            quote_currency = config.get('top_x_quote_currency', 'USD')
+            volume_field = config.get('top_x_volume_field', 'volume_24h')
+            print(f"Fetching top {count} symbols from {exchange_name} by {quote_currency} volume (field: {volume_field})...")
+            symbols_to_fetch = await get_top_x_symbols_by_volume(
+                exchange=exchange_object,
+                quote_currency=quote_currency,
+                count=count,
+                volume_field=volume_field
+            )
+        elif symbols_source == "explicit_list":
+            symbols_to_fetch = config.get('symbols_list', [])
+            print(f"Fetching specified list of symbols: {symbols_to_fetch}")
+        elif symbols_source.startswith("group:") and full_config:
+            group_name = symbols_source.split(":", 1)[1]
+            asset_groups = full_config.get('asset_groups', {})
+            if group_name in asset_groups:
+                symbols_to_fetch = asset_groups[group_name]
+                print(f"Fetching symbols from predefined group '{group_name}': {symbols_to_fetch}")
+            else:
+                logging.error(f"Asset group '{group_name}' not found in configuration. Skipping fetch.")
+                filename_formatted_symbols_result = None
+                raise Exception(f"Asset group '{group_name}' not found")
+        else:
+            logging.error(f"Unknown or misconfigured symbols_source: {symbols_source}. Check config or group syntax ('group:name'). Skipping fetch.")
+            filename_formatted_symbols_result = None 
+            raise Exception(f"Unknown symbols_source: {symbols_source}")
+
+        btc_quote_curr = config.get('top_x_quote_currency', config.get('quote_currency_for_btc', 'USD'))
+        btc_pair_ccxt_format = f"BTC/{btc_quote_curr}"
+        if symbols_to_fetch is None: 
+             symbols_to_fetch = []
+            
+        if btc_pair_ccxt_format not in symbols_to_fetch:
+            print(f"Ensuring {btc_pair_ccxt_format} is included in fetch list for BTC relative analysis.")
+            symbols_to_fetch.append(btc_pair_ccxt_format)
+
+        if not symbols_to_fetch:
+            logging.warning("No symbols determined for fetching (even after BTC check). Skipping candle download.")
+            filename_formatted_symbols_result = []
+        else:
+            print(f"Proceeding to fetch/update candles for {len(symbols_to_fetch)} symbols: {symbols_to_fetch}")
+            await data_handler.fetch_candles(
+                exchanges=[exchange_name],
+                symbols=tqdm(symbols_to_fetch, desc=f"Fetching {target_timeframe} candles"),
+                since=since_date,
+                timeframes=[target_timeframe],
+                write_to_db=False 
+            )
+            print("Candle data fetching/updating complete.")
+            filename_formatted_symbols_result = [s.replace('/', '-') for s in symbols_to_fetch]
+
+    except Exception as e:
+        if not str(e).startswith("Unknown symbols_source"):
+            logging.error(f"An error occurred during data fetching: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+        filename_formatted_symbols_result = None
+    finally:
+        if data_handler and hasattr(data_handler, 'close_all_exchanges'):
+            print("Closing exchange connections after fetching...")
+            await data_handler.close_all_exchanges()
+            print("Exchange connections closed.")
+            
+    return filename_formatted_symbols_result 
+--- End File: {relative_path} ---
+
+--- File: file_scanner.py ---
+import pandas as pd
+import glob
+import os
+import logging
+import numpy as np
+from typing import List, Dict, Any
+
+from .indicator_calculator import calculate_technical_indicators
+
+def scan_data_files(
+    path_pattern: str = "data/cache/*.csv", 
+    anchor_str_for_vwap: str = "2024-01-01", 
+    target_timeframe: str = "1d", 
+    symbols_to_process: List[str] | None = None, 
+    data_fetching_config: dict | None = None,
+    max_rows_to_load: int = 1000
+) -> pd.DataFrame:
+    """Scans data files, calculates indicators, and returns a DataFrame of results."""
+    rows = []
+    if symbols_to_process is not None:
+        print(f"Scanning for timeframe: {target_timeframe} in path: {path_pattern}, focusing on {len(symbols_to_process)} specific symbol(s).")
+    else:
+        print(f"Scanning for timeframe: {target_timeframe} in path: {path_pattern} for all matching files.")
+    
+    processed_symbols_count = 0
+    anchor_timestamp_for_vwap = pd.Timestamp(anchor_str_for_vwap) # Convert anchor string to Timestamp once
+
+    # --- Load Bitcoin data for relative Z-score calculation ---
+    btc_closes_series = None
+    btc_target_symbol_name_for_comparison = None
+
+    if data_fetching_config and data_fetching_config.get('enabled', False):
+        btc_exchange_name = data_fetching_config.get('exchange')
+        btc_quote_currency = data_fetching_config.get('top_x_quote_currency', data_fetching_config.get('quote_currency_for_btc', 'USD'))
+        
+        if btc_exchange_name and btc_quote_currency:
+            btc_target_symbol_name_for_comparison = f"BTC-{btc_quote_currency}"
+            cache_directory = os.path.dirname(path_pattern)
+            if not cache_directory: cache_directory = "."
+
+            btc_csv_filename = f"{btc_exchange_name}_{btc_target_symbol_name_for_comparison}_{target_timeframe}.csv"
+            btc_csv_full_path = os.path.join(cache_directory, btc_csv_filename)
+
+            if os.path.exists(btc_csv_full_path):
+                try:
+                    btc_df = pd.read_csv(btc_csv_full_path)
+                    if 'dates' in btc_df.columns and 'closes' in btc_df.columns:
+                        btc_df['dates'] = pd.to_numeric(btc_df['dates'], errors='coerce')
+                        btc_df['dates'] = pd.to_datetime(btc_df['dates'], unit='ms', errors='coerce')
+                        btc_df = btc_df.dropna(subset=['dates'])
+                        btc_df = btc_df.set_index("dates").sort_index()
+                        if not btc_df.empty and len(btc_df) >= 50:
+                            btc_closes_series = btc_df['closes']
+                            print(f"Successfully loaded Bitcoin data for relative analysis from: {btc_csv_full_path}")
+                        else:
+                            logging.warning(f"Bitcoin data file {btc_csv_full_path} has insufficient data after processing.")
+                    else:
+                        logging.warning(f"Bitcoin data file {btc_csv_full_path} is missing 'dates' or 'closes' column.")
+                except Exception as e:
+                    logging.error(f"Error loading or processing Bitcoin data from {btc_csv_full_path}: {e}")
+            else:
+                logging.warning(f"Bitcoin data file not found at {btc_csv_full_path}. BTC relative Z-score will not be calculated.")
+        else:
+            logging.warning("Bitcoin exchange or quote currency not found in data_fetching_config. Cannot load BTC data.")
+    else:
+        logging.info("Data fetching config not provided or not enabled; BTC relative Z-score will not be calculated.")
+
+    for fp in glob.glob(path_pattern, recursive=True):
+        filename = os.path.basename(fp)
+        name_part = filename.replace(".csv", "")
+        parts = name_part.split('_', 2)
+
+        exchange_name, symbol_name, file_timeframe = "UnknownExchange", "UnknownSymbol", "UnknownTF"
+
+        if len(parts) == 3:
+            exchange_name, symbol_name, file_timeframe = parts[0], parts[1], parts[2]
+        else:
+            continue
+
+        if file_timeframe != target_timeframe:
+            continue
+        
+        if symbols_to_process is not None and symbol_name not in symbols_to_process:
+            continue
+
+        print(f"Processing: {filename} (Exchange: {exchange_name}, Symbol: {symbol_name}, Parsed TF: {file_timeframe})")
+        
+        df = pd.read_csv(fp)
+        if 'dates' not in df.columns:
+            print(f"Warning: 'dates' column not found in {fp}. Skipping.")
+            continue
+        
+        # --- Apply tail loading --- 
+        if len(df) > max_rows_to_load:
+            df = df.tail(max_rows_to_load).copy() # Use copy to avoid SettingWithCopyWarning later if modifying df
+        # ------------------------
+
+        df['dates'] = pd.to_numeric(df['dates'], errors='coerce')
+        df['dates'] = pd.to_datetime(df['dates'], unit='ms', errors='coerce')
+        df = df.dropna(subset=['dates'])
+        df = df.set_index("dates").sort_index()
+
+        min_length = 50
+        min_length_adx_data_check = 28 # For data presence for ADX input columns
+        effective_min_length = max(min_length, min_length_adx_data_check if all(col in df.columns for col in ['highs', 'lows', 'closes']) else min_length)
+
+        if len(df) < effective_min_length:
+            print(f"Warning: Not enough data in {fp} to calculate all indicators (have {len(df)}, need {effective_min_length}). Skipping.")
+            continue
+
+        # Call the imported calculator function
+        factors = calculate_technical_indicators(
+            df=df, 
+            anchor_timestamp_for_vwap=anchor_timestamp_for_vwap, 
+            current_symbol_name=symbol_name,
+            btc_closes_series=btc_closes_series, 
+            btc_target_symbol_name_for_comparison=btc_target_symbol_name_for_comparison
+        )
+
+        # Add metadata that was previously part of the factors dict construction
+        full_factors_row = {
+            "exchange": exchange_name,
+            "symbol": symbol_name,
+            "timeframe": file_timeframe,
+            **factors # Unpack the calculated indicators
+        }
+        rows.append(full_factors_row)
+        processed_symbols_count += 1
+
+    print(f"Finished scanning. Processed {processed_symbols_count} files for the specified criteria.")
+    return pd.DataFrame(rows) 
+--- End File: {relative_path} ---
+
+--- File: indicator_calculator.py ---
+import pandas as pd
+import numpy as np
+import ta
+import logging
+
+def anchored_vwap(df, anchor_time):
+    """Calculates Anchored VWAP from the given anchor_time.
+    anchor_time should be a pandas Timestamp.
+    """
+    # Find the first row at or after the anchor_time
+    anchor_df = df[df.index >= anchor_time]
+    if anchor_df.empty:
+        # logging.warning(f"Anchor time {anchor_time} not found in DataFrame index. VWAP will be NaN.")
+        return pd.Series([np.nan] * len(df.index), index=df.index) # Return series of NaNs matching df length
+
+    # Slice the DataFrame from the actual anchor point found
+    actual_anchor_time = anchor_df.index[0]
+    
+    # Calculate cumulative sum of (price * volume) and cumulative sum of volume
+    num = (df.loc[actual_anchor_time:, 'closes'] * df.loc[actual_anchor_time:, 'volumes']).cumsum()
+    denom = df.loc[actual_anchor_time:, 'volumes'].cumsum()
+    
+    # Calculate VWAP, handling potential division by zero by replacing with NaN
+    vwap_series = (num / denom).reindex(df.index) # Reindex to match original df index, filling with NaNs before anchor
+    return vwap_series
+
+def calculate_technical_indicators(
+    df: pd.DataFrame, 
+    anchor_timestamp_for_vwap: pd.Timestamp, 
+    current_symbol_name: str, # For logging/debugging purposes
+    btc_closes_series: pd.Series | None = None, 
+    btc_target_symbol_name_for_comparison: str | None = None
+):
+    """Calculates all technical indicators for the given DataFrame.
+    Returns a dictionary of indicator values (factors).
+    """
+    factors = {}
+    min_length_adx = 28 # ADX default window is 14, needs 2*window typically for stability
+
+    latest = df.iloc[-1]
+
+    # --- basic price & TA-Lib indicators ---
+    rsi = ta.momentum.RSIIndicator(df['closes']).rsi()
+    sma20 = df['closes'].rolling(20).mean()
+    std20 = df['closes'].rolling(20).std() # For BB
+    sma50 = df['closes'].rolling(50).mean()
+    std50 = df['closes'].rolling(50).std()
+    
+    bb_middle = sma20 # Bollinger Middle Band is SMA20
+    bb_upper = bb_middle + 2 * std20
+    bb_lower = bb_middle - 2 * std20
+    
+    atr = ta.volatility.AverageTrueRange(df['highs'], df['lows'], df['closes']).average_true_range()
+    vwap_series = anchored_vwap(df, anchor_timestamp_for_vwap)
+    vwap_value = vwap_series.iloc[-1] if pd.notna(vwap_series.iloc[-1]) else np.nan
+
+    # --- Calculate Daily VWAP ---
+    daily_anchor_ts = df.index[-1].normalize() # 00:00 UTC of the latest day in the (potentially tailed) df
+    vwap_daily_series = anchored_vwap(df, daily_anchor_ts)
+    vwap_daily_value = vwap_daily_series.iloc[-1] if pd.notna(vwap_daily_series.iloc[-1]) else np.nan
+    # ---------------------------
+
+    # --- New Indicators ---
+    volume_zscore_value = np.nan
+    rvol_value = np.nan
+    bbw_value = np.nan
+    adx_value = np.nan
+
+    if 'volumes' in df.columns and df['volumes'].notna().sum() > 20: # Need enough volume data
+        vol_sma20 = df['volumes'].rolling(20, min_periods=10).mean()
+        vol_std20 = df['volumes'].rolling(20, min_periods=10).std()
+        current_volume = df['volumes'].iloc[-1]
+        latest_vol_sma20 = vol_sma20.iloc[-1]
+        latest_vol_std20 = vol_std20.iloc[-1]
+
+        if pd.notna(current_volume) and pd.notna(latest_vol_sma20) and pd.notna(latest_vol_std20) and latest_vol_std20 != 0:
+            volume_zscore_value = (current_volume - latest_vol_sma20) / latest_vol_std20
+        
+        if pd.notna(current_volume) and pd.notna(latest_vol_sma20) and latest_vol_sma20 != 0:
+            rvol_value = current_volume / latest_vol_sma20
+    
+    # Bollinger Bandwidth (Normalized)
+    if pd.notna(bb_upper.iloc[-1]) and pd.notna(bb_lower.iloc[-1]) and pd.notna(bb_middle.iloc[-1]) and bb_middle.iloc[-1] != 0:
+        bbw_value = (bb_upper.iloc[-1] - bb_lower.iloc[-1]) / bb_middle.iloc[-1]
+
+    # ADX
+    try:
+        if df['highs'].notna().sum() >= min_length_adx and \
+           df['lows'].notna().sum() >= min_length_adx and \
+           df['closes'].notna().sum() >= min_length_adx:
+            adx_indicator = ta.trend.ADXIndicator(df['highs'], df['lows'], df['closes'], window=14)
+            adx_series = adx_indicator.adx()
+            if adx_series is not None and not adx_series.empty and pd.notna(adx_series.iloc[-1]):
+                adx_value = adx_series.iloc[-1]
+        # else:
+            # logging.debug(f"Skipping ADX for {current_symbol_name} due to insufficient non-NaN data for ADX window.")
+    except Exception as e:
+        logging.warning(f"Could not calculate ADX for {current_symbol_name}: {e}")
+
+    # --- BTC Relative Z-Score ---
+    btc_relative_zscore_value = np.nan
+    if btc_closes_series is not None and current_symbol_name != btc_target_symbol_name_for_comparison:
+        try:
+            if not isinstance(df.index, pd.DatetimeIndex):
+                 logging.warning(f"Index for {current_symbol_name} is not DatetimeIndex prior to BTC merge. This is unexpected.")
+            
+            temp_symbol_closes = df[['closes']].copy()
+            merged_df = pd.merge(temp_symbol_closes, btc_closes_series.rename('btc_closes'), 
+                                 left_index=True, right_index=True, how='inner')
+
+            if not merged_df.empty and len(merged_df) >= 50 and 'closes' in merged_df.columns and 'btc_closes' in merged_df.columns:
+                merged_df['price_ratio'] = merged_df['closes'] / merged_df['btc_closes'].replace(0, np.nan)
+                merged_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+                merged_df.dropna(subset=['price_ratio'], inplace=True)
+
+                if len(merged_df) >= 50:
+                    ratio_sma = merged_df['price_ratio'].rolling(window=50, min_periods=20).mean()
+                    ratio_std = merged_df['price_ratio'].rolling(window=50, min_periods=20).std()
+                    
+                    latest_ratio = merged_df['price_ratio'].iloc[-1]
+                    latest_ratio_sma = ratio_sma.iloc[-1]
+                    latest_ratio_std = ratio_std.iloc[-1]
+
+                    if pd.notna(latest_ratio) and pd.notna(latest_ratio_sma) and pd.notna(latest_ratio_std) and latest_ratio_std != 0:
+                        btc_relative_zscore_value = (latest_ratio - latest_ratio_sma) / latest_ratio_std
+                    # else:
+                        # logging.debug(f"Could not calculate BTC_rel_zscore for {current_symbol_name}: NaN in ratio SMA/STD or STD is zero.")
+                # else:
+                    # logging.debug(f"Not enough overlapping data points with BTC for {current_symbol_name} to calculate ratio Z-score after merge ({len(merged_df)} points).")
+            # else:
+                # logging.debug(f"Not enough overlapping data points with BTC for {current_symbol_name} to calculate ratio Z-score ({len(merged_df)} points), or missing columns.")
+        except Exception as e:
+            logging.error(f"Error calculating BTC relative Z-score for {current_symbol_name}: {e}")
+
+    factors = {
+        "close": latest.closes,
+        "volume": latest.volumes if 'volumes' in latest else np.nan,
+        "RSI": rsi.iloc[-1] if pd.notna(rsi.iloc[-1]) else np.nan,
+        "zscore": (latest.closes - sma50.iloc[-1]) / std50.iloc[-1] if pd.notna(sma50.iloc[-1]) and pd.notna(std50.iloc[-1]) and std50.iloc[-1] != 0 else np.nan,
+        "%B": (latest.closes - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1]) if pd.notna(bb_upper.iloc[-1]) and pd.notna(bb_lower.iloc[-1]) and (bb_upper.iloc[-1] - bb_lower.iloc[-1]) != 0 else np.nan, # Corrected %B definition
+        "ATRstretch": abs(latest.closes - sma20.iloc[-1]) / atr.iloc[-1] if pd.notna(atr.iloc[-1]) and atr.iloc[-1] != 0 else np.nan,
+        "VWAPgap": (latest.closes - vwap_value) / vwap_value if pd.notna(vwap_value) and vwap_value != 0 else np.nan,
+        "VWAPgap_daily": (latest.closes - vwap_daily_value) / vwap_daily_value if pd.notna(vwap_daily_value) and vwap_daily_value != 0 else np.nan, # Added daily VWAP gap
+        "BTC_rel_zscore": btc_relative_zscore_value,
+        "VolumeZScore": volume_zscore_value,
+        "RVOL": rvol_value,
+        "BBW": bbw_value,
+        "ADX": adx_value,
+    }
+    return factors 
+--- End File: {relative_path} ---
+
+--- File: main_workflow.py ---
+import asyncio
+import os
+import logging
+import pandas as pd # Added for DataFrame type hint and empty check
+import numpy as np
+import os # Ensure os is imported
+
+from .config_utils import load_scan_config, OPERATOR_MAP
+from .data_handler import fetch_data_for_analysis
+from .file_scanner import scan_data_files
+from .output_handler import write_output # Added import
+
+# Define path for storing last results - TEMPLATE now
+LAST_RESULTS_PATH_TEMPLATE = 'results_last_{timeframe}.parquet'
+
+async def run_analysis_workflow(config_path='scan_config.yaml', default_timeframe="1h"):
+    """Main workflow to optionally fetch data and then run scans."""
+    full_config = load_scan_config(config_path)
+    if not full_config:
+        print("Failed to load configuration. Exiting.")
+        return
+
+    timeframe_to_process = default_timeframe # Use the resolved timeframe
+    last_results_file = LAST_RESULTS_PATH_TEMPLATE.format(timeframe=timeframe_to_process)
+    print(f"Using last results file: {last_results_file}")
+
+    # --- Load previous results for delta calculation ---
+    df_last = None
+    if os.path.exists(last_results_file): # Use timeframe-specific file
+        try:
+            df_last = pd.read_parquet(last_results_file) # Use timeframe-specific file
+            # Ensure key columns exist for indexing and comparison
+            key_cols = ['exchange', 'symbol', 'timeframe']
+            if not all(col in df_last.columns for col in key_cols):
+                 print(f"Warning: {last_results_file} missing key columns ({key_cols}). Skipping delta calculation.")
+                 df_last = None
+            else:
+                 # Set index for easy alignment later
+                 df_last = df_last.set_index(key_cols)
+        except Exception as e:
+            print(f"Warning: Could not load or process {last_results_file}: {e}. Skipping delta calculation.")
+            df_last = None
+    # --------------------------------------------------
+
+    data_fetching_config = full_config.get('data_fetching', {})
+    scans_config = full_config.get('scans', [])
+    output_configs = full_config.get('output', []) # Load output configurations
+    
+    # Default to markdown to stdout if no output config is provided, to maintain old behavior.
+    if not output_configs:
+        output_configs = [{'format': 'markdown', 'path': None}]
+        print("No output configuration found in scan_config.yaml. Defaulting to Markdown to stdout.")
+
+    print(f"Analysis workflow starting for timeframe: {timeframe_to_process}")
+
+    # Default path pattern for scan_data_files, can be overridden by config if desired in future
+    # For now, using the one from the original scan_folder default.
+    # It might be better to make this configurable via scan_config.yaml too.
+    path_pattern_for_scan = full_config.get('scanner_options', {}).get('path_pattern', "data/cache/*.csv")
+    anchor_for_vwap = full_config.get('scanner_options', {}).get('anchor_for_vwap', "2024-01-01")
+    # Read max_rows_to_load from config, default to 1000
+    max_rows_to_load = full_config.get('scanner_options', {}).get('max_rows_to_load', 1000)
+
+
+    symbols_targeted_by_fetch = None
+    if data_fetching_config.get('enabled', False):
+        # Pass full_config here for asset groups later
+        symbols_targeted_by_fetch = await fetch_data_for_analysis(data_fetching_config, timeframe_to_process, full_config)
+        if symbols_targeted_by_fetch is None:
+            print("Data fetching was enabled but encountered an issue or returned no symbols. Analysis might be on existing cache data only.")
+        elif not symbols_targeted_by_fetch:
+             print("Data fetching was enabled but no symbols were identified for fetching. Analysis will be on existing cache data only.")
+        else:
+            print(f"Data fetching targeted {len(symbols_targeted_by_fetch)} symbol(s). Scan will focus on these if found.")
+    else:
+        print("Data fetching is disabled. Proceeding directly to analysis of all matching files in cache.")
+
+    print(f"Starting folder scan for timeframe: {timeframe_to_process}...")
+    df_results = scan_data_files(
+        path_pattern=path_pattern_for_scan,
+        anchor_str_for_vwap=anchor_for_vwap,
+        target_timeframe=timeframe_to_process, 
+        symbols_to_process=symbols_targeted_by_fetch,
+        data_fetching_config=data_fetching_config,
+        max_rows_to_load=max_rows_to_load # Pass the value here
+    )
+
+    if df_results.empty:
+        print("No symbols found with sufficient data to calculate all indicators for the scan.")
+        # Attempt to save an empty DataFrame to potentially clear the last state if needed? Or just return.
+        # Let's just return for now. If no symbols are processed, no deltas can be calculated anyway.
+        return
+    
+    # --- Calculate Deltas ---
+    # Define columns for which to calculate deltas
+    delta_metric_cols = [
+        'RSI', 'zscore', 'RVOL', 'VWAPgap', 'VWAPgap_daily', 
+        'BBW', 'BTC_rel_zscore', 'VolumeZScore', '%B', 'ATRstretch', 'ADX'
+    ]
+    # Ensure results DF has the key index columns before proceeding
+    key_cols = ['exchange', 'symbol', 'timeframe']
+    if all(col in df_results.columns for col in key_cols):
+        df_results = df_results.set_index(key_cols)
+
+        if df_last is not None:
+            print("Calculating deltas from previous run...")
+            # Find columns that actually exist in both current and last results
+            valid_delta_cols = [col for col in delta_metric_cols if col in df_results.columns and col in df_last.columns]
+            
+            # Align indexes (use left join to keep all current results)
+            df_results, df_last_aligned = df_results.align(df_last, join='left', axis=0) 
+
+            # DEBUG: Print some values for comparison
+            if valid_delta_cols:
+                # Find a common index for debugging
+                common_indices = df_results.index.intersection(df_last_aligned.index)
+                if not common_indices.empty:
+                    debug_idx = common_indices[0] # Take the first common index
+                    debug_col = valid_delta_cols[0] # Take the first valid metric for delta
+                    current_val = df_results.loc[debug_idx, debug_col]
+                    last_val = df_last_aligned.loc[debug_idx, debug_col]
+                    print(f"DEBUG: For index {debug_idx}, metric {debug_col}:")
+                    print(f"DEBUG:   Current value: {current_val}")
+                    print(f"DEBUG:   Last value: {last_val}")
+                    if pd.isna(current_val) or pd.isna(last_val):
+                        print(f"DEBUG:   One or both values are NaN. Delta will be NaN.")
+                    elif current_val == last_val:
+                        print(f"DEBUG:   Values are identical. Delta will be 0.")
+                    else:
+                        print(f"DEBUG:   Values differ. Delta should be non-zero: {current_val - last_val}")
+                else:
+                    print("DEBUG: No common indices found between current and last results for detailed comparison. Deltas might be NaN or 0 if new data only.")
+
+
+            for col in valid_delta_cols:
+                 # Ensure columns are numeric before subtraction, coercing errors to NaN
+                 current_col_numeric = pd.to_numeric(df_results[col], errors='coerce')
+                 last_col_numeric = pd.to_numeric(df_last_aligned[col], errors='coerce')
+                 df_results[f'delta_{col}'] = current_col_numeric - last_col_numeric
+            print("Delta calculation complete.")
+        else:
+            print("Previous results not found or invalid. Skipping delta calculation for this run.")
+            # Add empty delta columns for consistent structure? Optional. For now, they just won't exist.
+
+        # --- Save current results for the next run's delta calculation ---
+        # Select only columns needed for next time's delta calculation + index cols
+        cols_to_save = valid_delta_cols if df_last is not None else [col for col in delta_metric_cols if col in df_results.columns] # Use computed valid cols or check current cols
+        
+        # Reset index to save key cols as regular columns
+        df_to_save = df_results[cols_to_save].reset_index() 
+        try:
+            df_to_save.to_parquet(last_results_file, index=False) # Use timeframe-specific file
+            print(f"Current results saved to {last_results_file} for next run.")
+        except Exception as e:
+            print(f"Warning: Could not save results to {last_results_file}: {e}")
+        # -----------------------------------------------------------------
+
+        # Reset index for subsequent processing/printing
+        df_results = df_results.reset_index() 
+    else:
+        print("Warning: Key columns missing in df_results. Skipping delta calculation and saving.")
+    # --- End Delta Calculation & Saving ---
+
+    # --- Scan Evaluation (existing logic) ---
+    if not scans_config:
+        print("No scans defined in the configuration. Displaying all processed symbols.")
+        # Check if df_results is a DataFrame
+        if isinstance(df_results, pd.DataFrame):
+            display_cols = sorted([col for col in df_results.columns if col not in key_cols])
+            # Use new output handler
+            for out_conf in output_configs:
+                write_output(df_results[key_cols + display_cols], out_conf, title="All Processed Symbols & Indicators (no filtering)")
+        else:
+            # Fallback for non-DataFrame results (should ideally not happen with current logic)
+            print("Non-DataFrame results, printing directly:")
+            print(df_results)
+        print("-----------------------------------------------------------\n")
+        return
+
+    # Print all processed symbols before scan filtering using the new handler
+    if isinstance(df_results, pd.DataFrame):
+        display_cols_all = sorted([col for col in df_results.columns if col not in key_cols])
+        df_to_output_all = df_results[key_cols + display_cols_all]
+        for out_conf in output_configs:
+            # Potentially use a different title or path suffix for this "all_processed" output
+            # For now, let's give it a distinct title.
+            # We might want specific output configs for "all_processed" vs "scan_results" later.
+            conf_all = out_conf.copy() # Avoid modifying original config if we add suffixes
+            if conf_all.get('path'):
+                 base, ext = os.path.splitext(conf_all['path'])
+                 conf_all['path'] = f"{base}_all_processed{ext}"
+            write_output(df_to_output_all, conf_all, title="All Processed Symbols & Indicators (before scan filtering)")
+    else:
+        print("Non-DataFrame results for 'All Processed Symbols', printing directly:")
+        print(df_results)
+    # Removed the direct print and horizontal line as write_output handles it for text/md to stdout
+
+    any_scan_passed = False
+    for scan_details in scans_config:
+        if not scan_details.get('enabled', False):
+            print(f"Scan '{scan_details.get('name', 'Unnamed Scan')}' is disabled. Skipping.")
+            continue
+
+        scan_name = scan_details.get('name', 'Unnamed Scan')
+        scan_description = scan_details.get('description', '')
+        min_flags = scan_details.get('min_flags_to_pass', 1)
+        conditions = scan_details.get('conditions', [])
+
+        if not conditions:
+            print(f"Scan '{scan_name}' has no conditions defined. Skipping.")
+            continue
+
+        # Use a copy for evaluation, keeping original df_results intact
+        current_scan_df = df_results.copy() 
+        current_scan_df['flags_met'] = 0 
+
+        print(f"\n--- Evaluating Scan: {scan_name} ---")
+        if scan_description:
+            print(f"Description: {scan_description}")
+        print(f"Minimum flags to pass: {min_flags}")
+
+        # Apply conditions to the copy
+        for cond in conditions:
+            if not cond.get('enabled', False):
+                continue 
+            
+            metric = cond.get('metric')
+            op_str = cond.get('operator')
+            value = cond.get('value')
+
+            if not all([metric, op_str, value is not None]):
+                print(f"Warning: Incomplete condition in scan '{scan_name}': {cond}. Skipping condition.")
+                continue
+            
+            # Check if metric exists in the copied DataFrame
+            if metric not in current_scan_df.columns:
+                print(f"Warning: Metric '{metric}' not found in DataFrame columns for scan '{scan_name}'. Skipping condition.")
+                continue
+            
+            op_func = OPERATOR_MAP.get(op_str)
+            if not op_func:
+                print(f"Warning: Invalid operator '{op_str}' in scan '{scan_name}'. Skipping condition.")
+                continue
+            
+            try:
+                # Ensure metric column is numeric before comparison
+                numeric_metric_series = pd.to_numeric(current_scan_df[metric], errors='coerce')
+                # Ensure value is float for comparison
+                comparison_value = float(value) 
+                condition_passed_mask = op_func(numeric_metric_series, comparison_value)
+                # Add to flags_met only where condition_passed_mask is True and the metric was not NaN
+                # Combine masks using logical AND (&)
+                valid_comparison_mask = pd.notna(numeric_metric_series) & condition_passed_mask
+                current_scan_df['flags_met'] += np.where(valid_comparison_mask, 1, 0)
+
+            except Exception as e:
+                print(f"Error applying condition {cond} for metric '{metric}' in scan '{scan_name}': {e}. Skipping condition.")
+
+        # Filter the copied DataFrame based on flags_met
+        passed_this_scan_df = current_scan_df[current_scan_df['flags_met'] >= min_flags]
+
+        if passed_this_scan_df.empty:
+            print(f"No symbols met the criteria for scan: '{scan_name}'.")
+        else:
+            any_scan_passed = True
+            print(f"\nSymbols meeting criteria for scan: '{scan_name}'")
+            # Prepare display columns, ensuring flags_met is last
+            base_cols = [col for col in df_results.columns if col != 'flags_met'] # Use original cols list
+            display_cols = base_cols + ['flags_met']
+            
+            # Ensure columns exist in the filtered df before selecting and sorting
+            cols_to_display_final = [col for col in display_cols if col in passed_this_scan_df.columns]
+            
+            if isinstance(passed_this_scan_df, pd.DataFrame) and hasattr(passed_this_scan_df, 'to_markdown'):
+                 # Use new output handler
+                 df_to_output_scan = passed_this_scan_df[cols_to_display_final].sort_values(by='flags_met', ascending=False).head(20)
+                 for out_conf in output_configs:
+                    # Potentially use different path suffixes for each scan
+                    conf_scan = out_conf.copy()
+                    if conf_scan.get('path'):
+                        base, ext = os.path.splitext(conf_scan['path'])
+                        conf_scan['path'] = f"{base}_{scan_name.replace(' ', '_')}{ext}"
+                    write_output(df_to_output_scan, conf_scan, title=f"Symbols meeting criteria for scan: '{scan_name}'")
+            else:
+                # Fallback print for non-DataFrame or missing to_markdown (less likely with current setup)
+                print(f"\nSymbols meeting criteria for scan: '{scan_name}' (fallback print)")
+                print(passed_this_scan_df[cols_to_display_final].sort_values(by='flags_met', ascending=False).head(20))
+
+    if not any_scan_passed:
+        print("\nNo symbols passed any of the enabled scans.")
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(name)s:%(message)s')
+
+    # Default timeframe, consider making this an argument or part of config.
+    # For now, keeping it as before for direct script execution.
+    timeframe_to_analyze = os.getenv("TIMEFRAME_TO_ANALYZE", "1h")
+    config_file_path = os.getenv("SCAN_CONFIG_PATH", "scan_config.yaml")
+
+    # Ensure asyncio policy for Windows if running directly
+    if os.name == 'nt':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    asyncio.run(run_analysis_workflow(config_path=config_file_path, default_timeframe=timeframe_to_analyze)) 
+--- End File: {relative_path} ---
+
+--- File: output_handler.py ---
+import pandas as pd
+import json # For custom JSON pretty printing if needed, though to_json might suffice
+
+def write_output(df: pd.DataFrame, output_config: dict, title: str | None = None):
+    """
+    Writes or prints the DataFrame according to the specified output configuration.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to output.
+        output_config (dict): A dictionary containing 'format' (str) and 'path' (str or None).
+                              If 'path' is None, output is printed to stdout.
+        title (str, optional): A title to prepend to the output, especially for stdout.
+    """
+    if not isinstance(df, pd.DataFrame):
+        print(f"Error: Expected a Pandas DataFrame for output, but got {type(df)}.")
+        return
+
+    output_format = output_config.get('format', 'text').lower()
+    output_path = output_config.get('path')
+
+    output_content = ""
+    if title:
+        output_content += f"--- {title} ---\n"
+
+    if output_format == 'csv':
+        if output_path:
+            try:
+                df.to_csv(output_path, index=False)
+                print(f"Successfully wrote CSV to {output_path}")
+            except Exception as e:
+                print(f"Error writing CSV to {output_path}: {e}")
+        else:
+            output_content += df.to_csv(index=False)
+            print(output_content)
+    elif output_format == 'json':
+        if output_path:
+            try:
+                df.to_json(output_path, orient='records', indent=2)
+                print(f"Successfully wrote JSON to {output_path}")
+            except Exception as e:
+                print(f"Error writing JSON to {output_path}: {e}")
+        else:
+            output_content += df.to_json(orient='records', indent=2)
+            print(output_content)
+    elif output_format == 'markdown':
+        # For markdown, we usually want to see it in the console for redirection.
+        # If a path is given, we can write it, though it's less common for direct .md generation this way.
+        md_string = df.to_markdown(index=False)
+        if output_path:
+            try:
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    if title: # Write title to file as well
+                        f.write(f"# {title}\n\n")
+                    f.write(md_string)
+                print(f"Successfully wrote Markdown to {output_path}")
+            except Exception as e:
+                print(f"Error writing Markdown to {output_path}: {e}")
+        else:
+            output_content += md_string
+            print(output_content)
+    elif output_format == 'text': # Simple text output
+        if output_path:
+            try:
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    if title:
+                         f.write(f"--- {title} ---\n")
+                    f.write(df.to_string(index=False))
+                    f.write("\n-----------------------------------------------------------\n")
+                print(f"Successfully wrote text to {output_path}")
+            except Exception as e:
+                print(f"Error writing text to {output_path}: {e}")
+        else:
+            output_content += df.to_string(index=False)
+            output_content += "\n-----------------------------------------------------------\n"
+            print(output_content)
+    else:
+        print(f"Warning: Unsupported output format '{output_format}'. Supported formats: csv, json, markdown, text.")
+
+# Example Usage (for testing, can be removed later)
+if __name__ == '__main__':
+    data = {
+        'col1': [1, 2, 3],
+        'col2': ['A', 'B', 'C'],
+        'col3': [0.1, 0.2, 0.3]
+    }
+    sample_df = pd.DataFrame(data)
+
+    print("\nTesting CSV to stdout:")
+    write_output(sample_df, {'format': 'csv', 'path': None}, title="Sample CSV Data")
+
+    print("\nTesting JSON to file:")
+    write_output(sample_df, {'format': 'json', 'path': 'sample_output.json'}, title="Sample JSON Data")
+
+    print("\nTesting Markdown to stdout:")
+    write_output(sample_df, {'format': 'markdown', 'path': None}, title="Sample Markdown Data")
+    
+    print("\nTesting Text to file:")
+    write_output(sample_df, {'format': 'text', 'path': 'sample_output.txt'}, title="Sample Text Data")
+    
+    print("\nTesting unsupported format:")
+    write_output(sample_df, {'format': 'xml', 'path': None}, title="Sample XML Data")
+
+    print("\nTesting CSV to file:")
+    write_output(sample_df, {'format': 'csv', 'path': 'sample_output.csv'}, title="Sample CSV Data File")
+    
+    print("\nTesting Markdown to file:")
+    write_output(sample_df, {'format': 'markdown', 'path': 'sample_output.md'}, title="Sample MD Data File")
+
+    # Test with None df
+    # write_output(None, {'format': 'text', 'path': None}, title="Test None DF")
+
+    print("\nEnsure files were created: sample_output.json, sample_output.txt, sample_output.csv, sample_output.md") 
+--- End File: {relative_path} ---
+

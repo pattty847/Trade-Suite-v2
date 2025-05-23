@@ -32,8 +32,13 @@ LOG_FILE = "./sentinel.log"         # Path to the log file
 LOG_LEVEL = "INFO"                  # Default logging level (e.g., DEBUG, INFO, WARNING, ERROR)
 
 # Run configuration
-RUN_DURATION_SECONDS_DRY_RUN = 30
+RUN_DURATION_SECONDS_DRY_RUN = 300 # 5 minutes, was 30 seconds
 RUN_DURATION_SECONDS_LIVE = 48 * 60 * 60  # 48 hours
+RUN_DURATION_SECONDS_TEST = 1 * 60    # 1 minute for integration tests
+
+# Health Check Interval
+# How often the supervisor should log the status of its queues (in seconds)
+HEALTH_CHECK_INTERVAL_SECONDS = 30
 
 # Targetted assets and exchanges
 TARGET_EXCHANGE = "coinbase"

@@ -1,6 +1,3 @@
-
-Okay, Gem! Here's a write-up of the "Sentinel" architecture and a breakdown of what has been accomplished and what the next steps should be.
-
 ## Sentinel Architecture & Progress Report
 
 **Core Goal:** To create a robust, 24/7 data collection service ("Sentinel") for BTC/USD order book snapshots and trades from Coinbase, storing the data in InfluxDB for analysis. The system is designed to be modular and resilient.

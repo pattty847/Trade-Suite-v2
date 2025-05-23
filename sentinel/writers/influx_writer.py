@@ -4,7 +4,8 @@ import logging
 import os
 from typing import List, Union, Any # Union for queue item type, Any for InfluxDB client
 
-from influxdb_client import InfluxDBClient, Point, WritePrecision, InfluxDBError
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.exceptions import InfluxDBError
 from influxdb_client.client.write_api import ASYNCHRONOUS, WriteOptions
 
 from sentinel import config

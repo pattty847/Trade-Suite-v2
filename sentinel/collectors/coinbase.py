@@ -85,6 +85,7 @@ async def stream_data_to_queues(
                 trade_id=str(trade['id']),
                 timestamp_ns=timestamp_ns
             )
+            logger.debug(f"[{exchange_name.upper()}] Trade LP generated: {lp}")
             await _safe_put_to_queue(trade_queue, lp, 'trade')
         except Exception as e:
             logger.error(f"[{exchange_name.upper()}] Error processing trade data for sink: {e} - Data: {trade_event_dict}", exc_info=True)
@@ -127,6 +128,7 @@ async def stream_data_to_queues(
                     sequence=sequence
                 )
                 if raw_lp_lines:
+                    logger.debug(f"[{exchange_name.upper()}] Raw LP lines generated for {book['symbol']}: {raw_lp_lines}")
                     await _safe_put_to_queue(raw_order_book_queue, raw_lp_lines, 'raw_book')
                     
         except Exception as e:
