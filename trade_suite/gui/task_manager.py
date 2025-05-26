@@ -172,6 +172,9 @@ class TaskManager:
         elif req_type == 'orderbook':
             orderbook_stream_key = f"orderbook_{exchange}_{symbol}"
             keys.append(orderbook_stream_key)
+        elif req_type == 'ticker':
+            ticker_stream_key = f"ticker_{exchange}_{symbol}"
+            keys.append(ticker_stream_key)
         else:
             logging.warning(f"Unknown requirement type: {req_type}")
 
@@ -245,6 +248,10 @@ class TaskManager:
                             elif key.startswith("orderbook_"):
                                 _, exchange, symbol = key.split("_", 2)
                                 coro = self._get_watch_orderbook_coro(exchange, symbol, stop_event) # Pass event
+                            elif key.startswith("ticker_"): # Added ticker stream
+                                _, exchange, symbol = key.split("_", 2)
+                                # Assuming Data class has watch_ticker(exchange_id, symbol, stop_event)
+                                coro = self.data.watch_ticker(exchange, symbol, stop_event)
                             # Add other stream types here if needed
                             
                             if coro:
@@ -306,12 +313,26 @@ class TaskManager:
                         if self.stream_ref_counts[key] == 0:
                             logging.info(f"Stopping stream task for key {key} as ref count is zero.")
                             del self.stream_ref_counts[key]
-                            # Clear the event first to signal the loop to stop
-                            stop_event = self.stream_events.pop(key, None)
-                            if stop_event:
-                                stop_event.clear()
-                            # Then cancel the task
-                            self.stop_task(key) # stop_task now only cancels future
+                            # Stop the stream task
+                            event = self.stream_events.get(key)
+                            if event:
+                                logging.debug(f"Setting stop event for stream {key}")
+                                self.loop.call_soon_threadsafe(event.set) # Signal the task to stop
+                                # Deliberately not removing from stream_events here, 
+                                # as the task might still be cleaning up.
+                                # It can be removed if the task is re-created or during a full cleanup.
+                            else:
+                                logging.warning(f"No stop event found for stream {key} during unsubscribe.")
+                            
+                            # Additionally, cancel the task if it's still running after event is set
+                            # This provides a more forceful stop if the task isn't responsive to the event.
+                            if key in self.tasks and not self.tasks[key].done():
+                                logging.debug(f"Cancelling task for stream {key} as a fallback.")
+                                self.stop_task(key) # stop_task handles removal from self.tasks
+                            
+                            # Clean up the event from stream_events if it exists, after attempting to stop.
+                            if key in self.stream_events:
+                                del self.stream_events[key]
                     else:
                          logging.warning(f"Stream key {key} not found in ref counts during unsubscribe.")
 

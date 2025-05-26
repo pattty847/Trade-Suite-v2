@@ -46,7 +46,7 @@ class AlertRule(ABC):
     
     def format_price(self, price: float) -> str:
         """Format price with appropriate precision"""
-        # This is just a placeholder - should be improved based on symbol's precision
+        # TODO: Improve based on symbol's precision
         if abs(price) > 0 and abs(price) < 0.001:  # Very small prices
             return f"{price:.8f}"
         return f"{price:.2f}"

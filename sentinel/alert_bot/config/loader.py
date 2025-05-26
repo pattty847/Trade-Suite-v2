@@ -67,12 +67,62 @@ class VolatilityRule(BaseModel):
         if v <= 0:
             raise ValueError('Timeframe must be positive')
         return v
+    
+class CVDRule(BaseModel):
+    """Rule that triggers based on Cumulative Volume Delta conditions"""
+    type: Literal['change', 'ratio', 'level', 'divergence'] = 'change'
+    timeframe: int = Field(default=15, description="Timeframe in minutes")
+    cooldown: int = Field(default=1800, description="Seconds before this alert can trigger again")
+    
+    # For 'change' type alerts
+    cvd_threshold: Optional[float] = Field(default=None, description="Absolute CVD change threshold")
+    cvd_percentage_threshold: Optional[float] = Field(default=None, description="CVD percentage change threshold")
+    
+    # For 'ratio' type alerts
+    buy_ratio_threshold: Optional[float] = Field(default=None, description="Buy volume ratio threshold (0.0-1.0)")
+    sell_ratio_threshold: Optional[float] = Field(default=None, description="Sell volume ratio threshold (0.0-1.0)")
+    
+    # For 'level' type alerts
+    cvd_level: Optional[float] = Field(default=None, description="CVD level to watch for")
+    level_condition: Literal['above', 'below'] = Field(default='above', description="Trigger when CVD goes above or below level")
+    
+    # For 'divergence' type alerts (future feature)
+    detect_divergence: bool = Field(default=False, description="Enable price/CVD divergence detection")
+    
+    @field_validator('timeframe')
+    @classmethod
+    def timeframe_must_be_positive(cls, v):
+        if v <= 0:
+            raise ValueError('Timeframe must be positive')
+        return v
+    
+    @field_validator('buy_ratio_threshold', 'sell_ratio_threshold')
+    @classmethod
+    def ratio_must_be_valid(cls, v):
+        if v is not None and (v < 0 or v > 1):
+            raise ValueError('Ratio thresholds must be between 0.0 and 1.0')
+        return v
+    
+    @model_validator(mode='after')
+    def validate_type_requirements(self) -> 'CVDRule':
+        """Ensure required fields are present for each alert type"""
+        if self.type == 'change':
+            if not self.cvd_threshold and not self.cvd_percentage_threshold:
+                raise ValueError('Change type CVD alerts require either cvd_threshold or cvd_percentage_threshold')
+        elif self.type == 'ratio':
+            if not self.buy_ratio_threshold and not self.sell_ratio_threshold:
+                raise ValueError('Ratio type CVD alerts require either buy_ratio_threshold or sell_ratio_threshold')
+        elif self.type == 'level':
+            if self.cvd_level is None:
+                raise ValueError('Level type CVD alerts require cvd_level')
+        return self
 
 class SymbolConfig(BaseModel):
     """Configuration for a single trading symbol"""
     price_levels: List[PriceLevelRule] = Field(default_factory=list)
     percentage_changes: List[PercentageChangeRule] = Field(default_factory=list)
     volatility: List[VolatilityRule] = Field(default_factory=list)
+    cvd: List[CVDRule] = Field(default_factory=list)  # Add this line
     
     @model_validator(mode='after')
     def at_least_one_rule(self) -> 'SymbolConfig':
@@ -80,7 +130,8 @@ class SymbolConfig(BaseModel):
         has_rules = (
             len(self.price_levels) > 0 or
             len(self.percentage_changes) > 0 or
-            len(self.volatility) > 0
+            len(self.volatility) > 0 or
+            len(self.cvd) > 0  # Add this line
         )
         if not has_rules:
             raise ValueError('At least one rule type must be defined for the symbol')

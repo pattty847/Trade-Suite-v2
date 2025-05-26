@@ -2,13 +2,13 @@
 from typing import Dict, List, Any, Optional
 import logging
 from pathlib import Path
-
-from ..config.loader import AlertConfig, load_config
+from ..config.loader import AlertConfig, CVDRule as CVDRuleConfig, load_config
 from ..state.manager import StateManager
 from .base import AlertRule
 from .price_level import PriceLevelRule
 from .percentage_change import PercentageChangeRule
 from .volatility import VolatilityRule
+from .cvd import CVDRule
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,13 @@ class RuleEngine:
                 rule = VolatilityRule(symbol, rule_config.dict())
                 self.rules[symbol].append(rule)
                 
+            # CVD rules - ADD THIS SECTION
+            for rule_config in symbol_config.cvd:
+                rule = CVDRule(symbol, rule_config.dict())
+                self.rules[symbol].append(rule)
+                
             logger.info(f"Initialized {len(self.rules[symbol])} rules for {symbol}")
+
     
     def get_symbols(self) -> List[str]:
         """Get all symbols with rules"""

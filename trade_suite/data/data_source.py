@@ -380,6 +380,68 @@ class Data(CCXTInterface):
                 await asyncio.sleep(1) # Optional: Add a delay before retrying after an error
         logging.info(f"Orderbook stream for {symbol} on {exchange} stopped.")
 
+    async def watch_ticker(self, exchange_id: str, symbol: str, stop_event: asyncio.Event):
+        """
+        Watches for ticker updates for a specific symbol on a given exchange.
+
+        Args:
+            exchange_id (str): The ID of the exchange to connect to.
+            symbol (str): The trading symbol to watch (e.g., 'BTC/USD').
+            stop_event (asyncio.Event): Event to signal when to stop the stream.
+        """
+        exchange_object = self.exchange_list.get(exchange_id)
+        if not exchange_object:
+            logging.error(f"Exchange {exchange_id} not found in initialized exchanges.")
+            return
+
+        if not hasattr(exchange_object, 'watch_ticker'):
+            logging.error(f"Exchange {exchange_id} does not support watch_ticker.")
+            return
+
+        logging.info(f"Starting ticker stream for {symbol} on {exchange_id}")
+        stop_event.clear() # Ensure the event is clear initially
+
+        while not stop_event.is_set():
+            try:
+                logging.debug(f"Awaiting ticker for {symbol} on {exchange_id}...")
+                ticker_data = await exchange_object.watch_ticker(symbol)
+                logging.debug(f"Received ticker for {symbol} on {exchange_id}: {ticker_data}")
+
+                if ticker_data:
+                    if self.emitter:
+                        if self._ui_loop and hasattr(self.emitter, 'emit_threadsafe') and self.emitter.emit_threadsafe.__name__ != '_do_not_use_emit_threadsafe':
+                            self.emitter.emit_threadsafe(
+                                self._ui_loop,
+                                Signals.NEW_TICKER_DATA,
+                                exchange=exchange_id,
+                                symbol=symbol,
+                                ticker_data_dict=ticker_data
+                            )
+                        else:
+                            self.emitter.emit(
+                                Signals.NEW_TICKER_DATA,
+                                exchange=exchange_id,
+                                symbol=symbol,
+                                ticker_data_dict=ticker_data
+                            )
+                    else:
+                        logging.debug(f"No emitter configured for ticker data for {symbol} on {exchange_id}.")
+            
+            except asyncio.CancelledError:
+                logging.info(f"Ticker stream for {symbol} on {exchange_id} cancelled.")
+                break # Exit loop on cancellation
+            except ccxt.NetworkError as e:
+                logging.warning(f"NetworkError in watch_ticker for {symbol} on {exchange_id}: {e}. Retrying after delay...")
+                await asyncio.sleep(exchange_object.rateLimit / 1000 if hasattr(exchange_object, 'rateLimit') and exchange_object.rateLimit > 0 else 5)
+            except ccxt.ExchangeError as e:
+                logging.error(f"ExchangeError in watch_ticker for {symbol} on {exchange_id}: {e}. Might stop or retry.")
+                await asyncio.sleep(5) # Basic retry delay
+            except Exception as e:
+                logging.error(f"Unexpected error in watch_ticker for {symbol} on {exchange_id}: {e}", exc_info=True)
+                await asyncio.sleep(5) # Basic retry delay
+        
+        logging.info(f"Ticker stream for {symbol} on {exchange_id} stopped.")
+
     async def fetch_candles(
         self,
         exchanges: List[str],

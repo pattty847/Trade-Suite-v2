@@ -1,27 +1,104 @@
 BTC/USD:
   price_levels:
-    - price: 108000
+    - price: 113000
       condition: above
-    - price: 105000
-      condition: below
+      cooldown: 1800
+  
   percentage_changes:
-    - percentage: 0.5
+    - percentage: 2.0
+      timeframe: 30
+      cooldown: 1800
+  
+  cvd:
+    # Alert on significant CVD changes (institutional flow)
+    - type: change
+      cvd_threshold: 50000  # Alert if CVD changes by 50k in timeframe
+      timeframe: 15
+      cooldown: 1800
+    
+    # Alert on extreme buy/sell imbalances
+    - type: ratio
+      buy_ratio_threshold: 0.75  # Alert if 75%+ buy volume
+      timeframe: 10
+      cooldown: 900
+    
+    - type: ratio
+      sell_ratio_threshold: 0.75  # Alert if 75%+ sell volume
+      timeframe: 10
+      cooldown: 900
+    
+    # Alert when CVD reaches specific levels
+    - type: level
+      cvd_level: 100000
+      level_condition: above
+      cooldown: 3600
+    
+    - type: level
+      cvd_level: -100000
+      level_condition: below
+      cooldown: 3600
+
+ETH/USD:
+  price_levels:
+    - price: 4000
+      condition: above
+      cooldown: 1800
+  
+  cvd:
+    # Percentage-based CVD change alerts
+    - type: change
+      cvd_percentage_threshold: 25  # Alert if CVD changes by 25%
+      timeframe: 20
+      cooldown: 1800
+    
+    # Quick scalping alerts on volume imbalance
+    - type: ratio
+      buy_ratio_threshold: 0.8  # Strong buying pressure
       timeframe: 5
-    - percentage: 2
-      timeframe: 60
-  volatility:
-    - threshold: 2
-      timeframe: 5
+      cooldown: 600
 
 PEPE/USD:
   price_levels:
-    - price: 0.000015
+    - price: 0.00001475
       condition: above
-    - price: 0.000013
-      condition: below
-  percentage_changes:
-    - percentage: 3
-      timeframe: 15
-  volatility:
-    - threshold: 2
+      cooldown: 1800
+  
+  cvd:
+    # Meme coin specific - watch for pump signals
+    - type: ratio
+      buy_ratio_threshold: 0.85  # Very strong buying (pump detection)
       timeframe: 5
+      cooldown: 300
+    
+    # Smaller absolute thresholds for smaller cap tokens
+    - type: change
+      cvd_threshold: 5000  # Lower threshold for smaller market cap
+      timeframe: 10
+      cooldown: 900
+    
+    # Dump detection
+    - type: ratio
+      sell_ratio_threshold: 0.8  # Heavy selling pressure
+      timeframe: 5
+      cooldown: 300
+
+# Advanced example with multiple CVD strategies
+SOL/USD:
+  cvd:
+    # Scalping setup - quick volume imbalances
+    - type: ratio
+      buy_ratio_threshold: 0.7
+      timeframe: 3
+      cooldown: 300
+    
+    # Swing setup - larger CVD movements
+    - type: change
+      cvd_threshold: 25000
+      timeframe: 30
+      cooldown: 3600
+    
+    # Position building detection
+    - type: change
+      cvd_percentage_threshold: 15
+      timeframe: 60
+      cooldown: 7200

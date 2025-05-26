@@ -37,6 +37,7 @@ class Signals(Enum):
 
     # Data Fetching Signals (Example - Adapt as needed)
     FETCH_OHLCV = auto() # payload: {'exchange': str, 'symbol': str, 'timeframe': str}
+    NEW_TICKER_DATA = auto() # payload: (exchange: str, symbol: str, ticker_data_dict: dict)
 
     # Generic Task Signals
     TASK_SUCCESS = auto() # data: {'task_name': str, 'result': Any}
