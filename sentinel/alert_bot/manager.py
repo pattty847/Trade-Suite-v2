@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Set, Tuple
+import pandas as pd
 
 # Trade Suite components (adjust path if necessary)
 from trade_suite.data.data_source import Data
@@ -28,7 +29,7 @@ class AlertDataManager:
         self.alerts_config_path = alerts_config_path
         
         self.active_alerts_config: Dict[str, Any] = {}
-        self.subscribed_resources: Dict[str, Any] = {} # To keep track of what ADM subscribed to
+        self.subscribed_resources_tracker: Dict[str | Tuple, Dict] = {}
 
         # Potentially initialize rule engine and notifiers here or in a start method
         # self.rule_engine = RuleEngine() 
@@ -36,6 +37,33 @@ class AlertDataManager:
 
         self._register_signal_handlers()
         logging.info("AlertDataManager initialized.")
+
+    @staticmethod
+    def _format_timeframe(time_value: Any) -> str | None:
+        """Converts various timeframe representations to CCXT string format."""
+        if isinstance(time_value, str):
+            # Assume if it's a string, it's already in a valid or near-valid format
+            # Basic validation could be added, e.g., checking for 'm', 'h', 'd'
+            return time_value.lower()
+        if isinstance(time_value, int):
+            if time_value < 60:
+                return f"{time_value}m"
+            elif time_value < 1440: # Less than 24 * 60
+                if time_value % 60 == 0:
+                    return f"{time_value // 60}h"
+                else:
+                    # Or handle as minutes if not perfectly divisible, e.g. 90 -> "90m"
+                    # For now, let's assume we want whole hours or just minutes
+                    logging.warning(f"Timeframe in minutes ({time_value}) not a whole hour, using minutes.")
+                    return f"{time_value}m" 
+            else: # Daily or more
+                if time_value % 1440 == 0:
+                    return f"{time_value // 1440}d"
+                else:
+                    logging.warning(f"Timeframe in minutes ({time_value}) not a whole day, using minutes.")
+                    return f"{time_value}m"
+        logging.warning(f"Unsupported timeframe format: {time_value}. Returning None.")
+        return None
 
     def _register_signal_handlers(self):
         """Registers handlers for relevant signals from SignalEmitter."""
@@ -66,56 +94,101 @@ class AlertDataManager:
             return
 
         logging.info("Starting monitoring: Subscribing to data streams based on alert configuration...")
-        # --- Placeholder for subscription logic ---
-        # Iterate through self.active_alerts_config
-        # For each alert, determine data requirements (OHLCV, trades, tickers)
-        # Example for an OHLCV requirement:
-        # unique_ohlcv_requirements = set()
-        # for alert_id, alert_details in self.active_alerts_config.items():
-        #     # This logic will be specific to your alerts_config.yaml structure
-        #     if alert_details.get("type") == "price_level" and "timeframe" in alert_details:
-        #         req = (alert_details["exchange"], alert_details["symbol"], alert_details["timeframe"])
-        #         unique_ohlcv_requirements.add(req)
-        # 
-        # for exchange, symbol, timeframe in unique_ohlcv_requirements:
-        #     requirement_dict = {'type': 'candles', 'exchange': exchange, 'symbol': symbol, 'timeframe': timeframe}
-        #     logging.info(f"Subscribing to: {requirement_dict}")
-        #     # self.task_manager.subscribe(self, requirement_dict) # Pass self or a unique ID for ADM
-        #     # self.subscribed_resources[f"candles_{exchange}_{symbol}_{timeframe}"] = requirement_dict
         
-        # TODO: Implement actual subscription logic based on parsed config for:
-        # 1. OHLCV data ('candles')
-        # 2. Raw trades ('trades') for CVD or other trade-based alerts
-        # 3. Ticker data ('ticker') for price/bid/ask alerts
+        unique_candle_requirements: Set[Tuple[str, str, str]] = set()
+        unique_trade_stream_requirements: Set[Tuple[str, str]] = set()
+        unique_ticker_requirements: Set[Tuple[str, str]] = set()
+
+        # --- CONFIG PARSING AND REQUIREMENT GATHERING ---
+        for symbol_key, alert_config_for_symbol in self.active_alerts_config.items():
+            # Assuming Pydantic model or similar dict structure after loading
+            # Default to 'coinbase' if not specified, or make it mandatory in Pydantic model
+            exchange_id = getattr(alert_config_for_symbol, 'exchange', 'coinbase') 
+
+            # Price Level Alerts (assumed to use Ticker data for now)
+            if hasattr(alert_config_for_symbol, 'price_levels') and alert_config_for_symbol.price_levels:
+                unique_ticker_requirements.add((exchange_id, symbol_key))
+
+            # Percentage Change Alerts (use Candles)
+            if hasattr(alert_config_for_symbol, 'percentage_changes') and alert_config_for_symbol.percentage_changes:
+                for rule in alert_config_for_symbol.percentage_changes:
+                    raw_tf = getattr(rule, 'timeframe', None)
+                    if raw_tf:
+                        formatted_tf = self._format_timeframe(raw_tf)
+                        if formatted_tf:
+                            unique_candle_requirements.add((exchange_id, symbol_key, formatted_tf))
+                        else:
+                            logging.warning(f"Invalid timeframe {raw_tf} for {symbol_key} percentage_change alert. Skipping candle subscription for this rule.")
+                    else:
+                        logging.warning(f"Missing timeframe for {symbol_key} percentage_change alert. Skipping candle subscription.")
+
+            # CVD Alerts (use Trades, and potentially Candles if rules are complex)
+            if hasattr(alert_config_for_symbol, 'cvd') and alert_config_for_symbol.cvd:
+                unique_trade_stream_requirements.add((exchange_id, symbol_key))
+                # Future: If CVD rules also need specific candle timeframes (e.g., for an SMA on the chart alongside CVD level),
+                # parse those here and add to unique_candle_requirements.
+                # For now, assuming CVD calculation is primarily based on raw trades, and the 'timeframe' in CVD rules
+                # is for the CVD aggregation period by the CVDCalculator.
+
+        # --- PERFORMING SUBSCRIPTIONS ---
+        for ex, sym, tf in unique_candle_requirements:
+            req_dict = {'type': 'candles', 'exchange': ex, 'symbol': sym, 'timeframe': tf}
+            logging.info(f"Subscribing to candles: {req_dict}")
+            self.task_manager.subscribe(self, req_dict) # Pass AlertDataManager instance as subscriber ID
+            self.subscribed_resources_tracker[('candles', ex, sym, tf)] = req_dict
+
+        for ex, sym in unique_trade_stream_requirements:
+            req_dict = {'type': 'trades', 'exchange': ex, 'symbol': sym}
+            logging.info(f"Subscribing to trades: {req_dict}")
+            self.task_manager.subscribe(self, req_dict)
+            self.subscribed_resources_tracker[('trades', ex, sym)] = req_dict
+
+        for ex, sym in unique_ticker_requirements:
+            req_dict = {'type': 'ticker', 'exchange': ex, 'symbol': sym}
+            logging.info(f"Subscribing to ticker: {req_dict}")
+            self.task_manager.subscribe(self, req_dict)
+            self.subscribed_resources_tracker[('ticker', ex, sym)] = req_dict
         
         # After subscribing, make sure signal handlers are active
+        # These should be registered once, perhaps in __init__ or here if we want to be sure.
+        # Re-registering is usually safe if the emitter handles duplicates, but let's ensure they are active.
+        self.signal_emitter.unregister(Signals.UPDATED_CANDLES, self._on_updated_candles) # Try unregister first in case of re-start
+        self.signal_emitter.unregister(Signals.NEW_TRADE, self._on_new_trade)
+        self.signal_emitter.unregister(Signals.NEW_TICKER_DATA, self._on_new_ticker_data)
+        
         self.signal_emitter.register(Signals.UPDATED_CANDLES, self._on_updated_candles)
         self.signal_emitter.register(Signals.NEW_TRADE, self._on_new_trade)
-        # self.signal_emitter.register(Signals.NEW_TICKER_DATA, self._on_new_ticker_data) # If ticker alerts are part of initial scope
-        logging.info("Actual signal handlers enabled.")
-
+        self.signal_emitter.register(Signals.NEW_TICKER_DATA, self._on_new_ticker_data)
+        logging.info("Signal handlers ensured and active.")
 
     def stop_monitoring(self):
         """Unsubscribes from all data streams and cleans up resources."""
         logging.info("Stopping monitoring: Unsubscribing from all data streams...")
         
-        # Unregister signal handlers first
+        # Unregister signal handlers first to prevent processing further updates during shutdown
         try:
             self.signal_emitter.unregister(Signals.UPDATED_CANDLES, self._on_updated_candles)
             self.signal_emitter.unregister(Signals.NEW_TRADE, self._on_new_trade)
-            # self.signal_emitter.unregister(Signals.NEW_TICKER_DATA, self._on_new_ticker_data)
+            self.signal_emitter.unregister(Signals.NEW_TICKER_DATA, self._on_new_ticker_data)
+            logging.info("Signal handlers unregistered.")
         except ValueError:
-            logging.warning("Could not unregister some signal handlers (they might not have been registered).")
+            # This can happen if a handler wasn't registered (e.g., if start_monitoring failed before full registration)
+            logging.warning("Attempted to unregister signal handlers, some may not have been registered.")
 
-        # --- Placeholder for unsubscription logic ---
-        # for resource_key, requirement_dict in self.subscribed_resources.items():
-        #     logging.info(f"Unsubscribing from: {requirement_dict}")
-        #     # self.task_manager.unsubscribe(self) # Or manage subscriptions more granularly if needed
+        # Unsubscribe AlertDataManager from all resources it subscribed to with TaskManager.
+        # TaskManager.unsubscribe(widget) is designed to look up all subscriptions for that widget (self in this case)
+        # and decrement reference counts, cleaning up resources if counts reach zero.
+        if not self.subscribed_resources_tracker:
+            logging.info("No resources were actively subscribed to by AlertDataManager, or tracker is empty.")
+        else:
+            logging.info(f"AlertDataManager is unsubscribing from {len(self.subscribed_resources_tracker)} tracked resource groups.")
+            # Pass self (the AlertDataManager instance) to unsubscribe from all its previous subscriptions.
+            self.task_manager.unsubscribe(self) 
         
-        # For a simpler initial approach, if ADM is the sole subscriber for its needs:
-        # self.task_manager.unsubscribe(self) # This unsubscribes ALL resources ADM subscribed to under its ID.
-        # self.subscribed_resources.clear()
-        logging.info("Monitoring stopped.")
+        self.subscribed_resources_tracker.clear() # Clear our local tracker
+        self.active_alerts_config.clear() # Clear loaded config
+
+        logging.info("Monitoring stopped and resources unsubscribed.")
 
     async def _on_updated_candles(self, exchange: str, symbol: str, timeframe: str, candles_df: pd.DataFrame):
         """Handles incoming OHLCV data."""
