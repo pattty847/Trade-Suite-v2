@@ -9,6 +9,24 @@
 
 
 ## Architecture
+
+<!-- 
+TODO: Replace the image below with a live Mermaid diagram if possible.
+GitHub Flavored Markdown supports Mermaid. Example:
+
+```mermaid
+graph TD;
+    A[TradeSuite GUI] --> B(TaskManager);
+    B --> C{Data Source (CCXT Pro)};
+    C --> D[Exchange WebSockets];
+    B --> E[CandleFactory];
+    A --> F[Sentinel Alert Bot];
+    F --> B;
+    F --> C;
+```
+
+-->
+
 ![image](https://github.com/user-attachments/assets/4d6c7474-0fcc-4ca7-891c-be9fe1077737)
 
 
@@ -21,6 +39,7 @@
   - [Environment Setup](#environment-setup)
   - [Running the Application](#running-the-application)
 - [Implemented Features](#implemented-features)
+- [Sentinel Alert Bot](#sentinel-alert-bot)
 - [Planned Features](#planned-features)
 - [Contributing](#contributing)
 - [License](#license)
@@ -28,7 +47,6 @@
   - [Packaging the Application](#packaging-the-application)
     - [Option 1: Creating a Standalone Executable](#option-1-creating-a-standalone-executable)
     - [Option 2: Using UV for Package Management](#option-2-using-uv-for-package-management)
-- [For End Users](#for-end-users)
 
 ## Introduction
 
@@ -46,6 +64,7 @@ TradeSuite is a multi-exchange cryptocurrency trading platform built using DearP
 - **Real-Time Order Book:** Analyze market depth with price level aggregation and zoom capabilities.
 - **Real-Time Price Level / DOM View:** Visualize aggregated market depth through the dedicated Price Level widget.
 - **Modular Architecture:** Decoupled components for data handling, UI widgets, and external API integrations (like SEC EDGAR).
+- **Sentinel Alert Bot:** A highly configurable alert system that monitors market conditions (price levels, CVD, percentage changes, etc.) and sends notifications. Operates integrated within TradeSuite or as a standalone terminal application.
 
 ## Getting Started
 
@@ -91,7 +110,8 @@ The installation script will:
 
 > **Note**: The script will prompt you to choose between UV (recommended) or pip for package installation. UV is significantly faster and more reliable, especially for packages that require compilation.
 
-#### Manual Installation (Alternative)
+<details>
+<summary>Manual Installation (Alternative)</summary>
 
 If you prefer to install manually, follow these steps:
 
@@ -126,6 +146,7 @@ If you prefer to install manually, follow these steps:
    - **Windows**: Download and install the wheel from [here](https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib)
    - **macOS**: `brew install ta-lib`
    - **Linux**: `apt-get install ta-lib`
+</details>
 
 ### Environment Setup
 
@@ -162,7 +183,8 @@ These scripts will automatically:
 - Run the installation script if needed
 - Start the application with default settings
 
-#### Option 2: Command Line (Advanced Users)
+<details>
+<summary>Option 2: Command Line (Advanced Users)</summary>
 
 You can run the application manually:
 
@@ -179,6 +201,7 @@ python -m trade_suite --level DEBUG
 # To reset to the default layout
 python -m trade_suite --reset-layout
 ```
+</details>
 
 ## Implemented Features
 
@@ -192,6 +215,25 @@ python -m trade_suite --reset-layout
 - **Modular Component Design:** Refactored codebase with clear separation of concerns (Data Source, Task Manager, Widgets, SEC API Module).
 - **Command-Line Interface:** Flexible application startup using `argparse` for setting exchanges, logging level, and layout reset.
 - **Basic Multi-Exchange Support:** Foundation laid for connecting to and displaying data from multiple exchanges simultaneously (e.g., Binance, Coinbase).
+- **Sentinel Alert Bot Integration:** Integrated the `sentinel.alert_bot` module for advanced, configurable market alerts (see dedicated section below).
+
+## Sentinel Alert Bot
+
+The `Sentinel Alert Bot` is a powerful, integrated module designed to provide users with timely notifications based on a wide range of configurable market conditions. It enhances TradeSuite by adding an intelligent monitoring layer.
+
+**Key Characteristics:**
+
+-   **Dual Mode Operation:** Can run seamlessly as part of the TradeSuite GUI (with potential UI notifications) or as a standalone, headless terminal application (e.g., for 24/7 server-based monitoring).
+-   **Leverages TradeSuite Core:** Utilizes TradeSuite's robust `Data` class for all exchange interactions and `TaskManager` for managing data stream lifecycles, ensuring consistency and efficiency.
+-   **Dedicated Configuration:** Alert rules, notification methods, and other parameters are defined in a separate YAML file (`sentinel/alert_bot/config/alerts_config.yaml`), allowing for detailed customization without altering core TradeSuite settings.
+-   **Rich Alert Types:** Supports various alert conditions, including:
+    -   Price Level Crossings (above/below)
+    -   Percentage Price Changes (within a timeframe)
+    -   Cumulative Volume Delta (CVD) analysis (tracking changes, ratios, levels)
+    -   (Future) Volatility breakouts, indicator-based alerts (MA crosses, RSI, etc.).
+-   **Centralized Orchestration:** The `AlertDataManager` class within the bot is responsible for parsing configurations, subscribing to necessary data via `TaskManager`, processing incoming data (e.g., managing `CVDCalculator` instances), evaluating rules, and dispatching notifications through configured channels (e.g., console, email).
+
+For detailed information on the Sentinel Alert Bot's specific setup, rule configuration, architecture, and standalone usage, please refer to its dedicated [README.md file](sentinel/alert_bot/README.md).
 
 ## Planned Features
 
@@ -240,10 +282,10 @@ The easiest way for end users to run the application is with a standalone execut
 2. Run the build script:
    ```bash
    # On Windows
-   python build_executable.py
+   python scripts/build/build_executable.py
    
    # On macOS/Linux
-   python3 build_executable.py
+   python3 scripts/build/build_executable.py
    ```
 
 3. The executable will be created in the `dist` folder, ready to distribute to users.
@@ -283,14 +325,3 @@ UV is a modern Python packaging tool that offers significant performance improve
    ```
 
 UV offers faster installation times, better dependency resolution, and is 100% compatible with pip. For more information, visit the [UV documentation](https://github.com/astral-sh/uv).
-
-## For End Users
-
-If you're not familiar with Python or command-line tools, we provide pre-built executables for Windows and macOS:
-
-1. Download the latest release from the [Releases page](https://github.com/pattty847/Trade-Suite-v2/releases)
-2. Extract the zip file to a folder of your choice
-3. Double-click the TradeSuite executable to run the application
-4. No installation or configuration is required for basic usage
-
-The application works with public cryptocurrency data by default, no API keys required!

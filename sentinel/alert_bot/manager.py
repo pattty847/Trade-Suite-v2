@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Set, Tuple
 import pandas as pd
+from datetime import datetime, timedelta
 
 # Trade Suite components (adjust path if necessary)
 from trade_suite.data.data_source import Data
@@ -9,8 +10,11 @@ from trade_suite.gui.task_manager import TaskManager
 from trade_suite.gui.signals import SignalEmitter, Signals
 
 # Alert Bot components
-from sentinel.alert_bot.config.loader import load_alerts_from_yaml # Assuming this is the loader
-from sentinel.alert_bot.state.manager import StateManager # The existing state manager
+from sentinel.alert_bot.config.loader import load_alerts_from_yaml
+from sentinel.alert_bot.state.manager import StateManager
+from sentinel.alert_bot.models.trade_data import TradeData
+from sentinel.alert_bot.processors.cvd_calculator import CVDCalculator
+
 # Placeholder for rule engine and notifiers, will be used later
 # from sentinel.alert_bot.rules.engine import RuleEngine
 # from sentinel.alert_bot.notifier.base import Notifier # Or specific notifier instances
@@ -30,6 +34,7 @@ class AlertDataManager:
         
         self.active_alerts_config: Dict[str, Any] = {}
         self.subscribed_resources_tracker: Dict[str | Tuple, Dict] = {}
+        self.cvd_calculators: Dict[Tuple[str, str], CVDCalculator] = {}
 
         # Potentially initialize rule engine and notifiers here or in a start method
         # self.rule_engine = RuleEngine() 
@@ -83,10 +88,10 @@ class AlertDataManager:
             logging.error(f"Failed to load or parse alerts configuration from {self.alerts_config_path}: {e}", exc_info=True)
             self.active_alerts_config = {} # Ensure it's empty on failure
 
-    def start_monitoring(self):
+    async def start_monitoring(self):
         """
         Parses the alert configuration and subscribes to all necessary data streams
-        via the TaskManager.
+        via the TaskManager. Also initializes and seeds CVD calculators.
         """
         self.load_and_parse_config()
         if not self.active_alerts_config:
@@ -101,15 +106,11 @@ class AlertDataManager:
 
         # --- CONFIG PARSING AND REQUIREMENT GATHERING ---
         for symbol_key, alert_config_for_symbol in self.active_alerts_config.items():
-            # Assuming Pydantic model or similar dict structure after loading
-            # Default to 'coinbase' if not specified, or make it mandatory in Pydantic model
             exchange_id = getattr(alert_config_for_symbol, 'exchange', 'coinbase') 
 
-            # Price Level Alerts (assumed to use Ticker data for now)
             if hasattr(alert_config_for_symbol, 'price_levels') and alert_config_for_symbol.price_levels:
                 unique_ticker_requirements.add((exchange_id, symbol_key))
 
-            # Percentage Change Alerts (use Candles)
             if hasattr(alert_config_for_symbol, 'percentage_changes') and alert_config_for_symbol.percentage_changes:
                 for rule in alert_config_for_symbol.percentage_changes:
                     raw_tf = getattr(rule, 'timeframe', None)
@@ -122,13 +123,51 @@ class AlertDataManager:
                     else:
                         logging.warning(f"Missing timeframe for {symbol_key} percentage_change alert. Skipping candle subscription.")
 
-            # CVD Alerts (use Trades, and potentially Candles if rules are complex)
             if hasattr(alert_config_for_symbol, 'cvd') and alert_config_for_symbol.cvd:
                 unique_trade_stream_requirements.add((exchange_id, symbol_key))
-                # Future: If CVD rules also need specific candle timeframes (e.g., for an SMA on the chart alongside CVD level),
-                # parse those here and add to unique_candle_requirements.
-                # For now, assuming CVD calculation is primarily based on raw trades, and the 'timeframe' in CVD rules
-                # is for the CVD aggregation period by the CVDCalculator.
+                # Assuming cvd rules might also have a specific lookback_minutes for the calculator itself
+                # For now, using a default lookback for CVDCalculator or a fixed one for seeding.
+
+        # --- INITIALIZE AND SEED CVD CALCULATORS ---
+        for ex, sym in unique_trade_stream_requirements:
+            if (ex, sym) not in self.cvd_calculators:
+                # TODO: Allow lookback_minutes to be configured per symbol/CVD rule in alerts_config.yaml
+                cvd_lookback_minutes = 60 # Default or from config
+                self.cvd_calculators[(ex, sym)] = CVDCalculator(lookback_minutes=cvd_lookback_minutes)
+                logging.info(f"Initialized CVDCalculator for {ex} {sym} with {cvd_lookback_minutes}m lookback.")
+
+                # Seed with historical trades
+                # Calculate `since` timestamp for fetching historical trades
+                # Fetch trades from (now - lookback_minutes - buffer) to ensure we have enough data
+                # For simplicity, let's fetch trades from the last `cvd_lookback_minutes` + a small buffer (e.g., 5 min)
+                # to ensure the period is covered. CCXT `since` is in milliseconds.
+                since_datetime = datetime.now() - timedelta(minutes=cvd_lookback_minutes + 5)
+                since_timestamp_ms = int(since_datetime.timestamp() * 1000)
+                
+                logging.info(f"Fetching historical trades for {ex} {sym} since {since_datetime} to seed CVDCalculator.")
+                historical_trades_raw = await self.data_source.fetch_historical_trades(
+                    exchange_id=ex, 
+                    symbol=sym, 
+                    since_timestamp=since_timestamp_ms,
+                    limit=1000 # Fetch up to 1000 trades, might need adjustment
+                )
+
+                if historical_trades_raw:
+                    parsed_historical_trades = []
+                    for trade_raw in historical_trades_raw:
+                        parsed_trade = TradeData.from_ccxt_trade(trade_raw)
+                        if parsed_trade:
+                            parsed_historical_trades.append(parsed_trade)
+                    
+                    # Sort by timestamp before adding to ensure correct order for CVD calculation
+                    parsed_historical_trades.sort(key=lambda t: t.timestamp)
+                    
+                    cvd_calc = self.cvd_calculators[(ex, sym)]
+                    for trade in parsed_historical_trades:
+                        cvd_calc.add_trade(trade)
+                    logging.info(f"Seeded CVDCalculator for {ex} {sym} with {len(parsed_historical_trades)} historical trades. Current CVD: {cvd_calc.get_cvd():.2f}")
+                else:
+                    logging.warning(f"No historical trades found to seed CVDCalculator for {ex} {sym}.")
 
         # --- PERFORMING SUBSCRIPTIONS ---
         for ex, sym, tf in unique_candle_requirements:
@@ -187,6 +226,7 @@ class AlertDataManager:
         
         self.subscribed_resources_tracker.clear() # Clear our local tracker
         self.active_alerts_config.clear() # Clear loaded config
+        self.cvd_calculators.clear() # Clear CVD calculators
 
         logging.info("Monitoring stopped and resources unsubscribed.")
 
@@ -207,14 +247,32 @@ class AlertDataManager:
 
     async def _on_new_trade(self, exchange: str, trade_data: Dict):
         """Handles incoming raw trade data (for CVD, etc.)."""
-        # symbol = trade_data.get('symbol') # Assuming trade_data contains the symbol
-        # logging.debug(f"Received new trade for {exchange} {symbol}.")
-        # TODO:
-        # 1. Route this trade to relevant CVDCalculators (if any are active for this exchange/symbol).
-        # 2. After CVDCalculator updates, get the new CVD value.
-        # 3. Identify alert rules that depend on this CVD value.
-        # 4. Evaluate those rules (similar to _on_updated_candles logic regarding rule engine & state manager).
-        pass
+        symbol = trade_data.get('symbol')
+        if not symbol:
+            logging.warning(f"Received trade data without symbol from exchange {exchange}: {trade_data}")
+            return
+
+        logging.debug(f"Received new trade for {exchange} {symbol}.")
+        
+        parsed_trade = TradeData.from_ccxt_trade(trade_data)
+        if not parsed_trade:
+            logging.warning(f"Failed to parse trade data for {exchange} {symbol}: {trade_data}")
+            return
+
+        cvd_calc_key = (exchange, symbol)
+        if cvd_calc_key in self.cvd_calculators:
+            cvd_calc = self.cvd_calculators[cvd_calc_key]
+            cvd_calc.add_trade(parsed_trade)
+            # logging.info(f"Updated CVD for {exchange} {symbol}: {cvd_calc.get_cvd():.2f}")
+            # Further logic will be to check rules that depend on this CVD update.
+            # For example, get all CVD related metrics:
+            # current_cvd_value = cvd_calc.get_cvd()
+            # cvd_change_5m = cvd_calc.get_cvd_change(5)
+            # buy_sell_ratio_15m = cvd_calc.get_buy_sell_ratio(15)
+            # Then pass these to the rule engine for evaluation.
+        else:
+            # This case should ideally not happen if subscriptions and calculator setup are correct
+            logging.debug(f"Received trade for {exchange} {symbol}, but no CVD calculator is active for it.")
 
     async def _on_new_ticker_data(self, exchange: str, symbol: str, ticker_data_dict: Dict):
         """Handles incoming ticker data."""

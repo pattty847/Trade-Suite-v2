@@ -23,13 +23,13 @@ data_fetching:
 
 output:
   - format: "markdown" # For stdout, if you still want to pipe to a .md file
-    path: "analysis_scanner/output/scan_results.md"
+    path: "scanner/output/scan_results.md"
   - format: "csv"
-    path: "analysis_scanner/output/scan_results.csv" # All scan-specific tables will get a suffix based on this
+    path: "scanner/output/scan_results.csv" # All scan-specific tables will get a suffix based on this
   - format: "json"
-    path: "analysis_scanner/output/scan_results.json" # Same here, e.g., output/scan_results_Overbought_Extreme_V1.json
+    path: "scanner/output/scan_results.json" # Same here, e.g., output/scan_results_Overbought_Extreme_V1.json
   - format: "text"
-    path: "analysis_scanner/output/scan_summary.txt" # And here 
+    path: "scanner/output/scan_summary.txt" # And here 
 
 asset_groups:
   majors:

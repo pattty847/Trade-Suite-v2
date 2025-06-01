@@ -126,13 +126,16 @@ alert_bot/
 │   ├── engine.py           # Rule evaluation engine
 │   ├── price_level.py      # Price level rule implementation
 │   ├── percentage_change.py # Percentage change rule implementation
+│   ├── cvd.py              # CVD rule implementation (Added)
 │   └── volatility.py       # Volatility rule implementation
-├── fetcher/
-│   ├── __init__.py
-│   ├── ccxt_fetcher.py     # Synchronous CCXT fetcher (legacy)
-│   ├── async_ccxt_fetcher.py # Async CCXT fetcher
-│   ├── ticker.py           # Async ticker streamer
-│   └── ohlcv.py            # Async OHLCV data streamer
+├── models/                 # (Added)
+│   ├── __init__.py         # (Added)
+│   └── trade_data.py       # (Added) Data model for trades
+├── processors/             # (Added)
+│   ├── __init__.py         # (Added)
+│   └── cvd_calculator.py   # (Added) CVD calculation logic
+├── fetcher/                # (Updated - largely deprecated for direct ccxt.pro use)
+│   └── __init__.py
 ├── notifier/
 │   ├── __init__.py
 │   ├── base.py             # Base notifier interface with queue support
@@ -144,6 +147,7 @@ alert_bot/
 │   ├── __init__.py
 │   └── manager.py          # State management for rule cooldowns
 ├── metrics.py              # Prometheus metrics collection
+├── manager.py              # (Added) AlertDataManager - main orchestrator
 ├── main.py                 # Application entry point with async event loop
 ├── requirements.txt        # Project dependencies
 └── README.md
@@ -151,14 +155,31 @@ alert_bot/
 
 ## Architecture
 
-The application follows an event-driven architecture:
+The application follows an event-driven architecture and is designed for integration with the `trade_suite` ecosystem:
 
-1. **Initialization**: Config is loaded, rules are instantiated, and data streamers are set up
-2. **Data Streaming**: Async streamers fetch price and OHLCV data at configurable intervals
-3. **Events**: When new data arrives, callbacks are triggered
-4. **Rule Evaluation**: Rules are evaluated against the latest data
-5. **Notifications**: If rules trigger, notifications are queued and processed in the background
-6. **Metrics**: Performance and operational metrics are collected and exposed via HTTP
+1.  **Initialization**:
+    *   `AlertDataManager` is initialized, receiving `trade_suite`'s `Data`, `TaskManager`, and `SignalEmitter` instances.
+    *   Alert configuration (`alerts_config.yaml`) is loaded and parsed by `AlertDataManager`.
+2.  **Data Subscription & Seeding**:
+    *   `AlertDataManager` determines data requirements (specific OHLCV timeframes, raw trades for CVD, ticker data) based on active alerts.
+    *   It subscribes to `trade_suite.TaskManager` for these data resources.
+    *   `TaskManager` manages `trade_suite.CandleFactory` instances (for OHLCV) and raw data streams (trades, tickers) from `trade_suite.Data`.
+    *   `AlertDataManager` initializes `CVDCalculator` instances and seeds them with historical trade data fetched via `trade_suite.Data`.
+3.  **Live Data Handling & Events**:
+    *   `trade_suite.SignalEmitter` broadcasts data updates:
+        *   `Signals.UPDATED_CANDLES` from `CandleFactory` instances.
+        *   `Signals.NEW_TRADE` from `Data.watch_trades`.
+        *   `Signals.NEW_TICKER_DATA` from `Data.watch_ticker`.
+    *   `AlertDataManager` listens for these signals.
+4.  **Data Processing & Rule Evaluation**:
+    *   Incoming candle data is passed to relevant alert rules.
+    *   Raw trades are fed to the appropriate `CVDCalculator` by `AlertDataManager`. Updated CVD metrics are then used for rule evaluation.
+    *   Ticker data is used for relevant rules (e.g., price level alerts).
+    *   The (future) `RuleEngine` evaluates rules against the latest processed data.
+5.  **State Management & Notifications**:
+    *   If rules trigger, `AlertDataManager` consults `StateManager` to check cooldowns.
+    *   If an alert can be dispatched, `StateManager` is updated, and notifications are queued and processed by configured notifiers (e.g., email, console).
+6.  **Metrics**: Performance and operational metrics are collected and exposed via HTTP.
 
 ## Future Enhancements
 

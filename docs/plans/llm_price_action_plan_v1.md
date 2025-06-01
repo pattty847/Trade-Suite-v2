@@ -6,7 +6,7 @@
 
 ## 1. Overview & Goals
 
-This document outlines a plan for developing and evolving Python-based analysis tools (`analysis_scanner` project and new components) designed to be called by a Large Language Model (LLM). The primary goal is to enable an LLM to understand, interpret, and explain cryptocurrency price action to retail users in an accessible and insightful manner.
+This document outlines a plan for developing and evolving Python-based analysis tools (`scanner` project and new components) designed to be called by a Large Language Model (LLM). The primary goal is to enable an LLM to understand, interpret, and explain cryptocurrency price action to retail users in an accessible and insightful manner.
 
 The system aims to support two main operational workflows:
 
@@ -115,7 +115,7 @@ The tools detailed in this plan will be exposed to the `LLM Tool Router`.
     *   `target_symbol` (Optional, e.g., "ETH/USD")
     *   `target_timeframe` (Optional, e.g., "1h")
 *   **Key Internal Modules/Logic:**
-    *   Adapts the existing `main_workflow.py` from the `analysis_scanner` project.
+    *   Adapts the existing `main_workflow.py` from the `scanner` project.
     *   Uses `FileScanner` and `IndicatorCalculator` (including intra-dataset deltas).
     *   Evaluates scan conditions.
     *   Optionally calculates inter-scan deltas (see 4.2) if configured.
@@ -203,7 +203,7 @@ The `ContextBuilder` (part of the main application, not these tools) is responsi
     *   Develop the main function orchestrating data fetching, indicator calculation, window summarization, current state extraction, and `PriceActionAnalyzer` event generation.
     *   Define and implement the target rich JSON output structure.
 4.  **`tool_scanner_run` Adaptation:**
-    *   Refactor existing `analysis_scanner/main_workflow.py` to function as this tool.
+    *   Refactor existing `scanner/main_workflow.py` to function as this tool.
     *   Ensure it incorporates intra-dataset deltas in its analysis and output.
     *   Implement logic for optional inter-scan delta calculation and output.
     *   Define its JSON output structure.

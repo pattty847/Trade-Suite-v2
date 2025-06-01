@@ -382,65 +382,100 @@ class Data(CCXTInterface):
 
     async def watch_ticker(self, exchange_id: str, symbol: str, stop_event: asyncio.Event):
         """
-        Watches for ticker updates for a specific symbol on a given exchange.
+        Watches the ticker for a given symbol on a specific exchange and emits updates.
 
         Args:
-            exchange_id (str): The ID of the exchange to connect to.
-            symbol (str): The trading symbol to watch (e.g., 'BTC/USD').
-            stop_event (asyncio.Event): Event to signal when to stop the stream.
+            exchange_id: The ID of the exchange to use.
+            symbol: The trading symbol to watch.
+            stop_event: An asyncio.Event to signal when to stop watching.
         """
-        exchange_object = self.exchange_list.get(exchange_id)
-        if not exchange_object:
-            logging.error(f"Exchange {exchange_id} not found in initialized exchanges.")
+        if exchange_id not in self.exchange_list:
+            logging.error(f"Exchange {exchange_id} not initialized in Data class.")
             return
 
-        if not hasattr(exchange_object, 'watch_ticker'):
-            logging.error(f"Exchange {exchange_id} does not support watch_ticker.")
-            return
-
-        logging.info(f"Starting ticker stream for {symbol} on {exchange_id}")
-        stop_event.clear() # Ensure the event is clear initially
+        exchange = self.exchange_list[exchange_id]
+        logging.info(f"Starting ticker watch for {symbol} on {exchange_id}")
+        stop_event.clear()
 
         while not stop_event.is_set():
             try:
-                logging.debug(f"Awaiting ticker for {symbol} on {exchange_id}...")
-                ticker_data = await exchange_object.watch_ticker(symbol)
+                logging.debug(f"Awaiting ticker for {symbol} on {exchange_id} via watch_ticker...")
+                ticker_data = await exchange.watch_ticker(symbol)
                 logging.debug(f"Received ticker for {symbol} on {exchange_id}: {ticker_data}")
 
                 if ticker_data:
-                    if self.emitter:
-                        if self._ui_loop and hasattr(self.emitter, 'emit_threadsafe') and self.emitter.emit_threadsafe.__name__ != '_do_not_use_emit_threadsafe':
-                            self.emitter.emit_threadsafe(
-                                self._ui_loop,
-                                Signals.NEW_TICKER_DATA,
-                                exchange=exchange_id,
-                                symbol=symbol,
-                                ticker_data_dict=ticker_data
-                            )
-                        else:
-                            self.emitter.emit(
-                                Signals.NEW_TICKER_DATA,
-                                exchange=exchange_id,
-                                symbol=symbol,
-                                ticker_data_dict=ticker_data
-                            )
+                    if self._ui_loop and hasattr(self.emitter, 'emit_threadsafe') and self.emitter.emit_threadsafe.__name__ != '_do_not_use_emit_threadsafe':
+                        self.emitter.emit_threadsafe(
+                            self._ui_loop,
+                            Signals.NEW_TICKER_DATA,
+                            exchange=exchange_id,
+                            symbol=symbol, # Make sure to pass the symbol
+                            ticker_data_dict=ticker_data
+                        )
+                    elif self.emitter:
+                        self.emitter.emit(
+                            Signals.NEW_TICKER_DATA,
+                            exchange=exchange_id,
+                            symbol=symbol, # Make sure to pass the symbol
+                            ticker_data_dict=ticker_data
+                        )
                     else:
                         logging.debug(f"No emitter configured for ticker data for {symbol} on {exchange_id}.")
-            
+
             except asyncio.CancelledError:
-                logging.info(f"Ticker stream for {symbol} on {exchange_id} cancelled.")
-                break # Exit loop on cancellation
+                logging.info(f"Ticker watch for {symbol} on {exchange_id} cancelled.")
+                break
             except ccxt.NetworkError as e:
                 logging.warning(f"NetworkError in watch_ticker for {symbol} on {exchange_id}: {e}. Retrying after delay...")
-                await asyncio.sleep(exchange_object.rateLimit / 1000 if hasattr(exchange_object, 'rateLimit') and exchange_object.rateLimit > 0 else 5)
+                await asyncio.sleep(exchange.rateLimit / 1000 if hasattr(exchange, 'rateLimit') and exchange.rateLimit > 0 else 5)
             except ccxt.ExchangeError as e:
-                logging.error(f"ExchangeError in watch_ticker for {symbol} on {exchange_id}: {e}. Might stop or retry.")
+                logging.error(f"ExchangeError in watch_ticker for {symbol} on {exchange_id}: {e}.")
                 await asyncio.sleep(5) # Basic retry delay
             except Exception as e:
                 logging.error(f"Unexpected error in watch_ticker for {symbol} on {exchange_id}: {e}", exc_info=True)
                 await asyncio.sleep(5) # Basic retry delay
-        
-        logging.info(f"Ticker stream for {symbol} on {exchange_id} stopped.")
+        logging.info(f"Ticker watch for {symbol} on {exchange_id} stopped.")
+
+    async def fetch_historical_trades(self, exchange_id: str, symbol: str, since_timestamp: int, limit: int = 1000) -> List[Dict]:
+        """
+        Fetch recent historical trades from the specified exchange for a given symbol.
+
+        Args:
+            exchange_id: The ID of the exchange (e.g., 'coinbase').
+            symbol: The trading symbol (e.g., 'BTC/USD').
+            since_timestamp: Fetch trades since this UNIX timestamp in milliseconds.
+            limit: Maximum number of trades to fetch.
+
+        Returns:
+            A list of raw trade dictionaries from CCXT, or an empty list if fetching fails or is not supported.
+        """
+        if exchange_id not in self.exchange_list:
+            logging.error(f"Exchange {exchange_id} not initialized in Data class. Cannot fetch historical trades.")
+            return []
+
+        exchange = self.exchange_list[exchange_id]
+
+        if not exchange.has.get('fetchTrades'):
+            logging.warning(f"Exchange {exchange_id} does not support fetchTrades. Cannot fetch historical trades for {symbol}.")
+            return []
+
+        try:
+            logging.debug(f"Fetching historical trades for {symbol} on {exchange_id} since {since_timestamp}, limit {limit}")
+            # Adjust limit if necessary, some exchanges have max limit per request
+            # For simplicity, using the provided limit directly here.
+            # Error handling and pagination might be needed for very large requests.
+            trades = await exchange.fetch_trades(symbol, since=since_timestamp, limit=limit)
+            logging.info(f"Fetched {len(trades)} historical trades for {symbol} on {exchange_id}.")
+            return trades
+        except ccxt.NetworkError as e:
+            logging.error(f"NetworkError fetching historical trades for {symbol} on {exchange_id}: {e}")
+            return []
+        except ccxt.ExchangeError as e:
+            logging.error(f"ExchangeError fetching historical trades for {symbol} on {exchange_id}: {e}")
+            return []
+        except Exception as e:
+            logging.error(f"Unexpected error fetching historical trades for {symbol} on {exchange_id}: {e}", exc_info=True)
+            return []
 
     async def fetch_candles(
         self,

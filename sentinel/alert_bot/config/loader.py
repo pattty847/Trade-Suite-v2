@@ -119,6 +119,7 @@ class CVDRule(BaseModel):
 
 class SymbolConfig(BaseModel):
     """Configuration for a single trading symbol"""
+    exchange: str = Field(default='coinbase', description="Exchange ID for this symbol (e.g., coinbase, binance)")
     price_levels: List[PriceLevelRule] = Field(default_factory=list)
     percentage_changes: List[PercentageChangeRule] = Field(default_factory=list)
     volatility: List[VolatilityRule] = Field(default_factory=list)

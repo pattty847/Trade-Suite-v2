@@ -28,7 +28,8 @@ class CCXTInterface:
                 logging.debug(f"Initializing {exchange_id} with provided credentials config (may be empty for public).")
             # else branch not strictly needed due to _get_credentials behavior
 
-            exchange_class = getattr(ccxtpro, exchange_id)(credentials)
+            config = {**credentials, "enableRateLimit": True}
+            exchange_class = getattr(ccxtpro, exchange_id)(config)
             logging.debug(f"Attempting to load markets for {exchange_id}...")
             await exchange_class.load_markets()
             logging.debug(f"Markets loaded for {exchange_id}.")

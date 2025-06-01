@@ -266,7 +266,7 @@ You're right, the current `trade_suite` architecture is quite comprehensive. We 
 4.  **Signal Handling:**
     *   Listens for `Signals.UPDATED_CANDLES` (from specific `CandleFactory` instances).
     *   Listens for `Signals.NEW_TRADE` (from `Data.watch_trades`).
-    *   (Future) Listens for `Signals.NEW_TICKER` (from `Data.watch_ticker`).
+    *   (Future) Listens for `Signals.NEW_TICKER_DATA` (from `Data.watch_ticker`).
 5.  **Data Routing & Logic:**
     *   Manages `CVDCalculator` instances, feeding them raw trades.
     *   (Future) Manages ticker price storage/processing.
@@ -284,163 +284,114 @@ The plan to synthesize these messages into a seed document for the next chat is 
 
 ## Project Blueprint: `alert_bot` Integration with `trade_suite`
 
-**Version:** 1.0
-**Date:** October 26, 2023
+**Version:** 1.1 (Updated October 27, 2023) - Reflects significant progress.
+**Previous Version:** 1.0 (October 26, 2023)
 **Authors:** User & Gemini AI
 
 **1. Introduction & Goals**
 
-The `alert_bot` is a critical feature designed to provide users with timely notifications based on configurable market conditions. This project aims to integrate the `alert_bot` into the existing `trade_suite` application, leveraging `trade_suite`'s robust data handling and task management infrastructure. The integration should support two primary modes of operation for the `alert_bot`:
+The `alert_bot` is a critical feature designed to provide users with timely notifications based on configurable market conditions. This project aims to integrate the `alert_bot` into the existing `trade_suite` application, leveraging `trade_suite`'s robust data handling and task management infrastructure. The integration supports two primary modes of operation for the `alert_bot`:
 
-1.  **Integrated GUI Feature:** Accessible and configurable within the `trade_suite` DearPyGui application, with alerts potentially triggering UI notifications.
-2.  **Standalone Terminal Application:** Capable of running independently (e.g., 24/7 on a server), using console logging or other notification mechanisms for alerts.
+1.  **Integrated GUI Feature:** Accessible and configurable within the `trade_suite` DearPyGui application.
+2.  **Standalone Terminal Application:** Capable of running independently.
 
-The core goals of this integration are:
+Core goals remain: centralized data management via `trade_suite.Data`, leveraging `trade_suite.TaskManager`, modular design, and maintainability.
 
-*   **Centralized Data Management:** Utilize `trade_suite`'s `Data` class (`data_source.py`) for all `ccxt.pro` exchange interactions (historical data, live trade/ticker streams), ensuring a single exchange instance per connection.
-*   **Leverage Task Management:** Employ `trade_suite`'s `TaskManager` (`task_manager.py`) for managing the lifecycle of data streams and `CandleFactory` instances.
-*   **Modular Design:** Create a clear separation of concerns, with the `alert_bot` logic interacting with `trade_suite` components through a well-defined interface.
-*   **Maintainability & Extensibility:** Design the integration to be understandable, maintainable, and easy to extend with new alert types or data sources in the future.
+**2. Current `trade_suite` Architecture (Leveraged Components)**
 
-**2. Current `trade_suite` Architecture Analysis (Relevant Components)**
+Analysis of `trade_suite` components (`__main__`, `Viewport`, `Data`, `TaskManager`, `CandleFactory`, `SignalEmitter`) as detailed in Version 1.0 remains relevant. Key changes and confirmations:
 
-Our exploration has identified the following key `trade_suite` components and their functionalities, which will be leveraged:
-
-*   **`trade_suite.__main__`:**
-    *   Application entry point.
-    *   Initializes core components: `ConfigManager`, `SignalEmitter`, `InfluxDB`, and `Data`.
-*   **`trade_suite.gui.viewport.Viewport`:**
-    *   Sets up the DearPyGui context and main render loop.
-    *   Initializes `SECDataFetcher` and `TaskManager`.
-    *   Manages the `DashboardManager` for UI layout.
 *   **`trade_suite.data.data_source.Data`:**
-    *   Manages all `ccxt.pro` exchange instances (ensuring one per exchange).
-    *   Handles fetching historical OHLCV data (`fetch_candles`) with caching, pagination, and retry logic.
-    *   Streams live trades (`watch_trades`) and order books (`watch_orderbook`) using `ccxt.pro`.
-    *   Uses `SignalEmitter` to broadcast data updates (e.g., `Signals.NEW_TRADE`).
-    *   *To be enhanced:* Will require a new method for streaming ticker data (e.g., `watch_ticker`).
+    *   Successfully enhanced with `async def watch_ticker(...)` for live ticker data.
+    *   Successfully enhanced with `async def fetch_historical_trades(...)` for seeding CVD calculators.
 *   **`trade_suite.gui.task_manager.TaskManager`:**
-    *   Runs an asyncio event loop in a separate thread.
-    *   Manages the lifecycle of background tasks (data streams, `CandleFactory` initialization).
-    *   Uses a subscription model (`subscribe`/`unsubscribe`) with reference counting for resources.
-    *   Resource keys include:
-        *   `factory_key = (exchange, symbol, timeframe)` for `CandleFactory` instances.
-        *   `trade_stream_key = f"trades_{exchange}_{symbol}"` for raw trade streams.
-        *   `orderbook_stream_key = f"orderbook_{exchange}_{symbol}"`.
-    *   Creates a **distinct `CandleFactory` instance for each unique `(exchange, symbol, timeframe)` tuple** requested.
-    *   Initializes each `CandleFactory` by calling `_fetch_initial_candles_for_factory`, which fetches historical data for the factory's specific timeframe and calls `factory.set_initial_data()`.
-    *   Manages the underlying raw trade stream (`Data.watch_trades`) that feeds `CandleFactory` instances.
-    *   *To be enhanced:* Will need to support a new resource type for ticker streams.
-*   **`trade_suite.data.candle_factory.CandleFactory`:**
-    *   Manages OHLCV data for a **single, specific `(exchange, symbol, timeframe)`** it's configured for.
-    *   Is seeded with historical data for its specific timeframe via `set_initial_data()`.
-    *   Listens for `Signals.NEW_TRADE` (filtered for its exchange/symbol) and processes these trades to update/build its candles.
-    *   Emits `Signals.UPDATED_CANDLES` when its candle data changes.
-    *   Contains a `try_resample()` method that changes the factory's *internal timeframe and data* to the new resampled timeframe. (Note: For the alert_bot, we will rely on `TaskManager` creating separate factories for different timeframes rather than dynamically resampling a single factory instance for multiple concurrent needs).
-    *   Provides `get_candle_data()` to access its current OHLCV DataFrame.
-*   **`trade_suite.gui.signals.SignalEmitter`:**
-    *   A pub/sub system for decoupled communication between components.
+    *   Successfully updated to manage ticker stream resources (`type: 'ticker'`).
 
-**3. Proposed `alert_bot` Architecture & Integration Strategy**
+**3. `alert_bot` Architecture & Integration Progress**
 
-We will introduce a new central component within the `alert_bot` module:
+The central `AlertDataManager` class (`sentinel/alert_bot/manager.py`) is the core of the integration.
 
-*   **`AlertDataManager` Class:**
-    *   **Responsibilities:**
-        1.  Act as the primary interface between the `alert_bot`'s rule engine and the `trade_suite`'s data infrastructure (`Data`, `TaskManager`).
-        2.  Parse `alerts_config.yaml` to determine all data requirements (specific OHLCV timeframes, raw trade streams for CVD, ticker data).
-        3.  Subscribe to `TaskManager` for all required data resources.
-        4.  Register listeners with `SignalEmitter` to receive live data updates (`UPDATED_CANDLES`, `NEW_TRADE`, `NEW_TICKER_DATA`).
-        5.  Manage instances of `CVDCalculator` (from the original `alert_bot/fetcher/trade_streamer.py`) and feed them appropriate raw trade data.
-        6.  (Future) Manage processing/storage of live ticker data.
-        7.  Route the processed and structured data to the `alert_bot`'s rule evaluation engine (`alert_bot.rules.engine`).
-        8.  **Integrate with the existing `StateManager` (from `sentinel/alert_bot/state/manager.py`) to manage alert cooldowns. After a rule's conditions are met, `AlertDataManager` will consult `StateManager.can_trigger()` before sending a notification and call `StateManager.mark_triggered()` if an alert is dispatched.**
-        9.  Handle resource cleanup by unsubscribing from `TaskManager` when alerts are removed or the bot stops.
-    *   **Initialization:**
-        *   When run as part of `trade_suite` GUI: Receives `Data`, `TaskManager`, and `SignalEmitter` instances from `trade_suite`.
-        *   When run as a standalone terminal app: Instantiates its own `Data`, `TaskManager`, and `SignalEmitter` (the emitter might be a console-logging version).
-        *   **Will instantiate or receive an instance of `StateManager`.**
-    *   **Refactoring Existing Fetchers:**
-        *   Logic from `sentinel/alert_bot/fetcher/trade_streamer.py` (especially `CVDCalculator`, `TradeData`) will be heavily refactored. The `TradeStreamer` class itself will likely be dissolved, its responsibilities absorbed by `AlertDataManager` and helper classes for CVD calculation.
-        *   `sentinel/alert_bot/fetcher/ohlcv.py` will be largely deprecated, as OHLCV data will come from `CandleFactory` instances managed by `TaskManager`.
-        *   `sentinel/alert_bot/fetcher/ticker.py` will be refactored. Its core data processing logic will be managed by `AlertDataManager` once ticker streaming is added to `trade_suite.Data`.
-        *   **No direct `ccxt.pro` usage within these refactored `alert_bot` components.**
+*   **`AlertDataManager` Key Responsibilities & Current State:**
+    1.  **Interface Role:** Acts as the primary interface between `alert_bot`'s rule engine and `trade_suite`'s data infrastructure.
+    2.  **Configuration Processing:**
+        *   Successfully loads and parses `alerts_config.yaml` using `sentinel.alert_bot.config.loader.load_alerts_from_yaml`. This function is part of the `loader.py` module which defines Pydantic models (`AlertConfig`, `SymbolConfig`, various `Rule` types) and uses a `load_config` function to perform the actual YAML loading and Pydantic validation. `SymbolConfig` now correctly includes an `exchange: str` field.
+    3.  **Subscription Management:**
+        *   Correctly identifies unique data requirements (candles, raw trades, tickers) from the parsed config.
+        *   Successfully subscribes to `TaskManager` for these resources, using `self` (the `AlertDataManager` instance) as the subscriber ID.
+    4.  **Signal Handling:**
+        *   Registers `async def _on_updated_candles(...)`, `async def _on_new_trade(...)`, and `async def _on_new_ticker_data(...)` with `SignalEmitter` to receive live data updates.
+    5.  **CVD Data Management:**
+        *   Manages instances of `CVDCalculator` (from `sentinel/alert_bot/processors/cvd_calculator.py`).
+        *   On startup (`start_monitoring`), successfully seeds each `CVDCalculator` with historical trade data fetched via `self.data_source.fetch_historical_trades()`.
+        *   The `_on_new_trade` method correctly parses incoming raw trades (using `TradeData.from_ccxt_trade` from `sentinel/alert_bot/models/trade_data.py`) and updates the appropriate `CVDCalculator` instance.
+    6.  **Ticker Data & Price Level Alerts:**
+        *   The `_on_new_ticker_data` method receives live ticker updates.
+        *   **Implemented Rule Evaluation for Price Level Alerts:**
+            *   Identifies relevant `PriceLevelRule`s from the active configuration for the incoming symbol/exchange.
+            *   Extracts the current price from the ticker data.
+            *   Checks if the rule's conditions (price above/below target) are met.
+            *   Utilizes `self.state_manager.can_trigger()` and `self.state_manager.mark_triggered()` to enforce cooldowns.
+            *   Logs a detailed message when a price level alert is triggered (actual notification dispatch is pending).
+    7.  **State Management Integration:**
+        *   Successfully uses `StateManager` (from `sentinel/alert_bot/state/manager.py`) for managing alert cooldowns in the implemented Price Level alert logic.
+    8.  **Resource Cleanup:**
+        *   `stop_monitoring()` handles unsubscribing from `TaskManager` and clearing internal trackers, including `cvd_calculators`.
 
-**4. Phased Implementation Plan**
+*   **Refactored/Removed `alert_bot` Components:**
+    *   `TradeData` class moved to `sentinel/alert_bot/models/trade_data.py`.
+    *   `CVDCalculator` class moved to `sentinel/alert_bot/processors/cvd_calculator.py`.
+    *   The entire `sentinel/alert_bot/fetcher/` directory has been cleaned up. Old fetcher modules (`trade_streamer.py`, `ohlcv.py`, `ticker.py`, `async_ccxt_fetcher.py`, `ccxt_fetcher.py`) that used `ccxt.pro` directly have been deleted, as all exchange interactions are now centralized in `trade_suite.Data`.
 
-**Phase 0: `trade_suite` Core Enhancements (Ticker Support) - COMPLETE**
+**4. Next Immediate Steps: Implementing Further Rule Evaluation**
 
-*   **`trade_suite.gui.signals.Signals`**:
-    *   `NEW_TICKER_DATA` signal defined with payload `(exchange: str, symbol: str, ticker_data_dict: dict)`.
-*   **`trade_suite.data.data_source.Data`**:
-    *   `async def watch_ticker(self, exchange_id: str, symbol: str, stop_event: asyncio.Event)` method implemented. It uses `ccxt.pro`'s `watch_ticker` and emits `Signals.NEW_TICKER_DATA` via the `SignalEmitter`.
-*   **`trade_suite.gui.task_manager.TaskManager`**:
-    *   `_get_resource_keys` updated to handle `type: 'ticker'`, generating `ticker_stream_key = f"ticker_{exchange}_{symbol}"`.
-    *   `subscribe` logic updated to start `Data.watch_ticker` tasks for new ticker subscriptions.
-    *   `unsubscribe` logic updated to correctly stop ticker stream tasks by setting their `asyncio.Event` and cleaning up.
+With the structural integration for data handling largely complete and Price Level alerts functioning, the next focus is on implementing evaluation for other alert types:
 
-**Phase 1: `AlertDataManager` Implementation & Basic Integration - IN PROGRESS**
+1.  **Phase 2: Percentage Change Alerts (within `_on_updated_candles`)**
+    *   **Task:** Enhance `async def _on_updated_candles(...)` in `AlertDataManager`.
+    *   **Logic:**
+        *   Identify relevant `PercentageChangeRule`s from `self.active_alerts_config` for the incoming `exchange`, `symbol`, and `timeframe`.
+        *   Using the provided `candles_df` (a pandas DataFrame):
+            *   Calculate the price change over the lookback period specified by `rule.timeframe` (in minutes). This will involve selecting the appropriate number of recent candles from the DataFrame. For example, if `rule.timeframe` is 60 minutes and the `candles_df` is for 1-minute candles, a 60-period lookback is needed. If `candles_df` is for 5-minute candles, a 12-period lookback is needed.
+            *   Determine the start price (e.g., open or close of the candle `N` periods ago) and the current price (e.g., close of the latest candle).
+            *   Calculate the percentage change: `((current_price - start_price) / start_price) * 100`.
+        *   Check if `abs(percentage_change)` is greater than or equal to `rule.percentage`.
+        *   If the condition is met:
+            *   Generate a unique `rule_id` (e.g., `f"percentage_change_{symbol}_{timeframe}_{rule.percentage}%_{rule.timeframe}min"`).
+            *   Check `self.state_manager.can_trigger(symbol, rule_id, rule.cooldown)`.
+            *   If `True`, call `self.state_manager.mark_triggered(symbol, rule_id)` and log the alert.
 
-*   **`sentinel/alert_bot/manager.py` - `AlertDataManager` Class Created:**
-    *   Initial class structure for `AlertDataManager` established.
-    *   `__init__` method defined, accepting `Data`, `TaskManager`, `SignalEmitter` (from `trade_suite`), `StateManager` (from `alert_bot.state.manager`), and `alerts_config_path`.
-    *   Static helper method `_format_timeframe(time_value: Any) -> str | None` added for converting timeframe representations.
-    *   `load_and_parse_config()` method implemented, using `sentinel.alert_bot.config.loader.load_alerts_from_yaml`.
-    *   `start_monitoring()` method implemented:
-        *   Parses `active_alerts_config` (assuming Pydantic models from `loader.py` will provide an `exchange` attribute per symbol, defaulting to 'coinbase' for now if not present).
-        *   Identifies unique data requirements for candles, raw trades, and tickers based on `alerts_config.yaml` structure:
-            *   `price_levels` rules map to `'ticker'` requirements.
-            *   `percentage_changes` rules map to `'candles'` requirements (using `_format_timeframe`).
-            *   `cvd` rules map to `'trades'` requirements.
-        *   Subscribes to `TaskManager` for each unique requirement, passing `self` (the `AlertDataManager` instance) as the subscriber ID.
-        *   Tracks subscribed resources in `self.subscribed_resources_tracker`.
-        *   Ensures signal handlers (`_on_updated_candles`, `_on_new_trade`, `_on_new_ticker_data`) are registered with `SignalEmitter`.
-    *   `stop_monitoring()` method implemented:
-        *   Unregisters signal handlers.
-        *   Calls `self.task_manager.unsubscribe(self)` to release all resources `AlertDataManager` subscribed to.
-        *   Clears local trackers like `subscribed_resources_tracker` and `active_alerts_config`.
-    *   Placeholders for `async def _on_updated_candles(...)`, `async def _on_new_trade(...)`, and `async def _on_new_ticker_data(...)` created.
-    *   `cleanup()` method implemented.
-    *   Conceptual `main_standalone()` example added for understanding standalone operation.
+2.  **Phase 3: CVD Alerts (Enhance `_on_new_trade`)**
+    *   **Task:** Further enhance `async def _on_new_trade(...)` in `AlertDataManager`. (It currently updates the CVD calculator).
+    *   **Logic (after `cvd_calc.add_trade(parsed_trade)`):**
+        *   Retrieve relevant metrics from the `cvd_calc` instance:
+            *   Current CVD value: `cvd_calc.get_cvd()`.
+            *   CVD change over N minutes: `cvd_calc.get_cvd_change(minutes=rule.timeframe)`. (The `timeframe` in `CVDRule` config will map to `minutes` here).
+            *   Buy/Sell ratio over N minutes: `cvd_calc.get_buy_sell_ratio(minutes=rule.timeframe)`.
+        *   Identify active `CVDRule`s for the `exchange` and `symbol`.
+        *   For each `CVDRule`:
+            *   Based on `rule.type` ('change', 'ratio', 'level'):
+                *   **'change':** Check `abs(cvd_change)` against `rule.cvd_threshold` or percentage change against `rule.cvd_percentage_threshold`.
+                *   **'ratio':** Check `buy_sell_ratio['buy_ratio']` against `rule.buy_ratio_threshold` or `buy_sell_ratio['sell_ratio']` against `rule.sell_ratio_threshold`.
+                *   **'level':** Check `current_cvd_value` against `rule.cvd_level` based on `rule.level_condition` ('above'/'below').
+            *   If a condition is met:
+                *   Generate a unique `rule_id` (e.g., `f"cvd_{symbol}_{rule.type}_{rule.timeframe}min_thresh_{rule.cvd_threshold_or_level}"`).
+                *   Use `StateManager` for cooldowns and log the alert.
+        *   (Divergence detection is a future feature and will remain placeholder for now).
 
-**Next Immediate Steps (Refining `AlertDataManager` and Integrating `CVDCalculator`):**
+3.  **Phase 4: Notification System Integration**
+    *   **Task:** Design and integrate a flexible notification system.
+    *   This will involve:
+        *   Defining a `Notifier` base class/interface.
+        *   Implementing concrete notifiers (e.g., `ConsoleNotifier`, `EmailNotifier`, `TelegramNotifier`).
+        *   Allowing users to configure which notifiers are active in `alerts_config.yaml`.
+        *   When an alert is confirmed (after cooldown check), `AlertDataManager` will dispatch it to all active notifiers.
 
-1.  **Refactor `trade_streamer.py` Components:**
-    *   **`TradeData` Class:**
-        *   Move to a new file: `sentinel/alert_bot/models/trade_data.py`.
-        *   Adapt the `parse_trade` method from the old `TradeStreamer` class and include it in `trade_data.py`, ideally as a static method of `TradeData` (e.g., `TradeData.from_ccxt_trade(raw_trade_dict)`).
-    *   **`CVDCalculator` Class:**
-        *   Move to a new file: `sentinel/alert_bot/processors/cvd_calculator.py`.
-        *   Ensure it imports `TradeData` from its new location.
-2.  **Enhance `trade_suite.data.data_source.Data`:**
-    *   Implement a new method: `async def fetch_historical_trades(self, exchange_id: str, symbol: str, since_timestamp: int, limit: int) -> List[Dict]`. This method will use the shared `ccxt.pro` exchange instance to fetch historical trades. The logic from `TradeStreamer.fetch_recent_trades` can be adapted for this.
-3.  **Update `AlertDataManager` (`sentinel/alert_bot/manager.py`):**
-    *   **CVDCalculator Management:**
-        *   In `__init__` or `start_monitoring`, create a dictionary `self.cvd_calculators: Dict[Tuple[str, str], CVDCalculator]` to hold instances, keyed by `(exchange_id, symbol)`.
-    *   **Historical Seeding for CVD:**
-        *   When a CVD requirement for a symbol is identified in `start_monitoring`, and if a `CVDCalculator` is being created for the first time for that `(exchange_id, symbol)`:
-            *   Call the new `self.data_source.fetch_historical_trades()` to get recent trades.
-            *   Parse these trades using `TradeData.from_ccxt_trade()`.
-            *   Feed these `TradeData` objects into the `CVDCalculator` instance to seed it.
-    *   **Implement `_on_new_trade` Method:**
-        *   When a new trade arrives:
-            *   Parse the raw trade data using `TradeData.from_ccxt_trade()`.
-            *   Retrieve the correct `CVDCalculator` instance from `self.cvd_calculators` based on the trade's exchange and symbol.
-            *   Call `cvd_calculator.add_trade(parsed_trade_data)`.
-            *   (Future) Get updated CVD metrics from the calculator and evaluate relevant alert rules.
-4.  **Pydantic Model Updates for `alerts_config.yaml` (`sentinel/alert_bot/config/loader.py`):**
-    *   Ensure Pydantic models are updated to include the `exchange: str` field for each top-level symbol configuration in `alerts_config.yaml`.
-    *   Ensure timeframe fields (like in `percentage_changes` or `cvd` rules) are parsed correctly, ready for the `_format_timeframe` helper.
-5.  **Cleanup:**
-    *   Once components are migrated, delete `sentinel/alert_bot/fetcher/trade_streamer.py`.
-    *   Review and potentially remove/refactor `sentinel/alert_bot/fetcher/ohlcv.py` and `sentinel/alert_bot/fetcher/ticker.py` as their functionality is now covered by `AlertDataManager`'s direct use of `TaskManager` and `trade_suite.Data`.
+**5. Key Architectural Insights & Reminders for Next Session**
 
-**Key Architectural Insights & Reminders for Next Session:**
+*   `AlertDataManager` is central, using `trade_suite` data components and its own modules for rules, state, and notifications.
+*   All data subscriptions are managed via `TaskManager`.
+*   Rule evaluation will occur within the `_on_...` data handler methods in `AlertDataManager`.
+*   `StateManager` is crucial for cooldowns.
+*   The Pydantic models in `sentinel.alert_bot.config.loader` are the source of truth for alert rule parameters.
 
-*   **`AlertDataManager` is the central orchestrator** for the alert bot, interfacing with `trade_suite`'s data systems and the alert bot's own rule evaluation, state management, and notification systems.
-*   **Leverage `TaskManager`:** All data stream subscriptions (candles, raw trades, tickers) are managed via `TaskManager` using the `subscribe`/`unsubscribe` pattern with `AlertDataManager` instance (`self`) as the subscriber ID.
-*   **Data Flow for CVD:** Raw trades come from `Data.watch_trades` (via `TaskManager`), are parsed by `AlertDataManager` (using the migrated `TradeData.from_ccxt_trade`), fed into the relevant `CVDCalculator` instance, and then CVD metrics are used for rule evaluation.
-*   **Standalone vs. Integrated:** The design supports both. Standalone `main_alert_bot.py` will instantiate all necessary components. Integrated GUI mode will pass existing `trade_suite` components (`Data`, `TaskManager`, `SignalEmitter`) to `AlertDataManager`.
-*   **Configuration is Key:** `alerts_config.yaml` (parsed by `loader.py` into Pydantic models) drives all data requirements and alert logic.
-
-This should give you a comprehensive snapshot to commit and allow us to dive right back into the `CVDCalculator` integration and historical data seeding when you're set up in the cafe. Enjoy the beer!
+This updated blueprint should provide a clear path forward for implementing the remaining alert logic.
