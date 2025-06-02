@@ -1,24 +1,40 @@
+import sys
+import os
+
+# Add the project root (Trade-Suite-v2) to sys.path
+# This allows imports like `from sentinel...` and `from trade_suite...` to work correctly
+# when the script is run as `python sentinel/alert_bot/main.py` from the project root.
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 #!/usr/bin/env python3
 import argparse
 import logging
-import time
+# import time # No longer directly used
 import os
 import sys
 import asyncio
 from pathlib import Path
-from typing import Any, Optional, Dict, Set, List
+from typing import Optional
+# from typing import Any, Optional, Dict, Set, List # No longer directly used here
 
-from sentinel.alert_bot.config.loader import load_config
-from sentinel.alert_bot.fetcher.trade_streamer import TradeStreamer
-from sentinel.alert_bot.rules.engine import RuleEngine
-from sentinel.alert_bot.fetcher.ticker import TickerStreamer
-from sentinel.alert_bot.fetcher.ohlcv import OHLCVStreamer
-from sentinel.alert_bot.notifier.async_email_notifier import AsyncEmailNotifier
-from sentinel.alert_bot.notifier.async_console_notifier import AsyncConsoleNotifier
+# Updated imports for AlertDataManager and trade_suite components
+from sentinel.alert_bot.config.loader import load_alerts_from_yaml, create_example_global_config_file # Changed from load_config
+from sentinel.alert_bot.manager import AlertDataManager
+from sentinel.alert_bot.notifier.async_email_notifier import AsyncEmailNotifier # Keep for --test-email
+# from sentinel.alert_bot.notifier.async_console_notifier import AsyncConsoleNotifier # Not directly used in main after refactor
 from sentinel.alert_bot.metrics import start_metrics_server
 
+# Trade Suite components - adjust paths if they are different in your final structure
+# Assuming trade_suite is a top-level package installable or in PYTHONPATH
+from trade_suite.gui.signals import SignalEmitter
+from trade_suite.data.data_source import Data
+from trade_suite.data.influx import InfluxDB # Data source might need InfluxDB
+from trade_suite.gui.task_manager import TaskManager
+
 # Setup logging
-logger = logging.getLogger("price_alert")
+logger = logging.getLogger(__name__) # Changed from "price_alert" to module name for consistency
 
 def setup_logging(log_level: str = "INFO") -> None:
     """
@@ -29,211 +45,37 @@ def setup_logging(log_level: str = "INFO") -> None:
     """
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
     
-    # Ensure logs directory exists
     log_dir = Path('logs')
     log_dir.mkdir(exist_ok=True)
-    log_file_path = log_dir / 'alert_logs.log'
+    log_file_path = log_dir / 'sentinel_alert_bot.log' # More specific log file name
     
-    # Configure logging
     logging.basicConfig(
         level=numeric_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        format='%(asctime)s - %(name)s - %(levelname)s - %(module)s - %(funcName)s - %(message)s',
         handlers=[
             logging.FileHandler(log_file_path),
             logging.StreamHandler()
         ]
     )
+    logger.info(f"Logging setup complete. Log level: {log_level.upper()}. File: {log_file_path}")
 
-class AlertBot:
-    """Main alert bot class that coordinates components"""
-    
-    def __init__(self, config_path: str, exchange_id: str = 'coinbase', ticker_interval: int = 10, cvd_lookback_minutes: int = 120):
-        """
-        Initialize the alert bot
-        
-        Args:
-            config_path: Path to YAML config file
-            exchange_id: CCXT exchange ID to use
-            ticker_interval: Seconds between ticker updates
-            cvd_lookback_minutes: Minutes of trade history for CVD calculation
-        """
-        self.config_path = config_path
-        self.exchange_id = exchange_id
-        self.ticker_interval = ticker_interval
-        
-        # Initialize components
-        self.config = load_config(config_path)
-        self.rule_engine = RuleEngine(self.config)
-        
-        # Streamers
-        self.ticker_streamer = TickerStreamer(exchange_id=exchange_id, update_interval=ticker_interval)
-        self.ohlcv_streamer = OHLCVStreamer(exchange_id=exchange_id)
-        self.trade_streamer = TradeStreamer(exchange_id=exchange_id, lookback_minutes=cvd_lookback_minutes)
-        
-        # Notifiers (now using async versions)
-        self.console_notifier = AsyncConsoleNotifier()
-        self.email_notifier = AsyncEmailNotifier(use_env_vars=True)
-        
-        # Collected required timeframes for each symbol
-        self.required_timeframes: Dict[str, Set[int]] = {}
-        
-        # Track symbols needing CVD data
-        self.cvd_symbols: Set[str] = set()
-        
-        # Set up callbacks
-        self.setup_callbacks()
-    
-    def setup_callbacks(self):
-        """Set up callbacks for price, OHLCV, and CVD data"""
-        
-        # When new price data arrives, evaluate rules
-        self.ticker_streamer.register_callback(self.on_new_price)
-        
-        # When new OHLCV data arrives, update cache
-        self.ohlcv_streamer.register_callback(self.on_new_ohlcv)
-        
-        # When CVD data updates, we don't trigger evaluations directly
-        # CVD is evaluated during price updates
-        self.trade_streamer.register_callback(self.on_new_cvd_data)
-    
-    def on_new_price(self, symbol: str, price: float):
-        """
-        Callback for new price data
-        
-        Args:
-            symbol: Trading symbol
-            price: Current price
-        """
-        try:
-            # Get any additional data for this symbol
-            extra_data = {}
-            
-            # If we have OHLCV data for this symbol, include it
-            if symbol in self.required_timeframes and self.required_timeframes[symbol]:
-                ohlcv_data = {}
-                for timeframe in self.required_timeframes[symbol]:
-                    candles = self.ohlcv_streamer.get_latest_data(symbol, timeframe)
-                    if candles:
-                        ohlcv_data[timeframe] = candles
-                
-                if ohlcv_data:
-                    extra_data['ohlcv_data'] = ohlcv_data
-            
-            # If we have CVD data for this symbol, include it
-            if symbol in self.cvd_symbols:
-                cvd_data = self.trade_streamer.get_cvd_data(symbol)
-                if cvd_data:
-                    extra_data['cvd_data'] = cvd_data
-            
-            # Evaluate rules for this symbol with the new price
-            alert_messages = self.rule_engine.evaluate_symbol(symbol, price, extra_data)
-            
-            # Send notifications if there are any alerts
-            if alert_messages:
-                combined_message = "\n\n".join(alert_messages)
-                asyncio.create_task(self.console_notifier.queue_notification(combined_message))
-                asyncio.create_task(self.email_notifier.queue_notification(combined_message))
-        
-        except Exception as e:
-            logger.error(f"Error processing new price for {symbol}: {e}")
-    
-    def on_new_cvd_data(self, symbol: str, cvd_value: float, extra_data: Dict[str, Any]):
-        """
-        Callback for new CVD data - just log it for debugging
-        
-        Args:
-            symbol: Trading symbol
-            cvd_value: Current CVD value
-            extra_data: Additional CVD metrics
-        """
-        logger.debug(f"CVD updated for {symbol}: {cvd_value:.2f}")
-        # Note: We don't trigger rule evaluation here - that happens on price updates
-        # This ensures all data (price, OHLCV, CVD) is available together
-    
-    async def initialize(self):
-        """Initialize all components"""
-        # Collect required timeframes and CVD symbols
-        for symbol_key in self.rule_engine.get_symbols():
-            self.required_timeframes[symbol_key] = set()
-            
-            # Analyze rules to determine required timeframes and features
-            for rule in self.rule_engine.get_rules_for_symbol(symbol_key):
-                if hasattr(rule, 'timeframe_minutes') and isinstance(getattr(rule, 'timeframe_minutes'), int):
-                    self.required_timeframes[symbol_key].add(rule.timeframe_minutes)
-                
-                # Check if this symbol needs CVD data
-                if rule.rule_type == 'cvd':
-                    self.cvd_symbols.add(symbol_key)
-        
-        # Initialize streamers
-        await self.ticker_streamer.initialize()
-        await self.ohlcv_streamer.initialize()
-        await self.trade_streamer.initialize()
-        
-        # Initialize notifiers
-        await self.console_notifier.start()
-        await self.email_notifier.start()
-        
-        # Set up what to track
-        for symbol in self.rule_engine.get_symbols():
-            # Track ticker for all symbols
-            self.ticker_streamer.track_symbol(symbol)
-            
-            # Track OHLCV for symbols that need it
-            if symbol in self.required_timeframes:
-                for timeframe in self.required_timeframes[symbol]:
-                    self.ohlcv_streamer.track_symbol_timeframe(symbol, timeframe)
-            
-            # Track trades for CVD calculation
-            if symbol in self.cvd_symbols:
-                self.trade_streamer.track_symbol(symbol)
-        
-        logger.info(f"CVD tracking enabled for {len(self.cvd_symbols)} symbols: {list(self.cvd_symbols)}")
-    
-    async def start(self):
-        """Start all components"""
-        # Start streamers
-        await self.ticker_streamer.start()
-        await self.ohlcv_streamer.start()
-        await self.trade_streamer.start()
-        
-        logger.info(f"Started monitoring {len(self.rule_engine.get_symbols())} symbols")
-        
-        # Keep main task alive
-        while True:
-            await asyncio.sleep(60)
-    
-    async def stop(self):
-        """Stop all components"""
-        # Stop notifiers
-        await self.email_notifier.stop()
-        await self.console_notifier.stop()
-        
-        # Stop streamers
-        await self.ticker_streamer.stop()
-        await self.ohlcv_streamer.stop()
-        await self.trade_streamer.stop()
-        
-        logger.info("Stopped monitoring")
+# Removed the old AlertBot class entirely
 
 async def async_main():
-    """Async entry point for price alert bot"""
-    parser = argparse.ArgumentParser(description='Crypto Price Alert Bot')
-    parser.add_argument('--config', type=str, default='sentinel/alert_bot/alerts_config.yaml', 
-                      help='Path to YAML configuration file')
-    parser.add_argument('--interval', type=int, default=10, 
-                      help='Ticker update interval in seconds (default: 10)')
-    parser.add_argument('--cvd-lookback', type=int, default=120,
-                      help='Lookback window in minutes for CVD calculation (default: 120)')
+    """Async entry point for Sentinel Alert Bot using AlertDataManager."""
+    parser = argparse.ArgumentParser(description='Sentinel Alert Bot')
+    parser.add_argument('--config', type=str, default='sentinel/alert_bot/config/alerts_config.yaml', 
+                      help='Path to YAML configuration file for AlertDataManager')
+    # Removed --interval and --cvd-lookback as AlertDataManager derives needs from its config
     parser.add_argument('--log-level', type=str, default='INFO', 
                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                       help='Logging level')
     parser.add_argument('--test-email', action='store_true', 
-                      help='Send a test email and exit')
-    parser.add_argument('--exchange', type=str, default='coinbase',
-                      help='CCXT exchange ID to use (default: coinbase)')
+                      help='Send a test email using settings from config and exit')
+    parser.add_argument('--exchange', type=str, default='coinbase', # Could be a list for Data source
+                      help='Default CCXT exchange ID to use if not specified in alerts_config.yaml or for general setup. Can be multiple comma-separated.')
     parser.add_argument('--create-config', action='store_true',
-                      help='Create an example configuration file and exit')
+                      help='Create an example GlobalAlertConfig YAML file and exit')
     parser.add_argument('--metrics-port', type=int, default=9090,
                       help='Port for Prometheus metrics HTTP server (default: 9090)')
     parser.add_argument('--disable-metrics', action='store_true',
@@ -241,58 +83,114 @@ async def async_main():
     
     args = parser.parse_args()
     
-    # Setup logging
     setup_logging(args.log_level)
     
-    # Create example config if requested
     if args.create_config:
-        from sentinel.alert_bot.config.create_example_config import create_example_config
-        config_path = create_example_config()
-        logger.info(f"Created example configuration at {config_path}")
+        try:
+            from sentinel.alert_bot.config.loader import create_example_global_config_file
+            # Determine the path relative to the main.py script's location or project root
+            # Assuming main.py is in sentinel/alert_bot/
+            output_dir = Path(__file__).parent / "config"
+            output_dir.mkdir(parents=True, exist_ok=True) # Ensure config directory exists
+            example_config_file_path = output_dir / "example_global_alerts_config.yaml"
+            
+            logger.info(f"Attempting to generate example global configuration file at: {example_config_file_path}")
+            create_example_global_config_file(example_config_file_path)
+            logger.info(f"Example configuration file created. Please review it and copy/rename to your desired alerts_config.yaml path (default: {args.config}) and customize it.")
+        except Exception as e:
+            logger.exception(f"Could not create example configuration: {e}")
         return
     
+    alert_manager: Optional[AlertDataManager] = None
+    task_manager: Optional[TaskManager] = None # Define task_manager here
+
     try:
-        # Start metrics server if not disabled
         if not args.disable_metrics:
-            metrics_server = await start_metrics_server(args.metrics_port)
-        
-        # Test email if requested
+            await start_metrics_server(args.metrics_port)
+            logger.info(f"Metrics server started on port {args.metrics_port}")
+
+        # Load the global configuration for the alert bot
+        # This is used by AlertDataManager and potentially for --test-email
+        global_alerts_config = load_alerts_from_yaml(args.config)
+
         if args.test_email:
             logger.info("Sending test email...")
-            email_notifier = AsyncEmailNotifier(use_env_vars=True)
-            await email_notifier.start()
-            await email_notifier.send_test_notification()
-            # Wait a bit for email to be sent
-            await asyncio.sleep(5)
-            await email_notifier.stop()
+            # Find email notifier config from global_alerts_config
+            email_conf = None
+            if global_alerts_config.notification_settings:
+                for nc in global_alerts_config.notification_settings.notifiers:
+                    if nc.type == 'email' and nc.enabled:
+                        email_conf = nc.config
+                        break
+            
+            if email_conf:
+                email_notifier = AsyncEmailNotifier(config=email_conf) # Pass specific config
+                await email_notifier.start()
+                await email_notifier.send_test_notification() 
+                await asyncio.sleep(2) # Brief pause for email sending
+                await email_notifier.stop()
+                logger.info("Test email process complete.")
+            else:
+                logger.warning("No enabled email notifier configuration found in alerts_config.yaml to send a test email.")
             return
+
+        # Initialize Trade Suite core components
+        logger.info("Initializing Trade Suite components...")
+        signal_emitter = SignalEmitter()
+        influx_db = InfluxDB() # Assuming default InfluxDB connection or it handles its own config
         
-        # Create and initialize alert bot
-        bot = AlertBot(
-            config_path=args.config,
-            exchange_id=args.exchange,
-            ticker_interval=args.interval,
-            cvd_lookback_minutes=args.cvd_lookback
+        # Determine exchanges to use for Data source
+        # Prioritize exchanges from alerts config if possible, or use CLI default
+        # For now, using CLI default. Data source can handle multiple.
+        exchanges_to_use = [e.strip() for e in args.exchange.split(',') if e.strip()]
+        if not exchanges_to_use:
+            logger.error("No exchanges specified for Data source. Please use --exchange argument.")
+            return
+        logger.info(f"Initializing Data source for exchanges: {exchanges_to_use}")
+        data_source = Data(influx=influx_db, emitter=signal_emitter, exchanges=exchanges_to_use)
+        
+        task_manager = TaskManager(data=data_source, sec_fetcher=None)
+        
+        logger.info("Initializing AlertDataManager...")
+        alert_manager = AlertDataManager(
+            data_source=data_source,
+            task_manager=task_manager,
+            signal_emitter=signal_emitter,
+            config_file_path=args.config
         )
         
-        # Initialize
-        logger.info("Initializing alert bot...")
-        await bot.initialize()
+        await alert_manager.start_monitoring()
+        logger.info("AlertDataManager started. Sentinel Alert Bot is running.")
+        logger.info("Press Ctrl+C to stop.")
         
-        # Run
-        logger.info(f"Starting price monitoring with {args.interval}s update interval")
-        logger.info("Press Ctrl+C to stop")
-        
-        try:
-            await bot.start()
-        except KeyboardInterrupt:
-            logger.info("Monitoring stopped by user (Ctrl+C).")
-        finally:
-            await bot.stop()
+        # Keep main task alive. TaskManager runs its own loop in a thread.
+        # AlertDataManager uses asyncio tasks for its operations.
+        while True:
+            await asyncio.sleep(3600) # Keep alive, actual work is event-driven
             
+    except FileNotFoundError as e:
+        logger.error(f"Configuration file error: {e}. Please ensure '{args.config}' exists and is correctly formatted.")
+        logger.error("If you need an example, run with --create-config (Note: you might need to run sentinel/alert_bot/config/loader.py manually to generate it first based on its __main__ block, then copy/rename to your desired config path)")
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received. Shutting down Sentinel Alert Bot...")
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        logger.error(f"Fatal error in Sentinel Alert Bot: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        if alert_manager:
+            logger.info("Stopping AlertDataManager...")
+            await alert_manager.stop_monitoring()
+            logger.info("AlertDataManager stopped.")
+        if task_manager: # Ensure task_manager is defined before calling cleanup
+            logger.info("Cleaning up TaskManager...")
+            # TaskManager has a cleanup() method for full shutdown
+            if hasattr(task_manager, 'cleanup'):
+                task_manager.cleanup()
+            else:
+                 logger.warning("TaskManager does not have a standard 'cleanup' method. Manual resource handling might be needed.")
+            logger.info("TaskManager cleanup complete.")
+        # Data source and InfluxDB might also have cleanup methods if they hold persistent connections
+        logger.info("Sentinel Alert Bot shutdown complete.")
 
 def main():
     """Entry point that runs the async loop"""

@@ -25,10 +25,10 @@ if __name__ == "__main__":
         symbols_to_fetch = []  # This will be ignored when top_symbols_config is used.
     else:
         top_symbols_config = None
-        symbols_to_fetch = ["PEPE/USD", "BTC/USD"]
+        symbols_to_fetch = ["PROMPT/USD"]
     
-    timeframes_to_use = ['1d']
-    since_date_to_use = '2024-07-01T00:00:00Z'
+    timeframes_to_use = ['1m']
+    since_date_to_use = '2025-04-11T00:00:00Z'
     # --- End User-defined parameters ---
 
     print(f"Starting OHLCV download for exchanges: {exchanges_to_use}")

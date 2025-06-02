@@ -10,23 +10,6 @@
 
 ## Architecture
 
-<!-- 
-TODO: Replace the image below with a live Mermaid diagram if possible.
-GitHub Flavored Markdown supports Mermaid. Example:
-
-```mermaid
-graph TD;
-    A[TradeSuite GUI] --> B(TaskManager);
-    B --> C{Data Source (CCXT Pro)};
-    C --> D[Exchange WebSockets];
-    B --> E[CandleFactory];
-    A --> F[Sentinel Alert Bot];
-    F --> B;
-    F --> C;
-```
-
--->
-
 ![image](https://github.com/user-attachments/assets/4d6c7474-0fcc-4ca7-891c-be9fe1077737)
 
 
