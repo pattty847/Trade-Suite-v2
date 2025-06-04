@@ -2,11 +2,9 @@ import asyncio
 import logging
 import threading
 from typing import Dict, List, Any, Callable, Set, Tuple
-import time
 from collections import defaultdict
 import pandas as pd
 
-import dearpygui.dearpygui as dpg
 
 from trade_suite.data.data_source import Data
 from trade_suite.gui.signals import Signals
@@ -39,14 +37,16 @@ class TaskManager:
         
         # Lock for thread synchronization (primarily for accessing shared resources like factories/counts)
         self.lock = threading.Lock()
+
+        # Event used to signal when the asyncio loop has been created
+        self.loop_ready = threading.Event()
         
         # Start the event loop in a separate thread
         self.thread = threading.Thread(target=self.run_loop, daemon=False) #
         self.thread.start()
-        
+
         # Wait for the loop to be initialized
-        while self.loop is None:
-            time.sleep(0.01)
+        self.loop_ready.wait()
 
         # Now that the asyncio loop is ready, inform Data so it can emit
         # signals thread-safely without the intermediate queue.
@@ -67,7 +67,8 @@ class TaskManager:
         """
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        
+        self.loop_ready.set()
+
         # Run the event loop (no longer schedules a separate data-queue consumer)
         self.loop.run_forever()
 
