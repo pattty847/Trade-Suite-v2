@@ -759,7 +759,16 @@ class Data(CCXTInterface):
 
             if not new_data_df.empty: # This check is somewhat redundant if all_newly_fetched_ohlcv is not empty
                 # existing_df is initialized by _load_cache (even if to an empty DF)
-                existing_df = pd.concat([existing_df, new_data_df]).drop_duplicates(subset=['dates'], keep='last').sort_values(by='dates').reset_index(drop=True)
+                if existing_df.empty:
+                    # If existing_df is empty, and new_data_df is not (guaranteed by the outer check),
+                    # the result is just new_data_df. Metadata columns are already added.
+                    combined_df = new_data_df
+                else:
+                    # Both existing_df and new_data_df are non-empty here.
+                    # Metadata columns are already added to new_data_df.
+                    combined_df = pd.concat([existing_df, new_data_df])
+                
+                existing_df = combined_df.drop_duplicates(subset=['dates'], keep='last').sort_values(by='dates').reset_index(drop=True)
                 logging.info(f"Fetched/updated {len(new_data_df)} new rows for {key}. Total rows now: {len(existing_df)}.")
 
         # Save the potentially modified (prepended and/or appended) existing_df to cache
