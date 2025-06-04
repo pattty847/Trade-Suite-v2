@@ -71,15 +71,6 @@ class TaskManager:
         # Run the event loop (no longer schedules a separate data-queue consumer)
         self.loop.run_forever()
 
-    # ---------------- Deprecated Queue API ----------------------
-    # The internal asyncio.Queue and its consumer have been removed in favour of
-    # emitting signals directly from worker tasks (via SignalEmitter) to the
-    # main-thread GUI.  The following stub remains only to avoid import errors
-    # if any legacy code calls TaskManager._process_data_queue.
-    async def _process_data_queue(self):
-        logging.warning("_process_data_queue is deprecated and no longer used.")
-        await asyncio.sleep(0)
-
     # ------------------------------------------------------------------
     # Direct emit helpers (used by worker tasks) – they forward the data to
     # the GUI thread via SignalEmitter.  Keeping them as small wrappers keeps

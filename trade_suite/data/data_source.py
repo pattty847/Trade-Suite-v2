@@ -748,6 +748,15 @@ class Data(CCXTInterface):
             new_data_df = pd.DataFrame(all_newly_fetched_ohlcv, columns=["dates", "opens", "highs", "lows", "closes", "volumes"])
             # Ensure 'dates' in new_data_df is int64 for consistent concatenation
             new_data_df['dates'] = new_data_df['dates'].astype('int64')
+
+            # Add metadata columns to new_data_df BEFORE concatenating
+            # This ensures that when concatenated with existing_df (which has these columns from cache),
+            # no NaNs are introduced for these metadata fields in the new rows.
+            if not new_data_df.empty: # Only add if there's data
+                new_data_df['exchange'] = exchange.id # exchange.id is available from the method's parameters
+                new_data_df['symbol'] = symbol     # symbol is available from the method's parameters
+                new_data_df['timeframe'] = timeframe # timeframe is available from the method's parameters
+
             if not new_data_df.empty: # This check is somewhat redundant if all_newly_fetched_ohlcv is not empty
                 # existing_df is initialized by _load_cache (even if to an empty DF)
                 existing_df = pd.concat([existing_df, new_data_df]).drop_duplicates(subset=['dates'], keep='last').sort_values(by='dates').reset_index(drop=True)
