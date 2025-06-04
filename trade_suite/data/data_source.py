@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Dict, List, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import ccxt
 import pandas as pd
@@ -64,7 +64,6 @@ class Data(CCXTInterface):
         :param limit: int: Limit the number of trades returned
         :param params: Pass additional parameters to the exchange
         :return: A list of dictionaries
-        :doc-author: Trelent
         """
 
         # For each exchange pass start watching for trades for the list of symbols passed
@@ -132,8 +131,8 @@ class Data(CCXTInterface):
         track_stats: bool = False,
         write_trades: bool = False,
         write_stats: bool = False,
-        sink: asyncio.coroutines = None,
-        queue: asyncio.Queue = None
+        sink: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        queue: asyncio.Queue | None = None
     ):
         """
         The watch_trades function is a method of the Data class that watches for trades on a specific exchange and symbol.
@@ -152,7 +151,6 @@ class Data(CCXTInterface):
                          Expected signature: async def sink(trade_event_dict: Dict)
         :param queue: asyncio.Queue: An asyncio.Queue to put trade data onto.
         :return: The following:
-        :doc-author: Trelent
         """
         if sink and queue:
             raise ValueError("Provide either a sink or a queue, not both.")
@@ -245,7 +243,6 @@ class Data(CCXTInterface):
         :param symbols: List[str]: Specify which symbols you want to watch
         :param stop_event: asyncio.Event: Event to signal when to stop the stream.
         :return: An orderbook, which is a dictionary with the following keys:
-        :doc-author: Trelent
         """
 
         for exchange_id in self.exchange_list.keys():
@@ -285,10 +282,14 @@ class Data(CCXTInterface):
                     break # Exit outer loop if event is cleared
             logging.info(f"Orderbook list stream for {symbols} on {exchange_id} stopped.")
 
-    async def watch_orderbook(self, exchange: str, symbol: str, stop_event: asyncio.Event,
-                              sink: asyncio.coroutines = None, # New: for direct callback
-                              queue: asyncio.Queue = None,     # New: for asyncio.Queue
-                              cadence_ms: int = 500         # New: configurable cadence, default 500ms
+    async def watch_orderbook(
+        self,
+        exchange: str,
+        symbol: str,
+        stop_event: asyncio.Event,
+        sink: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        queue: asyncio.Queue | None = None,
+        cadence_ms: int = 500         # New: configurable cadence, default 500ms
                               ):
         """
         The watch_orderbook function is a coroutine that takes in the exchange and symbol as parameters.
@@ -308,7 +309,6 @@ class Data(CCXTInterface):
         :param queue: asyncio.Queue: An asyncio.Queue to put order book data onto.
         :param cadence_ms: int: The desired minimum interval in milliseconds between sending order book updates (for sink/queue/emitter).
         :return: A dictionary with the following keys:
-        :doc-author: Trelent
         """
         if sink and queue:
             raise ValueError("Provide either a sink or a queue, not both.")
@@ -330,7 +330,7 @@ class Data(CCXTInterface):
                     latest_orderbook_raw = current_orderbook_data # Always store the latest received book
 
                 # Check if throttle interval has passed and we have a book to send
-                current_time = asyncio.get_event_loop().time()
+                current_time = asyncio.get_running_loop().time()
                 if latest_orderbook_raw and (current_time - last_emit_time >= throttle_interval_seconds):
                     orderbook_event_dict = {'exchange': exchange, 'orderbook': latest_orderbook_raw}
                     
@@ -495,7 +495,6 @@ class Data(CCXTInterface):
         :param timeframes: List[str]: Specify the timeframes to fetch candles for
         :param write_to_db: Write the data to the database
         :return: A dictionary of dictionaries
-        :doc-author: Trelent
         """
         all_candles = {}
 
@@ -557,7 +556,7 @@ class Data(CCXTInterface):
             try:
                 # Ensure 'dates' is read as integer if possible, handle if not present during read.
                 # This addresses a potential correctness issue from the feedback.
-                cached_df = pd.read_csv(path, dtype={"dates": "Int64"}) # Use Int64 for nullable integers
+                cached_df = await asyncio.to_thread(pd.read_csv, path, dtype={"dates": "Int64"})
                 if not cached_df.empty and 'dates' in cached_df.columns and not cached_df['dates'].isnull().all():
                     # Ensure dates are sorted if loaded from cache, as subsequent logic relies on it.
                     cached_df = cached_df.sort_values(by='dates').reset_index(drop=True)
@@ -593,7 +592,7 @@ class Data(CCXTInterface):
             desired_columns = ['dates', 'opens', 'highs', 'lows', 'closes', 'volumes', 'exchange', 'symbol', 'timeframe']
             columns_to_save = [col for col in desired_columns if col in df_to_save.columns]
             
-            df_to_save[columns_to_save].to_csv(path, index=False)
+            await asyncio.to_thread(df_to_save[columns_to_save].to_csv, path, index=False)
             logging.debug(f"Saved data for {key} to {path} with metadata columns. Rows: {len(df_to_save)}")
         else:
             logging.info(f"No data to save for {key} (DataFrame is empty). CSV not created/updated at {path}.")
