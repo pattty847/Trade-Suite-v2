@@ -1,9 +1,0 @@
-ccxt>=2.7.0
-pydantic>=1.9.0
-pyyaml>=6.0
-python-dotenv>=0.20.0
-aiohttp>=3.8.0
-aiodns>=3.0.0  # For better DNS resolution in async code
-# Optional dependencies - comment out if installation problems
-# cchardet>=2.1.7  # For better encoding detection in async HTTP
-prometheus_client>=0.14.0  # For metrics collection 
