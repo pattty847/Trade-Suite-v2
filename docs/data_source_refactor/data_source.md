@@ -248,4 +248,4 @@ Task 3.0: Implement Data Class Decomposition: Carry out the actual refactoring b
 Task 3.1: Unit Testing: Write pytest unit tests for the new components, covering cache operations, fetching logic (including retries and edge cases like duplicate candles), and the generic watcher.
 Task 3.2: Profiling and Performance Optimization: Use tools like py-spy to identify and address any remaining performance bottlenecks under load.
 Task 3.3: Address Call-out Questions & Final Review: Revisit questions about logging verbosity and the use of metadata columns in DataFrames. Conduct a final review of the architecture and docstrings.
-I'll now apply this to the markdown file.
+
