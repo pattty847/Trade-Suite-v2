@@ -73,7 +73,7 @@ graph TD
 | **UI**         | `src/trade_suite/gui/widgets/`         | `BaseWidget` subclasses, `Viewport`         | DashboardProgram (via signals), TaskManager (subscribe/unsubscribe) | Rendering, User Input, Local State Mgmt     |
 | **Dashboard**  | `src/trade_suite/gui/dashboard_program.py` | `DashboardProgram`, `DashboardManager`      | Viewport, TaskManager, Widgets (creation), Config | Widget Lifecycle, Layout Mgmt, Creation Dialogs |
 | **Orchestration**| `src/trade_suite/task_manager.py`      | `TaskManager`, `StreamKey`                  | DataSource, CandleFactory, Widgets (data delivery), DPG Job Pool | Data Routing, Resource Lifecycle (Streams/Factories), Async Task Mgmt |
-| **Data Source**| `src/trade_suite/data/data_source.py`  | `DataSource`                                | External Exchanges (CCXT), TaskManager (queues) | Exchange Communication (REST/WS), Raw Data Fetching |
+| **Data Source**| `src/trade_suite/data/data_source.py`  | `DataFacade`                                | External Exchanges (CCXT), TaskManager (queues) | Orchestrates `CacheStore`, `CandleFetcher`, `Streamer` |
 | **Data Proc.** | `src/trade_suite/data/candle_factory.py`| `CandleFactory`                             | TaskManager (signals/queues)        | Trade Aggregation -> Candles              |
 | **Config**     | `config/`, `.ini`, `src/trade_suite/config.py` | `ConfigManager` (implicitly via DPG/DashMgr) | Filesystem, (Read by DashboardManager, DPG) | Startup Settings, Layout Persistence        |
 | **Shared**     | `src/trade_suite/gui/signals.py`       | `SignalEmitter`, `Signals`                  | (Used by multiple layers)           | Application-wide Pub/Sub Events           |
@@ -139,12 +139,12 @@ class TaskManager:
 
 ```python
 # src/trade_suite/data/data_source.py
-class DataSource:
-    def __init__(self, ccxt_interface, emitter): ...
-    async def watch_trades(self, exchange: str, symbol: str) -> None: ...
-    async def watch_orderbook(self, exchange: str, symbol: str) -> None: ...
-    async def fetch_candles(self, exchange: str, symbol: str, timeframe: str, limit: int) -> pd.DataFrame | None: ...
-    # Internal methods for handling CCXT streams/fetches and putting data to TaskManager queues
+class DataFacade:
+    def __init__(self, influx, emitter, exchanges=None): ...
+    async def watch_trades(self, symbol: str, exchange: str, stop_event: asyncio.Event) -> None: ...
+    async def watch_orderbook(self, exchange: str, symbol: str, stop_event: asyncio.Event) -> None: ...
+    async def fetch_candles(self, exchanges: list[str], symbols: list[str], since: str, timeframes: list[str]) -> dict[str, dict[str, pd.DataFrame]]: ...
+    # Delegates to CacheStore, CandleFetcher, and Streamer
 ```
 
 ```python

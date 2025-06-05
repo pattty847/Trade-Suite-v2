@@ -6,7 +6,7 @@ graph TD
 
     subgraph TradeSuite_Core
         style TradeSuite_Core fill:#e1f5fe,stroke:#b3e5fc
-        TS_Data["Data (data_source.py)"] -- Fetches/Streams --> Internet["Exchanges (CCXT Pro)"]
+        TS_Data["DataFacade (data_source.py)"] -- Fetches/Streams --> Internet["Exchanges (CCXT Pro)"]
         TS_TaskManager["TaskManager (task_manager.py)"]
         TS_SignalEmitter["SignalEmitter (signals.py)"]
         TS_CandleFactory["CandleFactory Instances"]
