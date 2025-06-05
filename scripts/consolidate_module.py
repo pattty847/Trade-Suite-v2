@@ -13,13 +13,16 @@ def count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
         print("Please ensure tiktoken is installed ('pip install tiktoken') and the encoding is correct.")
         return -1
 
-def consolidate_module(module_path: pathlib.Path, output_file: pathlib.Path) -> None:
+def consolidate_module(module_path: pathlib.Path, output_file: pathlib.Path, include_txt: bool = False, include_md: bool = False) -> None:
     """
     Consolidates all Python files in a module/directory into a single text file.
+    Optionally includes .txt and .md files based on the provided toggles.
 
     Args:
         module_path: The path to the Python module/directory.
         output_file: The path to the output text file.
+        include_txt: Boolean flag to include .txt files in the consolidation.
+        include_md: Boolean flag to include .md files in the consolidation.
     """
     consolidated_content = []
     
@@ -29,22 +32,28 @@ def consolidate_module(module_path: pathlib.Path, output_file: pathlib.Path) -> 
 
     print(f"Scanning directory: {module_path.resolve()}")
 
-    for py_file in sorted(module_path.rglob("*.py")):
-        relative_path = py_file.relative_to(module_path)
-        header = f"--- File: {relative_path} ---\n"
-        print(f"Processing: {py_file.resolve()}")
-        try:
-            with open(py_file, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-            consolidated_content.append(header)
-            consolidated_content.append(content)
-            consolidated_content.append("\n--- End File: {relative_path} ---\n\n")
-        except Exception as e:
-            print(f"Error reading file {py_file}: {e}")
-            consolidated_content.append(header)
-            consolidated_content.append(f"Error reading file: {e}\n")
-            consolidated_content.append("\n--- End File: {relative_path} ---\n\n")
+    file_patterns = ["*.py"]
+    if include_txt:
+        file_patterns.append("*.txt")
+    if include_md:
+        file_patterns.append("*.md")
 
+    for pattern in file_patterns:
+        for file in sorted(module_path.rglob(pattern)):
+            relative_path = file.relative_to(module_path)
+            header = f"--- File: {relative_path} ---\n"
+            print(f"Processing: {file.resolve()}")
+            try:
+                with open(file, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                consolidated_content.append(header)
+                consolidated_content.append(content)
+                consolidated_content.append(f"\n--- End File: {relative_path} ---\n\n")
+            except Exception as e:
+                print(f"Error reading file {file}: {e}")
+                consolidated_content.append(header)
+                consolidated_content.append(f"Error reading file: {e}\n")
+                consolidated_content.append(f"\n--- End File: {relative_path} ---\n\n")
 
     full_text_output = "".join(consolidated_content)
 
@@ -81,4 +90,4 @@ if __name__ == "__main__":
     module_p = pathlib.Path(args.module_path)
     output_p = pathlib.Path(args.output_file)
 
-    consolidate_module(module_p, output_p) 
+    consolidate_module(module_p, output_p, include_txt=False, include_md=True) 
