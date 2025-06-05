@@ -54,6 +54,14 @@ This document captures a quick audit of selected modules.  Line references follo
   aggregation, and signal emission. Splitting responsibilities would aid
   maintainability. **P1**
 
+  *Refactor direction:* break `Data` into focused helpers. A planned layout is
+  `CacheStore` for all CSV I/O, `CandleFetcher` for CCXT calls and retry logic,
+  and `Streamer` for live trade/orderbook watchers. A thin `DataFacade` will
+  orchestrate these pieces for the GUI/TaskManager. This modular approach keeps
+  each component testable and limits the surface area of future changes. The
+  latest refactor introduces these helpers and reduces the size of
+  `data_source.py` to a thin facade coordinating them.
+
 - Several docstrings still contain templated text like
   `:doc-author: Trelent`. **P2**【65a8c6†L57-L68】
 

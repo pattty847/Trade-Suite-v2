@@ -12,3 +12,12 @@ testing and future maintenance much easier. The decomposition proposal in Phase
   InfluxDB and the GUI.
 
 These changes will reduce coupling and keep each piece focused on a single job.
+
+### Progress After Initial Refactor
+
+The initial steps moved heavy I/O onto `asyncio.to_thread` and switched the
+`watch_*` methods to `asyncio.get_running_loop()`. The refactor is now complete:
+`CacheStore`, `CandleFetcher`, and `Streamer` live in their own modules and
+`Data` merely delegates to them. This reduces coupling and clarifies each
+component's role.
+
