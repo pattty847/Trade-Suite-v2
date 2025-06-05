@@ -236,9 +236,9 @@ class TaskManager:
                         if key not in self.tasks or self.tasks[key].done():
                             logging.info(f"Starting new stream task for key: {key}")
                             coro = None
-                            # Create and set the event for this stream
+                            # Create the stop event in a cleared state so the
+                            # stream coroutine begins running immediately.
                             stop_event = asyncio.Event()
-                            stop_event.set()
                             self.stream_events[key] = stop_event
                             
                             # Determine which watch function to call based on the key
