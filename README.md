@@ -2,7 +2,7 @@
 
 TradeSuite provides a dockable GUI for viewing cryptocurrency market data across multiple exchanges. It leverages CCXT PRO for real-time streams and features a flexible widget system.
 
-![Screenshot](https://github.com/user-attachments/assets/80dcbe6b-ecdf-45e2-a9fa-f0b542088655)
+![image](https://github.com/user-attachments/assets/6f49af6f-3e56-43ce-aba0-24d8aca29b1b)
 
 ## Features
 
