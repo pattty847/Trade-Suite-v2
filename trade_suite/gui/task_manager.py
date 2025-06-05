@@ -256,8 +256,9 @@ class TaskManager:
                         if key not in self.tasks or self.tasks[key].done():
                             logging.info(f"Starting new stream task for key: {key}")
                             coro = None
+                            
                             stop_event = sub.stop_event
-
+                            
                             # Determine which watch function to call based on the key
                             if key.startswith("trades_"):
                                 _, exchange, symbol = key.split("_", 2)
