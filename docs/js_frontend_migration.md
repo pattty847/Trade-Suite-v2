@@ -60,3 +60,36 @@ These endpoints map directly to existing async methods such as `watch_trades()` 
 - [ ] phase out DearPyGui once widgets run in browser
 ```
 
+## DataSource API Summary
+
+The `trade_suite.data.data_source.Data` class orchestrates fetching historical data and starting live streams. Key methods are:
+
+| Method | Description | Async? | Notes |
+|--------|-------------|-------|-------|
+| `fetch_candles(exchanges, symbols, since, timeframes)` | Retrieve batches of OHLCV data from cache or the exchange. Returns `Dict[str, Dict[str, DataFrame]]`. | **async** | Writes to InfluxDB when `write_to_db=True`. |
+| `watch_trades(exchange, symbol, stop_event, ...)` | Stream new trades over websockets. Emits `Signals.NEW_TRADE`. | **async** | Runs until `stop_event` is set. |
+| `watch_orderbook(exchange, symbol, stop_event, cadence_ms=500)` | Stream order book snapshots. Emits `Signals.ORDER_BOOK_UPDATE`. | **async** | Throttled by `cadence_ms`. |
+| `watch_ticker(exchange, symbol, stop_event)` | Stream ticker data for last price / spread. | **async** | Optional, not used by current widgets. |
+
+`Data` delegates the heavy lifting to `Streamer` and `CandleFetcher` but exposes a clean interface for the GUI and (future) FastAPI layer.
+
+## Widget Interaction Details
+
+Beyond the high-level matrix, each widget relies on `TaskManager` to manage subscriptions:
+
+- **ChartWidget** – Subscribes to a candle factory plus the trade stream to incrementally update its series. Uses signals `NEW_CANDLES` and `UPDATED_CANDLES`.
+- **OrderbookWidget** – Subscribes to an order book stream. Processes raw data with `OrderBookProcessor` and updates a plot.
+- **PriceLevelWidget** – Shares the same order book stream but aggregates levels to display a DOM-style table.
+- **TradingWidget** – Consumes trade ticks for live pricing and will issue future REST calls for order placement.
+- **SECFilingViewer** – Does not use `Data`; it talks directly to `SECDataFetcher` via `TaskManager` tasks.
+
+The `TaskManager` maintains reference counts per stream or candle factory. When the first widget subscribes, the relevant `watch_*` coroutine is started. When all widgets unsubscribe, the `stop_event` is set and the task cancelled.
+
+## Integration Strategy
+
+1. **Expose Data via FastAPI** – Wrap the methods above into REST and WebSocket endpoints. Maintain the `TaskManager` so server-side streaming mirrors the current GUI.
+2. **Front-End Components** – Recreate each widget using React components. The existing widget code serves as a blueprint for required props and behaviors.
+3. **Shared Layout** – Persist layout state on the client (Golden Layout) and optionally in the backend for user profiles.
+4. **Incremental Porting** – Start with the Chart and Orderbook since they cover the main data flows. Once stable, migrate Trading and SEC filings features.
+
+=======
