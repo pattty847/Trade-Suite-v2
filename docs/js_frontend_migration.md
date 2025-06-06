@@ -60,7 +60,6 @@ These endpoints map directly to existing async methods such as `watch_trades()` 
 - [ ] phase out DearPyGui once widgets run in browser
 ```
 
-
 ## DataSource API Summary
 
 The `trade_suite.data.data_source.Data` class orchestrates fetching historical data and starting live streams. Key methods are:
@@ -93,3 +92,4 @@ The `TaskManager` maintains reference counts per stream or candle factory. When 
 3. **Shared Layout** – Persist layout state on the client (Golden Layout) and optionally in the backend for user profiles.
 4. **Incremental Porting** – Start with the Chart and Orderbook since they cover the main data flows. Once stable, migrate Trading and SEC filings features.
 
+=======
