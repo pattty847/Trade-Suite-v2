@@ -1,4 +1,4 @@
-# SEC Filing Viewer
+git# SEC Filing Viewer
 
 The SEC Filing Viewer allows you to directly access and view official company filings submitted to the U.S. Securities and Exchange Commission (SEC). This feature helps you stay informed about company financials, significant events, and insider trading activity without leaving the Trade Suite.
 
