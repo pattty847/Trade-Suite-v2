@@ -1,68 +1,44 @@
 # Blueprint: TradeSuite v2 - Full System Architecture
 
-This document outlines the architectural blueprint and phased implementation plan for evolving TradeSuite into a distributed client-server system. It covers both the 24/7 backend services and the migration to a modern, web-based frontend.
+This document outlines the blueprint for TradeSuite v2. The new approach abandons the previous client/server split and instead keeps everything in a single Python application. The frontend will be rewritten using **PySide6**, while existing background services continue to run inside the same process.
 
 **Part 1: Backend & Server-Side Architecture**
 
 ### 🗺️ **Proposed Backend Architecture**
 
-The core of the new architecture is a persistent, powerful Python server that handles all heavy lifting, including data collection, analysis, and alert monitoring.
+The application continues to provide 24/7 data collection and analysis, but all components run locally.
 
 ```mermaid
 graph TD;
-    subgraph "Cloud / Local Server (Runs 24/7)"
-        direction LR
-        
-        subgraph "FastAPI Server (mcp_server.py)"
-            direction TB
-            A["REST API <br/> (e.g., /fetch_candles, /create_alert)"]
-            B["WebSocket API <br/> (e.g., /ws/candles, /ws/trades)"]
-            A -- HTTP Requests --> C
-            B -- WebSocket Connections --> C
-            C{API Layer}
-            
-        end
-
-        subgraph "Core Services"
-            direction TB
-            D["Data Service <br/> (data_source.py)"]
-            S["Sentinel Service <br/> (supervisor.py)"]
-            AB["AlertBot Service <br/> (alert_data_manager.py)"]
-            AI["AI Analysis Service <br/> (scanner tools)"]
-        end
-        
-        C --> D
-        C --> S
-        C --> AB
-        C --> AI
-
-        InfluxDB[(InfluxDB)]
-
-        D <--> InfluxDB
-        S --> InfluxDB
-        AI --> InfluxDB
+    subgraph "TradeSuite Application (Runs Locally)"
+        direction TB
+        GUI["PySide6 GUI"]
+        D["Data Service"]
+        S["Sentinel Service"]
+        AB["AlertBot Service"]
+        AI["AI Analysis Service"]
     end
 
-    subgraph "User's Machine / Browser"
-        TS_GUI["TradeSuite Web GUI (JS/React)"]
-    end
+    InfluxDB[(InfluxDB)]
 
-    TS_GUI -- "REST & WebSocket" --> C;
+    GUI --> D
+    GUI --> S
+    GUI --> AB
+    GUI --> AI
 
-    style TS_GUI fill:#cde,stroke:#333,stroke-width:2px
-    style InfluxDB fill:#dbf,stroke:#333,stroke-width:2px
-    style C fill:#f9f,stroke:#333,stroke-width:2px
+    D <--> InfluxDB
+    S --> InfluxDB
+    AI --> InfluxDB
 ```
 
-### 🔁 **Server-Side Responsibilities**
+### 🔁 **Background Service Responsibilities**
 
-The server, built upon the `mcp_server.py` FastAPI application, will be the central hub.
+The application orchestrates several background services that run alongside the PySide6 GUI.
 
 -   **Continuous Data Collection:** The `Sentinel` service will run as a background task, collecting and storing BTC microstructure data into InfluxDB 24/7.
 -   **On-Demand Data:** The `Data` service will fetch historical and real-time data for other assets as requested by clients.
 -   **Alert Monitoring:** The `AlertBot` service will run as a background task, continuously evaluating user-defined alert conditions.
--   **AI Analysis:** The `scanner` tools will be integrated and exposed via a dedicated API endpoint (`/explain_price_action`), allowing the AI to perform complex analysis on server-side data.
--   **API Gateway:** It will expose all functionality through a secure and well-defined set of versioned REST and WebSocket endpoints.
+-   **AI Analysis:** The `scanner` tools provide in-process price action explanations and other advanced analytics.
 
 ---
 
@@ -70,15 +46,13 @@ The server, built upon the `mcp_server.py` FastAPI application, will be the cent
 
 ### 📡 **Frontend Goal & Architecture**
 
-The existing DearPyGui application will be replaced by a modern, web-based user interface built with a standard JavaScript framework (e.g., React) to achieve a sophisticated, performant, and maintainable UI.
+The existing DearPyGui interface will be ported to **PySide6**, retaining a native desktop experience while leveraging Qt's rich widget ecosystem.
 
--   **Thin Client:** The frontend is purely a presentation layer. It makes no direct connections to exchanges and runs no persistent background tasks.
--   **API Communication:** It communicates exclusively with the Python backend via the versioned REST and WebSocket APIs.
+-   **Integrated Application:** The GUI lives in the same Python process as the data and alert services.
 -   **Key Technologies:**
-    -   **Framework:** React+Vite is recommended.
-    -   **Styling:** Tailwind CSS.
-    -   **Charting:** TradingView Lightweight Charts.
-    -   **Layout:** A flexible docking/tiling layout system (e.g., Golden Layout).
+    -   **Framework:** PySide6 (Qt for Python)
+    -   **Charting:** Existing widgets adapted to Qt's painting system
+    -   **Layout:** Qt's docking widgets or a custom docking implementation
 
 ### 🔧 **Unified Implementation Plan (Backend & Frontend)**
 
@@ -86,39 +60,33 @@ This migration is broken down into integrated phases.
 
 #### **Phase 1: Foundation & Chart MVP**
 
-*Goal: Establish the core server and render the first live widget in the new web UI.*
+*Goal: Establish the PySide6 framework and render the first live widget.*
 
--   [ ] **Task 1.1 (Backend): Finalize Service Integration:** In `mcp_server.py`, replace dummy objects with actual `InfluxDB`, `Sentinel`, and `AlertBot` classes. Ensure they start correctly via the `lifespan_manager`.
--   [ ] **Task 1.2 (Backend): Define & Implement Charting API:**
-    -   **Action:** Define Pydantic schemas for candle history (REST) and live candle updates (WebSocket).
-    -   **Endpoints:** Implement `GET /api/v1/candles` and `/ws/v1/candles/{...}`.
--   [ ] **Task 1.3 (Frontend): Scaffold Project:** Set up a React+Vite project with TypeScript, Tailwind CSS, and other essential tools.
--   [ ] **Task 1.4 (Frontend): Implement Chart MVP:** Create a basic TradingView Lightweight Chart component that fetches initial history via REST and subscribes to the WebSocket for live updates.
+-   [ ] **Task 1.1 (Frontend): Scaffold PySide6 Project:** Create the main window and application skeleton.
+-   [ ] **Task 1.2 (Frontend): Port Chart Widget:** Adapt the existing chart widget to PySide6 and connect it directly to the `Data` service.
+-   [ ] **Task 1.3 (Backend): Start Services:** Ensure `Sentinel` and `AlertBot` start alongside the GUI.
 
 #### **Phase 2: Modular Widgets & Core Features**
 
-*Goal: Expand the UI with more widgets and essential features like alerts.*
+*Goal: Expand the GUI with additional widgets and alert management.*
 
--   [ ] **Task 2.1 (Backend): Build Alert Management API:** Implement REST endpoints for creating, listing, and deleting alerts (`POST`, `GET`, `DELETE` at `/api/v1/alerts`).
--   [ ] **Task 2.2 (Backend): Build Real-Time Trade/Order Book API:** Define schemas and implement WebSocket endpoints for streaming trades and order book data. Consider binary encoding (MsgPack) for performance.
--   [ ] **Task 2.3 (Frontend): Implement Docking Layout:** Integrate the chosen docking/tiling layout manager (e.g., Golden Layout).
--   [ ] **Task 2.4 (Frontend): Build Order Book & Trade Tape Widgets:** Create the components for displaying real-time order book depth and time & sales, connecting them to the new WebSocket streams.
--   [ ] **Task 2.5 (Frontend): Build Alert Management UI:** Create a UI for users to manage their alerts by interacting with the alert API endpoints.
+-   [ ] **Task 2.1 (Frontend): Implement Docking Layout:** Use Qt docking widgets or a suitable library for a flexible layout.
+-   [ ] **Task 2.2 (Frontend): Port Order Book & Trade Tape Widgets:** Adapt these widgets to PySide6 and wire them to the live data streams.
+-   [ ] **Task 2.3 (Frontend): Build Alert Management Dialog:** Allow users to create and manage alerts using the in-process `AlertBot` service.
 
 #### **Phase 3: AI Integration & Deployment**
 
 *Goal: Integrate the AI analysis capabilities and package the application for deployment.*
 
--   [ ] **Task 3.1 (Backend): Implement AI Analysis Endpoint:** Flesh out the `POST /api/v1/explain_price_action` endpoint with the real `scanner` tool logic.
--   [ ] **Task 3.2 (Frontend): Integrate AI Features:** Create a UI element that allows a user to request a price action explanation, call the AI endpoint, and display the results.
--   [ ] **Task 3.3 (DevOps): Document & Containerize:** Create a `Dockerfile` for the server and a `docker-compose.yml` to orchestrate running the FastAPI server and InfluxDB together.
+-   [ ] **Task 3.1 (Frontend): Integrate AI Features:** Add a dialog that invokes the `scanner` tools to generate price action explanations.
+-   [ ] **Task 3.2 (DevOps): Package Application:** Use PyInstaller (or similar) to build cross-platform executables and document the build process.
 
 ---
 
-### ☁️ **Server & Hosting Requirements**
+### ☁️ **System Requirements**
 
 -   **CPU & Memory:**
-    -   **Baseline:** For `Sentinel` (monitoring one asset, BTC/USD) and the `AlertBot` with a handful of rules, a server with **1-2 vCPUs** and **2-4 GB of RAM** should be sufficient.
+    -   **Baseline:** Running `Sentinel` (monitoring one asset, BTC/USD) and the `AlertBot` alongside the GUI requires **1-2 vCPUs** and **2-4 GB of RAM**.
     -   **AI Usage:** The `scanner` and LLM tools are the most resource-intensive components. If you plan to run frequent, complex analyses, especially with local models, you will need to scale up. A machine with **4+ vCPUs** and **8-16+ GB of RAM** would be a safer starting point. GPU access would be necessary for running larger local models efficiently.
 
 -   **Free Tier Viability:**
@@ -126,7 +94,7 @@ This migration is broken down into integrated phases.
     -   **Providers:**
         -   **Oracle Cloud:** Their "Always Free" tier is generous, often providing up to 2-4 ARM vCPUs and 24 GB of RAM, which is more than enough to get started.
         -   **AWS (EC2 t2.micro/t3.micro), Google Cloud (e2-micro):** These free tiers typically offer 1-2 vCPUs and 1-2 GB of RAM. This will be **tight**. It can likely run the baseline server, but you may experience slowdowns, especially if memory usage for data streams spikes. Running AI analysis on these tiers will be very slow or impossible.
-    -   **Recommendation:** Start with Oracle Cloud's free tier if possible. Otherwise, use the AWS/GCP free tiers for basic testing of the server foundation (Phase 1), but plan to move to a paid, more powerful instance (e.g., ~$10-30/month) for Phase 3 and production use.
+    -   **Recommendation:** Cloud VMs can be used, but a modest local machine is also sufficient for development. Scale up if heavy AI usage is planned.
 
 -   **Storage:**
     -   InfluxDB storage for `Sentinel` (trades and order book data for one asset) is manageable. A few GB per month is a reasonable estimate, but this will grow over time. Ensure your host has at least **25-50 GB of block storage** available.
