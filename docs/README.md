@@ -7,6 +7,7 @@ Welcome to the TradeSuite documentation hub. This directory provides guidance fo
 - [User Guide](user_guide/getting_started.md)
 - [Developer Guide](developer_guide/architecture.md)
 - [Design Documents](design_documents/)
+- [Autonomous Agent Playground](design_documents/active_proposals/autonomous_agent_playground.md)
 - [Code Reviews](code_reviews/)
 - [Changelogs](changelogs/main_changelog.md)
 
