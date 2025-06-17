@@ -22,6 +22,7 @@ For a detailed overview of the new architecture, technology stack, and implement
 ## Documentation
 
 Full documentation lives in the [docs](docs/README.md) directory. The legacy application can be installed by following the original [Getting Started](docs/user_guide/getting_started.md) guide. Documentation for v2 will be updated as development progresses.
+See [Autonomous Agent Playground](docs/design_documents/active_proposals/autonomous_agent_playground.md) for the new AutoGen framework blueprint.
 
 ## Contributing
 
