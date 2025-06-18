@@ -76,6 +76,114 @@ class TestSchemaBuilders(unittest.TestCase):
         lp_lines = schema.build_book_lp("test", "SYM", [(1,1)], [], 123)
         self.assertEqual(len(lp_lines), 0)
 
+    def test_build_book_lp_wide_spread(self):
+        """Tests that binning still produces the correct number of bins with a wide spread."""
+        exchange = "testex"
+        symbol = "ETH/USD"
+        # Very wide spread
+        bids = [(2500.0, 1.0)] 
+        asks = [(3500.0, 1.0)]
+        timestamp_ns = 1678886501000000000
+        # mid_price = 3000
+
+        lp_lines = schema.build_book_lp(exchange, symbol, bids, asks, timestamp_ns)
+
+        # Even with a wide spread, we expect a full set of bins to be generated
+        expected_line_count = config.ORDER_BOOK_MAX_BINS_PER_SIDE * 2 + 1
+        self.assertEqual(len(lp_lines), expected_line_count)
+
+        # We can also check that the quantities landed in the outermost bins
+        found_outer_bid = False
+        found_outer_ask = False
+        outermost_bin_idx = config.ORDER_BOOK_MAX_BINS_PER_SIDE
+
+        for lp in lp_lines:
+            if f"side=bid,bps_offset_idx=-{outermost_bin_idx}" in lp:
+                self.assertIn("total_qty=1.0", lp)
+                found_outer_bid = True
+            if f"side=ask,bps_offset_idx={outermost_bin_idx}" in lp:
+                self.assertIn("total_qty=1.0", lp)
+                found_outer_ask = True
+        
+        self.assertTrue(found_outer_bid, "Wide spread bid did not land in the outermost bin.")
+        self.assertTrue(found_outer_ask, "Wide spread ask did not land in the outermost bin.")
+
+    def test_build_book_lp_clamping(self):
+        """Tests that orders far from mid-price are clamped into the outermost bins."""
+        exchange = "testex"
+        symbol = "ETH/USD"
+        bids = [(2998.0, 1.0), (1000.0, 5.0)] # The 1000.0 bid should be clamped
+        asks = [(3002.0, 1.0), (5000.0, 5.0)] # The 5000.0 ask should be clamped
+        timestamp_ns = 1678886502000000000
+        # mid_price = 3000
+        outermost_bin_idx = config.ORDER_BOOK_MAX_BINS_PER_SIDE
+
+        lp_lines = schema.build_book_lp(exchange, symbol, bids, asks, timestamp_ns)
+
+        found_clamped_bid = False
+        found_clamped_ask = False
+
+        for lp in lp_lines:
+            # The regular bid at 2998 should be in bin -1.
+            # The clamped bid at 1000 should be added to the outermost bin.
+            if f"side=bid,bps_offset_idx=-{outermost_bin_idx}" in lp:
+                self.assertIn("total_qty=5.0", lp) # Only the clamped order is in this bin
+                found_clamped_bid = True
+            
+            # The regular ask at 3002 should be in bin 1.
+            # The clamped ask at 5000 should be added to the outermost bin.
+            if f"side=ask,bps_offset_idx={outermost_bin_idx}" in lp:
+                self.assertIn("total_qty=5.0", lp) # Only the clamped order is in this bin
+                found_clamped_ask = True
+        
+        self.assertTrue(found_clamped_bid, "Far-out bid was not clamped correctly.")
+        self.assertTrue(found_clamped_ask, "Far-out ask was not clamped correctly.")
+
+    def test_build_book_lp_multiple_orders_in_one_bin(self):
+        """Tests that quantities are correctly summed when multiple orders fall into one bin."""
+        exchange = "testex"
+        symbol = "ETH/USD"
+        # These three bids should all fall into different bins based on rounding
+        bids = [(2998.0, 1.0), (2997.5, 2.5), (2997.0, 1.5)] 
+        # These two asks should fall into the same bin (1)
+        asks = [(3002.0, 0.3), (3002.5, 0.7)]
+        timestamp_ns = 1678886503000000000
+        # mid_price = 3000
+
+        lp_lines = schema.build_book_lp(exchange, symbol, bids, asks, timestamp_ns)
+
+        found_bin_minus_1 = False
+        found_bin_minus_2 = False
+        found_summed_ask_bin = False
+
+        for lp in lp_lines:
+            # Calculation for 2998.0: round((2998-3000)/3000 * 10000 / 5) = round(-1.33) = -1
+            if "side=bid,bps_offset_idx=-1" in lp:
+                self.assertIn("total_qty=1.00", lp)
+                found_bin_minus_1 = True
+            
+            # Calculation for 2997.5: round((2997.5-3000)/3000 * 10000 / 5) = round(-1.66) = -2
+            # Calculation for 2997.0: round((2997.0-3000)/3000 * 10000 / 5) = round(-2.0) = -2
+            # These two should be summed. 2.5 + 1.5 = 4.0
+            if "side=bid,bps_offset_idx=-2" in lp:
+                self.assertIn("total_qty=4.00", lp)
+                found_bin_minus_2 = True
+            
+            # Asks fall in different bins due to rounding
+            # Calculation for 3002.0: round((3002.0-3000)/3000*10000/5) = round(1.33) = 1
+            # Calculation for 3002.5: round((3002.5-3000)/3000*10000/5) = round(1.66) = 2
+            if "side=ask,bps_offset_idx=1" in lp:
+                self.assertIn("total_qty=0.30", lp)
+                found_summed_ask_bin = True # Reuse this flag, rename if we add the other ask check
+            
+            # We can optionally add a check for the other ask bin as well
+            # if "side=ask,bps_offset_idx=2" in lp:
+            #     self.assertIn("total_qty=0.70", lp)
+
+        self.assertTrue(found_bin_minus_1, "Bin for -1 bps offset was not found or incorrect.")
+        self.assertTrue(found_bin_minus_2, "Bin for -2 bps offset was not found or incorrect.")
+        self.assertTrue(found_summed_ask_bin, "Ask quantities were not handled correctly.")
+
     def test_build_raw_book_lp_example(self):
         exchange = "rawex"
         symbol = "ADA/USDT"

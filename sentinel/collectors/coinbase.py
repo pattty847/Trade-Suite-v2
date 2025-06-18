@@ -42,6 +42,7 @@ async def stream_data_to_queues(
     dropped_trades_count = 0
     dropped_binned_books_count = 0
     dropped_raw_books_count = 0
+    last_order_book_nonce = None # State for gap audit
 
     if is_raw_enabled and raw_order_book_queue is None:
         logger.warning(f"[{exchange_name.upper()}] Raw order book is enabled, but no raw_order_book_queue provided. Raw data will not be processed.")
@@ -91,6 +92,7 @@ async def stream_data_to_queues(
             logger.error(f"[{exchange_name.upper()}] Error processing trade data for sink: {e} - Data: {trade_event_dict}", exc_info=True)
 
     async def order_book_sink(order_book_event_dict):
+        nonlocal last_order_book_nonce
         try:
             exchange = order_book_event_dict['exchange']
             book = order_book_event_dict['orderbook']
@@ -103,6 +105,27 @@ async def stream_data_to_queues(
             sequence = book.get('nonce') # Common for CCXT snapshots
             if sequence is None and 'info' in book and isinstance(book['info'], dict):
                 sequence = book['info'].get('sequence') # Try info.sequence (e.g. Coinbase Pro REST snapshot)
+            
+            # --- GAP AUDIT LOGIC ---
+            if sequence is not None:
+                if last_order_book_nonce is not None:
+                    if sequence <= last_order_book_nonce:
+                        logger.critical(
+                            f"[{exchange_name.upper()}-{book['symbol']}] Stale or out-of-order book received! "
+                            f"Last Nonce: {last_order_book_nonce}, Current Nonce: {sequence}. Resync may be needed."
+                        )
+                        # In a more advanced system, we might trigger a full resync here.
+                        # For now, we log critically and continue, assuming CCXT will handle it.
+                    elif sequence > last_order_book_nonce + 1:
+                        missed_count = sequence - last_order_book_nonce - 1
+                        logger.warning(
+                            f"[{exchange_name.upper()}-{book['symbol']}] GAP DETECTED in order book stream. "
+                            f"Missed {missed_count} update(s). "
+                            f"Last Nonce: {last_order_book_nonce}, Current Nonce: {sequence}."
+                        )
+                last_order_book_nonce = sequence
+            else:
+                logger.debug(f"[{exchange_name.upper()}-{book['symbol']}] No nonce found in order book data. Cannot perform gap audit.")
             
             # Binned order book processing
             binned_lp_lines = schema.build_book_lp(

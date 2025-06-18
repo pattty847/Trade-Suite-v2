@@ -4,6 +4,7 @@ import logging
 import os
 import signal # For graceful shutdown
 import logging.handlers # For RotatingFileHandler
+from typing import Optional
 
 from trade_suite.data.data_source import Data as TradeSuiteData # Alias to avoid confusion
 from sentinel.collectors.coinbase import stream_data_to_queues
@@ -39,7 +40,7 @@ root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__) # Supervisor specific logger
 
 class Supervisor:
-    def __init__(self, is_raw_enabled: bool = False): # Accept is_raw_enabled
+    def __init__(self, is_raw_enabled: bool = False, data_source: Optional[TradeSuiteData] = None): # Accept data_source
         self.is_raw_enabled = is_raw_enabled
         self.trade_queue = asyncio.Queue(maxsize=10000)
         self.order_book_queue = asyncio.Queue(maxsize=10000)
@@ -67,8 +68,15 @@ class Supervisor:
         )
 
         # Initialize TradeSuiteData (DataSource)
-        # No emitter needed for sentinel's use case. Influx client is managed by InfluxWriter.
-        self.data_source = TradeSuiteData(influx=None, emitter=None, exchanges=[config.TARGET_EXCHANGE], force_public=True)
+        if data_source:
+            self.data_source = data_source
+            logger.info("Supervisor is using a provided DataSource instance.")
+        else:
+            logger.info("No DataSource provided. Supervisor is creating its own instance for standalone operation.")
+            # No emitter needed for sentinel's use case. Influx client is managed by InfluxWriter.
+            self.data_source = TradeSuiteData(influx=None, emitter=None, exchanges=[config.TARGET_EXCHANGE], force_public=True)
+        
+        self._is_standalone = data_source is None
 
     async def _run_with_restart(self, coro_func, *args, name="UnnamedTask"):
         """Runs a coroutine and restarts it with exponential backoff on failure."""
@@ -144,7 +152,10 @@ class Supervisor:
             logger.critical("InfluxWriter not properly initialized. Supervisor cannot start data flow.")
             return
 
-        await self.data_source.load_exchanges() # Important: Load exchange details
+        # If running standalone, we need to load the exchanges ourselves.
+        if self._is_standalone:
+            await self.data_source.load_exchanges() 
+            
         if config.TARGET_EXCHANGE not in self.data_source.exchange_list:
             logger.critical(f"Target exchange '{config.TARGET_EXCHANGE}' not loaded in DataSource. Aborting.")
             return
