@@ -20,7 +20,7 @@ For a detailed overview of the new architecture, technology stack, and implement
 - Optional Sentinel alert bot for automated monitoring
 
 ## Sentinel Monitoring Through Grafana
-![image](https://github.com/user-attachments/assets/47341fd4-f6e9-4344-9b27-88aa574ab001)
+![image](https://github.com/user-attachments/assets/fc11ca26-ec19-43ca-8739-b9b1972db1f7)
 
 ## Documentation
 
