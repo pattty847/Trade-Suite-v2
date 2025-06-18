@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Set, Tuple, TYPE_CHECKING
 from collections import defaultdict
 
 from trade_suite.gui.stream_subscription import StreamSubscription
+from trade_suite.gui.stream_manager import StreamManager
 
 from trade_suite.data.candle_factory import CandleFactory
 from trade_suite.data.sec_api import SECDataFetcher
@@ -60,7 +61,9 @@ class TaskManager:
             logging.warning(
                 "Data object lacks set_ui_loop – direct emit optimisation disabled."
             )
-
+        # Initialize StreamManager now that loop is ready
+        self.stream_manager = StreamManager(self.data)
+        self.start_task("stream_manager", self.stream_manager.run())
     def run_loop(self):
         """
         The run_loop function is the main event loop for the task manager.
@@ -253,42 +256,16 @@ class TaskManager:
                         f"Stream ref count for {key} incremented to {sub.ref_count}"
                     )
                     if sub.ref_count == 1:
-                        # Start the stream task if it's the first subscriber
-                        if key not in self.tasks or self.tasks[key].done():
-                            logging.info(f"Starting new stream task for key: {key}")
-                            coro = None
-                            
-                            stop_event = sub.stop_event
-                            
-                            # Determine which watch function to call based on the key
-                            if key.startswith("trades_"):
-                                _, exchange, symbol = key.split("_", 2)
-                                coro = self._get_watch_trades_coro(
-                                    exchange, symbol, stop_event
-                                )  # Pass event
-                            elif key.startswith("orderbook_"):
-                                _, exchange, symbol = key.split("_", 2)
-                                coro = self._get_watch_orderbook_coro(
-                                    exchange, symbol, stop_event
-                                )  # Pass event
-                            elif key.startswith("ticker_"):  # Added ticker stream
-                                _, exchange, symbol = key.split("_", 2)
-                                # Assuming Data class has watch_ticker(exchange_id, symbol, stop_event)
-                                coro = self.data.watch_ticker(
-                                    exchange, symbol, stop_event
-                                )
-                            # Add other stream types here if needed
-
-                            if coro:
-                                self.start_task(key, coro)
-                            else:
-                                logging.warning(
-                                    f"Could not determine coroutine for stream key: {key}"
-                                )
-                                # Clean up subscription if task isn't started
-                                self.stream_subscriptions.pop(key, None)
-                        else:
-                            logging.info(f"Stream task {key} is already running.")
+                        if key.startswith("trades_"):
+                            _, exchange, symbol = key.split("_", 2)
+                            self.run_task_until_complete(
+                                self.stream_manager.subscribe_to_asset(exchange, symbol, "trades")
+                            )
+                        elif key.startswith("orderbook_"):
+                            _, exchange, symbol = key.split("_", 2)
+                            self.run_task_until_complete(
+                                self.stream_manager.subscribe_to_asset(exchange, symbol, "orderbook")
+                            )
 
             # After potentially creating a new CandleFactory, fetch initial candles
             if needs_initial_candles and initial_candle_details:
@@ -348,20 +325,16 @@ class TaskManager:
                             f"Stream ref count for {key} decremented to {sub.ref_count}"
                         )
                         if sub.ref_count == 0:
-                            logging.info(
-                                f"Stopping stream task for key {key} as ref count is zero."
-                            )
-                            # Signal the task to stop
-                            self.loop.call_soon_threadsafe(sub.stop_event.set)
-
-                            # Additionally, cancel the task if it's still running
-                            if key in self.tasks and not self.tasks[key].done():
-                                logging.debug(
-                                    f"Cancelling task for stream {key} as a fallback."
+                            if key.startswith("trades_"):
+                                _, exchange, symbol = key.split("_", 2)
+                                self.run_task_until_complete(
+                                    self.stream_manager.unsubscribe_from_asset(exchange, symbol, "trades")
                                 )
-                                self.stop_task(key)
-
-                            # Remove subscription object
+                            elif key.startswith("orderbook_"):
+                                _, exchange, symbol = key.split("_", 2)
+                                self.run_task_until_complete(
+                                    self.stream_manager.unsubscribe_from_asset(exchange, symbol, "orderbook")
+                                )
                             self.stream_subscriptions.pop(key, None)
                     else:
                         logging.warning(
