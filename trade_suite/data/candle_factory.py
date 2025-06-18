@@ -3,7 +3,6 @@ import time
 import pandas as pd
 import asyncio
 import logging
-from trade_suite.data.data_source import Data
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 import numpy as np
@@ -11,8 +10,8 @@ import numpy as np
 from trade_suite.gui.signals import SignalEmitter, Signals
 from trade_suite.gui.utils import timeframe_to_seconds
 
-# Guard the TaskManager import for type hinting only
 if TYPE_CHECKING:
+    from trade_suite.data.data_source import Data
     from trade_suite.gui.task_manager import TaskManager
 
 
@@ -20,21 +19,22 @@ class CandleFactory:
     def __init__(
         self,
         exchange: str,
-        emitter: SignalEmitter,
-        task_manager: 'TaskManager', # Type hint using TaskManager
-        data: Data,
-        symbol: str, # Added symbol parameter
+        symbol: str,
         timeframe_str: str,
-    ) -> None:
+        emitter: "SignalEmitter",
+        task_manager: "TaskManager",
+        data: "Data",
+        initial_candles: Optional[pd.DataFrame] = None,
+    ):
         self.exchange = exchange
+        self.symbol = symbol
+        self.timeframe_str = timeframe_str
         self.emitter = emitter
         self.task_manager = task_manager
         self.data = data
-        self.timeframe_str = timeframe_str
-        self.timeframe_seconds = timeframe_to_seconds(timeframe_str)
-        
-        # Set symbol directly from argument
-        self.symbol = symbol
+
+        # Set timeframe in minutes and seconds for calculations
+        self.timeframe_in_seconds = self.data.exchange_list[self.exchange].parse_timeframe(timeframe_str)
         
         # Get market info for price precision, if available
         price_precision = 0.00001  # Default value
@@ -166,11 +166,11 @@ class CandleFactory:
         volume = trade_data["amount"]
 
         # Adjust timestamp to the candle boundary
-        adjusted_timestamp = timestamp - (timestamp % self.timeframe_seconds)
+        adjusted_timestamp = timestamp - (timestamp % self.timeframe_in_seconds)
 
         # --- Debug Logging Start ---
         log_prefix = f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) _process_trade:"
-        logging.debug(f"{log_prefix} Trade(ts={timestamp}, adj_ts={adjusted_timestamp}), LastCandle(ts={self.last_candle_timestamp}), TF(s)={self.timeframe_seconds}, OHLCV_Empty={self.ohlcv.empty}")
+        logging.debug(f"{log_prefix} Trade(ts={timestamp}, adj_ts={adjusted_timestamp}), LastCandle(ts={self.last_candle_timestamp}), TF(s)={self.timeframe_in_seconds}, OHLCV_Empty={self.ohlcv.empty}")
         # --- Debug Logging End ---
 
         # Initialize last candle timestamp if not set
@@ -183,12 +183,12 @@ class CandleFactory:
 
         # Check if this trade belongs to a new candle
         # Use >= for safety, although > should be sufficient if timestamps are precise
-        if adjusted_timestamp >= self.last_candle_timestamp + self.timeframe_seconds:
+        if adjusted_timestamp >= self.last_candle_timestamp + self.timeframe_in_seconds:
             logging.debug(f"{log_prefix} Branch 1: New Candle") # Debug
             # Start a new candle
-            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) starting new candle at {datetime.fromtimestamp(self.last_candle_timestamp + self.timeframe_seconds)}")
+            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) starting new candle at {datetime.fromtimestamp(self.last_candle_timestamp + self.timeframe_in_seconds)}")
             new_candle = {
-                "dates": self.last_candle_timestamp + self.timeframe_seconds,
+                "dates": self.last_candle_timestamp + self.timeframe_in_seconds,
                 "opens": price,
                 "highs": price,
                 "lows": price,
@@ -198,7 +198,7 @@ class CandleFactory:
             # Add new candle to the dataframe
             new_candle_df = pd.DataFrame([new_candle])
             self.ohlcv = pd.concat([self.ohlcv, new_candle_df], ignore_index=True)
-            self.last_candle_timestamp += self.timeframe_seconds
+            self.last_candle_timestamp += self.timeframe_in_seconds
             return True # Candle data changed
 
         elif not self.ohlcv.empty and adjusted_timestamp == self.last_candle_timestamp:
@@ -248,7 +248,7 @@ class CandleFactory:
         resampled_data = None
 
         # Can only resample to larger timeframes if data exists
-        if new_timeframe_seconds <= self.timeframe_seconds or self.ohlcv.empty:
+        if new_timeframe_seconds <= self.timeframe_in_seconds or self.ohlcv.empty:
             logging.warning(f"CandleFactory ({self.exchange}/{self.symbol}) cannot resample from {self.timeframe_str} to {new_timeframe} (or no data).")
             # Still update internal timeframe if needed, but report failure
             # self.timeframe_str = new_timeframe # Decided against this - let ChartWidget manage this
@@ -289,7 +289,7 @@ class CandleFactory:
                         # Update internal state ONLY if resampling succeeded
                         self.ohlcv = resampled_data.copy() # Store the resampled data
                         self.timeframe_str = new_timeframe
-                        self.timeframe_seconds = new_timeframe_seconds
+                        self.timeframe_in_seconds = new_timeframe_seconds
                         self.last_candle_timestamp = self.ohlcv["dates"].iloc[-1] # Update last timestamp
                         success = True
                         logging.info(f"CandleFactory ({self.exchange}/{self.symbol}) successfully resampled {len(self.ohlcv)} candles to {new_timeframe}")

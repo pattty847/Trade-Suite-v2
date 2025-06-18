@@ -1,0 +1,312 @@
+2025-06-18 00:23:35,424 - root - INFO - InfluxDB client initialized and write_api configured.
+2025-06-18 00:23:39,477 - root - WARNING - InfluxDB ping failed. Check connection and credentials.
+2025-06-18 00:23:39,477 - sentinel.supervisor - INFO - No DataSource provided. Supervisor is creating its own instance for standalone operation.
+2025-06-18 00:23:39,479 - sentinel.run - WARNING - Signal handler for SIGINT could not be set (likely on Windows).
+2025-06-18 00:23:39,479 - sentinel.run - WARNING - Signal handler for SIGTERM could not be set (likely on Windows).
+2025-06-18 00:23:39,480 - sentinel.run - INFO - Executing DRAGON dry run... I mean DRY RUN.
+2025-06-18 00:23:39,480 - sentinel.supervisor - INFO - Supervisor starting...
+2025-06-18 00:23:39,480 - root - INFO - Starting to load specified exchanges: ['coinbase']
+2025-06-18 00:23:39,481 - root - INFO - Attempting to load exchange: coinbase...
+2025-06-18 00:23:39,481 - root - INFO - force_public is True for coinbase, initializing without authentication credentials.
+2025-06-18 00:23:41,210 - root - INFO - Coinbase has been initialized successfully.
+2025-06-18 00:23:41,210 - root - INFO - Exchange loading process complete.
+2025-06-18 00:23:41,211 - root - INFO - Successfully loaded exchanges: ['coinbase']
+2025-06-18 00:23:41,211 - root - INFO - All specified exchanges attempted for loading reported no persistent failures.
+2025-06-18 00:23:41,212 - sentinel.supervisor - INFO - All tasks created. Supervisor is running.
+2025-06-18 00:23:41,212 - sentinel.supervisor - INFO - Running for a specified duration: 300 seconds.
+2025-06-18 00:23:41,213 - sentinel.supervisor - INFO - Starting task: DataCollector
+2025-06-18 00:23:41,214 - sentinel.collectors.coinbase - INFO - [COINBASE] Starting data collection for BTC/USD. Raw enabled: False
+2025-06-18 00:23:41,214 - sentinel.collectors.coinbase - INFO - [COINBASE] Trade and order book watchers for BTC/USD started.
+2025-06-18 00:23:41,214 - sentinel.supervisor - INFO - Starting task: TradeInfluxWriter
+2025-06-18 00:23:41,215 - root - INFO - Starting InfluxDB writer for bucket: trades
+2025-06-18 00:23:41,215 - sentinel.supervisor - INFO - Starting task: OrderBookInfluxWriter
+2025-06-18 00:23:41,215 - root - INFO - Starting InfluxDB writer for bucket: order_book
+2025-06-18 00:23:41,216 - sentinel.supervisor - INFO - Healthz monitor started.
+2025-06-18 00:23:41,217 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:23:41,217 - root - INFO - Starting trade stream for BTC/USD on coinbase
+2025-06-18 00:23:41,217 - root - INFO - Starting orderbook stream for BTC/USD on coinbase with 100ms cadence.
+2025-06-18 00:23:45,429 - root - ERROR - Unexpected error writing to bucket 'trades' (attempt 1/3): <urllib3.connection.HTTPConnection object at 0x00000186079D9490>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it
+2025-06-18 00:23:51,388 - root - ERROR - Unexpected error writing to bucket 'order_book' (attempt 1/3): <urllib3.connection.HTTPConnection object at 0x00000186079C0F90>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it
+2025-06-18 00:23:51,460 - sentinel.run - INFO - Run.py main function cleanup starting...
+2025-06-18 00:23:51,461 - sentinel.run - INFO - Ensuring supervisor is stopped in finally block.
+2025-06-18 00:23:51,461 - sentinel.supervisor - INFO - Supervisor stopping... Setting stop event.
+2025-06-18 00:23:51,461 - sentinel.supervisor - INFO - Waiting for 4 tasks to finish...
+2025-06-18 00:23:51,463 - root - INFO - Trade stream for BTC/USD on coinbase stopped.
+2025-06-18 00:23:51,464 - root - INFO - Orderbook stream for BTC/USD on coinbase stopped.
+2025-06-18 00:23:55,540 - root - ERROR - Unexpected error writing to bucket 'trades' (attempt 2/3): <urllib3.connection.HTTPConnection object at 0x00000186079B5ED0>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it
+2025-06-18 00:23:55,573 - sentinel.collectors.coinbase - INFO - [COINBASE] Data collection for BTC/USD stopped.
+2025-06-18 00:23:55,573 - sentinel.supervisor - INFO - Task DataCollector stopped gracefully via stop_event.
+2025-06-18 00:23:55,574 - sentinel.supervisor - INFO - Task DataCollector has finished its lifecycle.
+2025-06-18 00:23:59,660 - root - ERROR - Unexpected error writing to bucket 'order_book' (attempt 2/3): <urllib3.connection.HTTPConnection object at 0x000001860716E750>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it
+2025-06-18 00:24:03,825 - root - ERROR - Unexpected error writing to bucket 'trades' (attempt 3/3): <urllib3.connection.HTTPConnection object at 0x00000186079C2390>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it
+2025-06-18 00:24:03,826 - root - ERROR - Failed to write to bucket 'trades' after 3 attempts due to unexpected error.
+2025-06-18 00:24:03,827 - root - INFO - InfluxDB writer for bucket 'trades' stopped.
+2025-06-18 00:24:03,827 - sentinel.supervisor - INFO - Task TradeInfluxWriter stopped gracefully via stop_event.
+2025-06-18 00:24:03,828 - sentinel.supervisor - INFO - Task TradeInfluxWriter has finished its lifecycle.
+2025-06-18 00:24:03,832 - sentinel.supervisor - WARNING - Task Task-24 did not finish in time. Cancelling...
+2025-06-18 00:24:03,832 - sentinel.supervisor - WARNING - Task Task-23 did not finish in time. Cancelling...
+2025-06-18 00:24:03,833 - root - INFO - Writer for bucket 'order_book' task cancelled externally.
+2025-06-18 00:24:03,834 - root - INFO - Flushing remaining 11 items from 'order_book' due to cancellation.
+2025-06-18 00:24:05,867 - root - INFO - InfluxDB writer for bucket 'order_book' stopped.
+2025-06-18 00:24:05,869 - sentinel.supervisor - INFO - Healthz monitor cancelled.
+2025-06-18 00:24:05,869 - sentinel.supervisor - INFO - Healthz monitor stopped.
+2025-06-18 00:24:05,920 - sentinel.run - INFO - Application terminated by KeyboardInterrupt at the top level.
+2025-06-18 00:24:05,969 - ccxt.base.exchange - WARNING - coinbase requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2025-06-18 00:24:05,970 - asyncio - ERROR - Unclosed connector
+connections: ['[(<aiohttp.client_proto.ResponseHandler object at 0x000001860704E2E0>, 544007.687)]']
+connector: <aiohttp.connector.TCPConnector object at 0x00000186030B7950>
+2025-06-18 00:24:05,971 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='Task-23' coro=<Supervisor._run_with_restart() done, defined at C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\sentinel\supervisor.py:81> exception=KeyboardInterrupt()>
+Traceback (most recent call last):
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connection.py", line 198, in _new_conn
+    sock = connection.create_connection(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\util\connection.py", line 85, in create_connection
+    raise err
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\util\connection.py", line 73, in create_connection
+    sock.connect(sa)
+ConnectionRefusedError: [WinError 10061] No connection could be made because the target machine actively refused it
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\sentinel\writers\influx_writer.py", line 78, in write_batch
+    self.write_api.write(bucket=bucket, org=self.influx_org, record=data_points)
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\client\write_api.py", line 381, in write
+    results = list(map(write_payload, payloads.items()))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\client\write_api.py", line 379, in write_payload
+    return self._post_write(_async_req, bucket, org, final_string, payload[0])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\client\write_api.py", line 516, in _post_write
+    return self._write_service.post_write(org=org, bucket=bucket, body=body, precision=precision,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\service\write_service.py", line 60, in post_write
+    (data) = self.post_write_with_http_info(org, bucket, body, **kwargs)  # noqa: E501
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\service\write_service.py", line 90, in post_write_with_http_info
+    return self.api_client.call_api(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\api_client.py", line 343, in call_api
+    return self.__call_api(resource_path, method,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\api_client.py", line 173, in __call_api
+    response_data = self.request(
+                    ^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\api_client.py", line 388, in request
+    return self.rest_client.POST(url,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\rest.py", line 311, in POST
+    return self.request("POST", url,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\rest.py", line 220, in request
+    r = self.pool_manager.request(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\_request_methods.py", line 143, in request
+    return self.request_encode_body(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\_request_methods.py", line 278, in request_encode_body
+    return self.urlopen(method, url, **extra_kw)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\poolmanager.py", line 443, in urlopen
+    response = conn.urlopen(method, u.request_uri, **kw)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connectionpool.py", line 841, in urlopen
+    retries = retries.increment(
+              ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\util\retry.py", line 449, in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\util\util.py", line 39, in reraise
+    raise value
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connectionpool.py", line 493, in _make_request
+    conn.request(
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connection.py", line 445, in request
+    self.endheaders()
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 1281, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 1041, in _send_output
+    self.send(msg)
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 979, in send
+    self.connect()
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connection.py", line 276, in connect
+    self.sock = self._new_conn()
+                ^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connection.py", line 213, in _new_conn
+    raise NewConnectionError(
+urllib3.exceptions.NewConnectionError: <urllib3.connection.HTTPConnection object at 0x000001860716E750>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\sentinel\writers\influx_writer.py", line 159, in run_queue_consumer
+    await self.write_batch(bucket_name, list(local_batch)) # Pass a copy
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\sentinel\writers\influx_writer.py", line 97, in write_batch
+    await asyncio.sleep(retry_delay * (2 ** attempt))
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\asyncio\tasks.py", line 649, in sleep
+    return await future
+           ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\util\connection.py", line 73, in create_connection
+    sock.connect(sa)
+ConnectionRefusedError: [WinError 10061] No connection could be made because the target machine actively refused it
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\sentinel\run.py", line 91, in <module>
+    asyncio.run(main(args))
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 640, in run_until_complete
+    self.run_forever()
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 607, in run_forever
+    self._run_once()
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1922, in _run_once
+    handle._run()
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py", line 80, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\sentinel\supervisor.py", line 88, in _run_with_restart
+    await coro_func(*args)
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\sentinel\writers\influx_writer.py", line 174, in run_queue_consumer
+    await self.write_batch(bucket_name, list(local_batch))
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\sentinel\writers\influx_writer.py", line 78, in write_batch
+    self.write_api.write(bucket=bucket, org=self.influx_org, record=data_points)
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\client\write_api.py", line 381, in write
+    results = list(map(write_payload, payloads.items()))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\client\write_api.py", line 379, in write_payload
+    return self._post_write(_async_req, bucket, org, final_string, payload[0])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\client\write_api.py", line 516, in _post_write
+    return self._write_service.post_write(org=org, bucket=bucket, body=body, precision=precision,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\service\write_service.py", line 60, in post_write
+    (data) = self.post_write_with_http_info(org, bucket, body, **kwargs)  # noqa: E501
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\service\write_service.py", line 90, in post_write_with_http_info
+    return self.api_client.call_api(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\api_client.py", line 343, in call_api
+    return self.__call_api(resource_path, method,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\api_client.py", line 173, in __call_api
+    response_data = self.request(
+                    ^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\api_client.py", line 388, in request
+    return self.rest_client.POST(url,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\rest.py", line 311, in POST
+    return self.request("POST", url,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\influxdb_client\_sync\rest.py", line 220, in request
+    r = self.pool_manager.request(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\_request_methods.py", line 143, in request
+    return self.request_encode_body(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\_request_methods.py", line 278, in request_encode_body
+    return self.urlopen(method, url, **extra_kw)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\poolmanager.py", line 443, in urlopen
+    response = conn.urlopen(method, u.request_uri, **kw)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connectionpool.py", line 493, in _make_request
+    conn.request(
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connection.py", line 445, in request
+    self.endheaders()
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 1281, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 1041, in _send_output
+    self.send(msg)
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 979, in send
+    self.connect()
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connection.py", line 276, in connect
+    self.sock = self._new_conn()
+                ^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\connection.py", line 198, in _new_conn
+    sock = connection.create_connection(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pepe\Documents\Programming\Python\Trade-Suite-v2\.venv\Lib\site-packages\urllib3\util\connection.py", line 81, in create_connection
+    sock.close()
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\socket.py", line 499, in close
+    def close(self):
+    
+  File "C:\Users\Pepe\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py", line 157, in _on_sigint
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+2025-06-18 00:25:40,920 - root - INFO - InfluxDB client initialized and write_api configured.
+2025-06-18 00:25:40,946 - sentinel.supervisor - INFO - No DataSource provided. Supervisor is creating its own instance for standalone operation.
+2025-06-18 00:25:40,947 - sentinel.run - WARNING - Signal handler for SIGINT could not be set (likely on Windows).
+2025-06-18 00:25:40,947 - sentinel.run - WARNING - Signal handler for SIGTERM could not be set (likely on Windows).
+2025-06-18 00:25:40,947 - sentinel.run - INFO - Executing DRAGON dry run... I mean DRY RUN.
+2025-06-18 00:25:40,947 - sentinel.supervisor - INFO - Supervisor starting...
+2025-06-18 00:25:40,948 - root - INFO - Starting to load specified exchanges: ['coinbase']
+2025-06-18 00:25:40,948 - root - INFO - Attempting to load exchange: coinbase...
+2025-06-18 00:25:40,949 - root - INFO - force_public is True for coinbase, initializing without authentication credentials.
+2025-06-18 00:25:42,534 - root - INFO - Coinbase has been initialized successfully.
+2025-06-18 00:25:42,534 - root - INFO - Exchange loading process complete.
+2025-06-18 00:25:42,535 - root - INFO - Successfully loaded exchanges: ['coinbase']
+2025-06-18 00:25:42,536 - root - INFO - All specified exchanges attempted for loading reported no persistent failures.
+2025-06-18 00:25:42,536 - sentinel.supervisor - INFO - All tasks created. Supervisor is running.
+2025-06-18 00:25:42,536 - sentinel.supervisor - INFO - Running for a specified duration: 300 seconds.
+2025-06-18 00:25:42,536 - sentinel.supervisor - INFO - Starting task: DataCollector
+2025-06-18 00:25:42,538 - sentinel.collectors.coinbase - INFO - [COINBASE] Starting data collection for BTC/USD. Raw enabled: False
+2025-06-18 00:25:42,538 - sentinel.collectors.coinbase - INFO - [COINBASE] Trade and order book watchers for BTC/USD started.
+2025-06-18 00:25:42,538 - sentinel.supervisor - INFO - Starting task: TradeInfluxWriter
+2025-06-18 00:25:42,539 - root - INFO - Starting InfluxDB writer for bucket: trades
+2025-06-18 00:25:42,539 - sentinel.supervisor - INFO - Starting task: OrderBookInfluxWriter
+2025-06-18 00:25:42,539 - root - INFO - Starting InfluxDB writer for bucket: order_book
+2025-06-18 00:25:42,540 - sentinel.supervisor - INFO - Healthz monitor started.
+2025-06-18 00:25:42,540 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:25:42,541 - root - INFO - Starting trade stream for BTC/USD on coinbase
+2025-06-18 00:25:42,541 - root - INFO - Starting orderbook stream for BTC/USD on coinbase with 100ms cadence.
+2025-06-18 00:26:12,534 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:26:42,546 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:27:12,543 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:27:42,554 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:28:12,533 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:28:42,534 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:29:12,546 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:29:42,549 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:30:12,548 - sentinel.supervisor - INFO - [Healthz] Queues - Trades: 0, BinnedBooks: 0, RawBooks: N/A
+2025-06-18 00:30:42,559 - sentinel.supervisor - INFO - Specified duration ended. Initiating shutdown.
+2025-06-18 00:30:42,559 - sentinel.supervisor - INFO - Supervisor stopping... Setting stop event.
+2025-06-18 00:30:42,560 - sentinel.supervisor - INFO - Waiting for 4 tasks to finish...
+2025-06-18 00:30:42,560 - sentinel.supervisor - INFO - Healthz monitor stopped.
+2025-06-18 00:30:42,563 - root - INFO - InfluxDB writer for bucket 'order_book' stopped.
+2025-06-18 00:30:42,563 - sentinel.supervisor - INFO - Task OrderBookInfluxWriter stopped gracefully via stop_event.
+2025-06-18 00:30:42,564 - sentinel.supervisor - INFO - Task OrderBookInfluxWriter has finished its lifecycle.
+2025-06-18 00:30:42,564 - root - INFO - InfluxDB writer for bucket 'trades' stopped.
+2025-06-18 00:30:42,565 - sentinel.supervisor - INFO - Task TradeInfluxWriter stopped gracefully via stop_event.
+2025-06-18 00:30:42,566 - sentinel.supervisor - INFO - Task TradeInfluxWriter has finished its lifecycle.
+2025-06-18 00:30:42,594 - root - INFO - Orderbook stream for BTC/USD on coinbase stopped.
+2025-06-18 00:30:42,595 - root - INFO - Trade stream for BTC/USD on coinbase stopped.
+2025-06-18 00:30:42,596 - sentinel.collectors.coinbase - INFO - [COINBASE] Data collection for BTC/USD stopped.
+2025-06-18 00:30:42,596 - sentinel.supervisor - INFO - Task DataCollector stopped gracefully via stop_event.
+2025-06-18 00:30:42,596 - sentinel.supervisor - INFO - Task DataCollector has finished its lifecycle.
+2025-06-18 00:30:42,596 - sentinel.supervisor - INFO - Closing InfluxWriter...
+2025-06-18 00:30:42,597 - root - INFO - InfluxDB write_api closed.
+2025-06-18 00:30:42,598 - root - INFO - InfluxDB client closed.
+2025-06-18 00:30:42,599 - sentinel.supervisor - INFO - Closing DataSource connections...
+2025-06-18 00:30:42,599 - root - INFO - Closing connections for 1 exchanges...
+2025-06-18 00:30:42,853 - root - INFO - coinbase closed successfully.
+2025-06-18 00:30:42,854 - root - INFO - Finished closing exchange connections.
+2025-06-18 00:30:42,854 - sentinel.supervisor - INFO - Supervisor stopped.
+2025-06-18 00:30:42,855 - sentinel.run - INFO - Run.py main function cleanup starting...
+2025-06-18 00:30:42,855 - sentinel.run - INFO - Run.py main function finished.

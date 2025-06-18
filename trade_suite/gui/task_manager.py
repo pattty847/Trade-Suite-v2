@@ -1,24 +1,25 @@
 import asyncio
 import logging
 import threading
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple, TYPE_CHECKING
 from collections import defaultdict
 
 from trade_suite.gui.stream_subscription import StreamSubscription
 
-
-from trade_suite.data.data_source import Data
+from trade_suite.data.candle_factory import CandleFactory
+from trade_suite.data.sec_api import SECDataFetcher
 from trade_suite.gui.signals import Signals
 from trade_suite.gui.utils import (
     calculate_since,
     create_timed_popup,
 )
-from trade_suite.data.candle_factory import CandleFactory
-from trade_suite.data.sec_api import SECDataFetcher
+
+if TYPE_CHECKING:
+    from trade_suite.data.data_source import Data
 
 
 class TaskManager:
-    def __init__(self, data: Data, sec_fetcher: SECDataFetcher):
+    def __init__(self, data: "Data", sec_fetcher: SECDataFetcher):
         self.data = data
         self.sec_fetcher = sec_fetcher
         self.tasks: Dict[str, asyncio.Task] = {}

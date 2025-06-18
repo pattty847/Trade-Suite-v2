@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TYPE_CHECKING
 import pandas as pd
 
 from trade_suite.analysis.market_aggregator import MarketAggregator
@@ -9,12 +9,13 @@ from trade_suite.data.influx import InfluxDB
 from trade_suite.gui.signals import SignalEmitter
 from trade_suite.gui.task_manager import TaskManager
 
-from sentinel.supervisor import Supervisor as SentinelSupervisor
-from sentinel.alert_bot.manager import AlertDataManager
-
 from .cache_store import CacheStore
 from .candle_fetcher import CandleFetcher
 from .streamer import Streamer
+
+if TYPE_CHECKING:
+    from sentinel.supervisor import Supervisor as SentinelSupervisor
+    from sentinel.alert_bot.manager import AlertDataManager
 
 
 class Data(CCXTInterface):
@@ -39,8 +40,8 @@ class Data(CCXTInterface):
         self.streamer = Streamer(emitter, self.agg, influx)
 
         # Placeholders for Sentinel components
-        self.sentinel_supervisor: Optional[SentinelSupervisor] = None
-        self.alert_manager: Optional[AlertDataManager] = None
+        self.sentinel_supervisor: Optional["SentinelSupervisor"] = None
+        self.alert_manager: Optional["AlertDataManager"] = None
 
     async def load_exchanges(self, exchanges: List[str] | None = None) -> None:
         await super().load_exchanges(exchanges)
@@ -55,6 +56,10 @@ class Data(CCXTInterface):
         """
         Initializes and starts Sentinel components (Supervisor and AlertDataManager).
         """
+        # --- Local imports to break circular dependency ---
+        from sentinel.supervisor import Supervisor as SentinelSupervisor
+        from sentinel.alert_bot.manager import AlertDataManager
+        
         logging.info("Initializing Sentinel services within TradeSuite...")
 
         # 1. Initialize AlertDataManager
