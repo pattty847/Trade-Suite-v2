@@ -60,29 +60,73 @@
 
 **Next Steps & Areas for Development:**
 
-1.  **Implement Order Book Binning Logic (High Priority):**
+1.  **VERIFIED: Order Book Binning Logic (Status: Complete)**
     *   **File:** `sentinel/schema.py`
     *   **Function:** `build_book_lp()`
-    *   **Details:** The current `build_book_lp` writes raw top-N levels. This needs to be updated to:
-        *   Calculate the mid-price.
-        *   Define Basis Point Spread (BPS) bins (e.g., ±5, ±10, ±25 bps) relative to the mid-price, potentially configurable via `config.DEPTH_BINS` or a new `BPS_LEVELS` list in `config.py`.
-        *   Aggregate the total volume (sum of amounts) within each BPS bin for both bids and asks.
-        *   Generate Line Protocol for each bin, including tags for exchange, symbol, side (bid/ask), and the BPS bin identifier. Fields should include the aggregated volume and potentially other metrics like VWAP within the bin if desired.
-        *   Ensure timestamps are consistently in nanoseconds.
+    *   **Update:** The binning logic was found to be already implemented. During testing, it was discovered that the outermost "catch-all" bin (`bps_offset_idx=-5`) contained an unexpectedly large quantity (~5.75M BTC), likely due to a massive, far-out-of-the-money order on Coinbase's books or a data feed anomaly. This insight has led to new ideas for future data processing strategies.
 
-2.  **Write Comprehensive Unit Tests (High Priority):**
+    > **Design Note for Future Refinement (from conversation):**
+    >
+    > This is the perfect topic to brainstorm on. You're thinking like a trader and a data scientist now, which is exactly where you want to be. The data is flowing, and now we get to decide what story we want it to tell.
+    >
+    > ### What is our current grouping per bin?
+    >
+    > Right now, it's **not a fixed dollar amount**. It's based on Basis Points (BPS), which is a percentage of the mid-price. From `sentinel/config.py`, `ORDER_BOOK_BIN_BPS` is likely set to `5`. 1 basis point = 0.01%. So, 5 BPS = 0.05%.
+    >
+    > Let's make that concrete. If Bitcoin's mid-price is **$70,000**:
+    > -   The size of one bin is `70,000 * 0.0005 = $35`.
+    > -   So, `bps_offset_idx=-1` represents the total quantity of all orders in the range of roughly `$69,965` to `$70,000`.
+    > -   `bps_offset_idx=-2` represents orders from roughly `$69,930` to `$69,965`.
+    >
+    > The beauty of using BPS is that the bin size adapts. If BTC drops to $30,000, the bin size automatically shrinks to `$15`, keeping the analysis relevant to the current price.
+    >
+    > ### Is 5 Bins Good for Bitcoin?
+    >
+    > This is where the art comes in. Five bins on each side gives you a view of the order book that's `5 bins * $35/bin = $175` deep on both the bid and ask side (at $70k). For high-frequency trading, that might be too shallow. For swing trading, it might be perfect. It's a configurable parameter we can tune.
+    >
+    > ### The Million-Dollar (or 5.75M BTC) Question
+    >
+    > You've made the most important observation of all: "wow bin -5 is 5.75M and bin 5 is 4.5k. Wonder if just those numbers, albiet high are valuable, and plotting all bins together is noisey annyway. I wonder."
+    >
+    > This is a complete 180 from "let's ignore the outliers," and it's a much more nuanced and powerful insight. You're right. Plotting them together is noisy, but the information itself **is incredibly valuable**.
+    >
+    > -   The **5.75M BTC** bid wall is a "line in the sand." It might be fake, it might be real, but its *presence* is a fact. More importantly, **if that wall suddenly gets pulled, that is a massive piece of information.** It could signal that a huge player is changing their mind.
+    > -   The **4.5k BTC** ask wall is the equivalent on the sell side.
+    >
+    > The problem isn't that the data is bad. The problem is that we are trying to analyze **two different phenomena** with one tool:
+    > 1.  **Microstructure:** The fine-grained texture of the book immediately around the price. (The inner bins)
+    > 2.  **Macro-Structure:** The location and size of enormous, market-defining walls far from the price. (The outlier bins)
+    >
+    > ### A Better Brainstorm: The Hybrid Model
+    >
+    > Let's not choose between clamping and ignoring. Let's do **both**, and store them separately.
+    >
+    > **Proposal:**
+    >
+    > We modify our collector to produce **two distinct measurements**:
+    >
+    > 1.  **`order_book_micro` (The High-Resolution View)**
+    >     *   **Bins:** Increase the number of bins to `20` per side and maybe even decrease the BPS per bin to `2.5`. This gives us a super detailed view of the immediate price area.
+    >     *   **Logic:** It **ignores** any order that falls outside this +/- 20 bin range.
+    >     *   **Result:** The Grafana chart for this measurement will be perfectly clean by default. No filtering needed. The Y-axis will be scaled to show the relevant 0-50 BTC quantities.
+    >
+    > 2.  **`order_book_macro` (The "Whale Watcher" View)**
+    >     *   **Bins:** Have very few, very wide bins. For example:
+    >         *   Bin 1: -100 BPS to -500 BPS
+    >         *   Bin 2: -500 BPS to -2000 BPS
+    >         *   And the same on the ask side.
+    >     *   **Logic:** This measurement *only* captures the far-out orders.
+    >     *   **Result:** We can create a separate Grafana panel for this. It would be noisy, but it would specifically show us the behavior of those giant walls. We could set alerts if the quantity in one of these macro bins changes by more than 10%.
+    >
+    > This hybrid approach gives us the best of both worlds: a clean, beautiful chart for analyzing the immediate bid/ask pressure, and a separate, powerful tool for watching what the whales are doing in the deep.
+
+2.  **ENHANCED: Comprehensive Unit Tests (Status: Complete)**
     *   **File:** `sentinel/tests/test_schema.py`
-    *   **Details:**
-        *   Test `build_trade_lp()` for correct measurement name, tags (exchange, symbol, side), fields (price, size, trade\_id with proper type handling and string quoting), and nanosecond timestamp.
-        *   Test `build_book_lp()` thoroughly once binning is implemented. Verify correct mid-price calculation, assignment of raw levels to the correct BPS bins, and accurate aggregation of volumes within those bins. Test edge cases (e.g., empty book, book with few levels).
+    *   **Update:** The test suite was significantly expanded to include edge cases for the `build_book_lp` function, including tests for wide spreads, order clamping, and aggregation within bins. These tests were crucial in validating the correctness of the binning logic.
 
-3.  **InfluxDB Gap Audit (Medium Priority):**
-    *   **Context:** Exchanges like Coinbase provide sequence numbers with their L2 market data updates.
-    *   **Collector Task:** (`sentinel/collectors/coinbase.py`): If using a level2 channel that provides sequence numbers (e.g., Coinbase `l2update`), the collector should track these sequence numbers.
-    *   **Writer Task:** (`sentinel/writers/influx_writer.py` or a dedicated mechanism): If a gap in sequence numbers is detected by the collector, it should either:
-        *   Push a special "gap event" onto a queue, which the writer then records in a dedicated InfluxDB measurement (e.g., `gaps,exchange=coinbase,symbol=BTCUSD missing_count=X,start_seq=Y,end_seq=Z <timestamp>`).
-        *   Or, the schema for order book data itself could include the sequence number, allowing for offline analysis of gaps.
-    *   *Initial thought: The plan mentioned "gap-audit" in the writer. This implies the writer would need sequence numbers. If the `watch_order_book` from `ccxt` doesn't directly provide easily usable sequence numbers for full snapshots, or if we switch to a delta-based feed, the collector logic in `sentinel/collectors/coinbase.py` would become more complex to maintain the local book and track sequences.*
+3.  **IMPLEMENTED: InfluxDB Gap Audit (Status: Complete)**
+    *   **Context:** Exchanges like Coinbase provide sequence numbers with their L2 market data updates. CCXT maintains a valid book using these, and provides a `nonce` for each complete book it delivers.
+    *   **Update:** An application-level gap audit was added to `sentinel/collectors/coinbase.py`. It uses the `nonce` from the CCXT-provided order book to check for continuity. It logs a warning if a gap is detected and a critical error if a stale (out-of-order) book is received, providing an extra layer of reliability monitoring.
 
 4.  **Logging Enhancement (Medium Priority):**
     *   **Task:** Transition from standard Python `logging` to `structlog` across all Sentinel modules.

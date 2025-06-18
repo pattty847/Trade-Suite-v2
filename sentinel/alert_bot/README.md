@@ -134,8 +134,6 @@ alert_bot/
 ├── processors/             # (Added)
 │   ├── __init__.py         # (Added)
 │   └── cvd_calculator.py   # (Added) CVD calculation logic
-├── fetcher/                # (Updated - largely deprecated for direct ccxt.pro use)
-│   └── __init__.py
 ├── notifier/
 │   ├── __init__.py
 │   ├── base.py             # Base notifier interface with queue support
