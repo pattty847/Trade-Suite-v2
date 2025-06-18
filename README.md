@@ -2,6 +2,7 @@
 
 TradeSuite is a multi-exchange cryptocurrency trading platform. It is currently being re-architected into a high-performance, distributed client-server system designed for 24/7 operation and advanced AI-driven analysis.
 
+![ezgif-8fe9048b423618](https://github.com/user-attachments/assets/e703a1f7-d0be-487e-bdfb-695e34073d53)
 ![image](https://github.com/user-attachments/assets/6f49af6f-3e56-43ce-aba0-24d8aca29b1b)
 
 ## Project Evolution: TradeSuite v2
