@@ -3,11 +3,9 @@ import dearpygui.dearpygui as dpg
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from trade_suite.data.sec_api import SECDataFetcher
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.task_manager import TaskManager
-from trade_suite.gui.widgets.base_widget import DockableWidget
-from trade_suite.gui import utils
+from .base_widget import DockableWidget
+from ...core.facade import CoreServicesFacade
+from ...gui import utils
 
 class SECFilingViewer(DockableWidget):
     """
@@ -43,46 +41,35 @@ class SECFilingViewer(DockableWidget):
         _last_fetched_financials (Optional[Dict]): Stores the last fetched financials data for debugging.
         _is_loading (bool): Flag to track if a load is in progress.
     """
-    WIDGET_TYPE = "SECFilingViewer"
+    WIDGET_TYPE = "sec_filing_viewer"
+    WIDGET_TITLE = "SEC Filing Viewer"
 
     def __init__(
         self,
-        emitter: SignalEmitter,
-        sec_fetcher: SECDataFetcher,
-        task_manager: TaskManager,
-        instance_id: Optional[str] = None,
+        core: CoreServicesFacade,
+        instance_id: str,
         ticker: Optional[str] = None,
         **kwargs
     ):
         """Initializes the SECFilingViewer widget.
 
         Args:
-            emitter (SignalEmitter): The application's signal emitter for communication.
-            sec_fetcher (SECDataFetcher): An instance of the SEC data fetching class.
-            task_manager (TaskManager): An instance of the application's task manager.
+            core (CoreServicesFacade): The application's core services facade.
             instance_id (Optional[str], optional): A unique identifier for this widget instance.
-                                                   Defaults to None (will be auto-generated).
             ticker (Optional[str], optional): The initial ticker symbol to load. Defaults to None.
             **kwargs: Additional keyword arguments passed to the base DockableWidget constructor.
         """
-        # Store the initial ticker value *before* calling super()
-        # Convert to uppercase and handle None
         self._last_requested_ticker: Optional[str] = ticker.upper() if ticker else None
-        # Pass other kwargs to the base class, excluding 'ticker' if it was somehow in kwargs
-        kwargs.pop('ticker', None) # Ensure ticker is not passed to super
+        kwargs.pop('ticker', None)
 
         super().__init__(
-            title="SEC Filing Viewer",
-            widget_type=self.WIDGET_TYPE,
-            task_manager=task_manager,
-            emitter=emitter,
+            core=core,
             instance_id=instance_id,
             width=600,
             height=500,
-            **kwargs # Pass the cleaned kwargs
+            **kwargs
         )
-        self.sec_fetcher = sec_fetcher
-        self.task_manager = task_manager
+        self.sec_fetcher = self.core.data.sec_fetcher
 
         # Tags for UI elements
         self.ticker_input_tag = f"{self.content_tag}_ticker_input"
@@ -116,7 +103,7 @@ class SECFilingViewer(DockableWidget):
 
             # Form type selector dropdown
             # Filter out Form 4 as it has its own button
-            common_forms = [ft for ft in SECDataFetcher.FORM_TYPES.keys() if ft != "4"]
+            common_forms = [ft for ft in self.sec_fetcher.FORM_TYPES.keys() if ft != "4"]
             dpg.add_combo(tag=self.form_type_combo_tag,
                           items=common_forms,
                           label="Form Type",
@@ -927,11 +914,7 @@ class SECFilingViewer(DockableWidget):
         # dpg.configure_item(modal_id, height=dpg.get_item_height(content_area_id) + 60)
     
     def get_requirements(self) -> Dict[str, Any]:
-        """SECFilingViewer does not directly subscribe to market data streams via TaskManager.
-
-        Its data fetching is triggered by user actions.
-        Returns an empty dictionary.
-        """
+        """This widget fetches data on demand, so it has no streaming requirements."""
         return {}
 
     def get_config(self) -> Dict[str, Any]:
@@ -947,8 +930,8 @@ class SECFilingViewer(DockableWidget):
 # from trade_suite.gui.widgets.sec_filing_viewer import SECFilingViewer
 #
 # sec_viewer = SECFilingViewer(
-#     emitter=signal_emitter,
-#     sec_fetcher=sec_data_fetcher_instance,
-#     task_manager=task_manager_instance
+#     core=core_instance,
+#     instance_id="example_instance_id",
+#     ticker="AAPL"
 # )
 # sec_viewer.create() # Or add to docking layout 

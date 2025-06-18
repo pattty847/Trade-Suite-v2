@@ -269,7 +269,9 @@ class ChartWidget(DockableWidget):
         # Log data being sent to DPG
         if not self.ohlcv.empty:
             logging.debug(f"Chart {self.window_tag} Sending to DPG - Shape: {self.ohlcv.shape}")
-            logging.debug(f"Chart {self.window_tag} Sending to DPG - Last Row:\n{self.ohlcv.iloc[-1:].to_string()}")
+            logging.debug(f"Chart {self.window_tag} Sending to DPG - Data length: dates={len(dates_list)}, opens={len(self._opens_list)}")
+            if len(dates_list) > 0:
+                logging.debug(f"Chart {self.window_tag} Sending to DPG - Date range: {min(dates_list)} to {max(dates_list)}")
         else:
             logging.debug(f"Chart {self.window_tag} Sending empty data to DPG.")
 
@@ -328,6 +330,70 @@ class ChartWidget(DockableWidget):
                  logging.warning(f"Error clearing status bar for {self.window_tag}: {e}")
         
         logging.debug(f"Chart {self.window_tag} updated with {len(self.ohlcv)} candles.")
+    
+    def update(self, data: pd.DataFrame) -> None:
+        """Update the chart widget with new candle data.
+        
+        Args:
+            data: DataFrame containing OHLCV candle data
+        """
+        if data is None or data.empty:
+            logging.warning(f"Chart {self.window_tag} received empty data for update.")
+            return
+
+        logging.info(f"Chart {self.window_tag} updating with {len(data)} candles")
+        
+        # Ensure incoming dates are numeric (seconds) - same logic as in _on_updated_candles
+        try:
+            processed_data = data.copy()
+            
+            # Reset index if it's a DatetimeIndex to avoid structure issues  
+            if isinstance(processed_data.index, pd.DatetimeIndex):
+                processed_data = processed_data.reset_index(drop=True)
+            
+            if not pd.api.types.is_numeric_dtype(processed_data['dates']):
+                if pd.api.types.is_datetime64_any_dtype(processed_data['dates']):
+                    # Convert nanoseconds to seconds
+                    processed_data['dates'] = processed_data['dates'].astype(np.int64) // 1_000_000_000
+                else:
+                    # Try converting other types (e.g., object)
+                    processed_data['dates'] = pd.to_datetime(processed_data['dates'], errors='coerce')
+                    if pd.api.types.is_datetime64_any_dtype(processed_data['dates']):
+                        processed_data['dates'] = processed_data['dates'].astype(np.int64) // 1_000_000_000
+                    else:
+                        # Fallback: try direct numeric conversion (might be ms/s)
+                        processed_data['dates'] = pd.to_numeric(processed_data['dates'], errors='coerce')
+                        # Check for potential ms using simpler heuristic
+                        if pd.api.types.is_numeric_dtype(processed_data['dates']) and not processed_data['dates'].isna().all() and processed_data['dates'].max() > 2_000_000_000:
+                            logging.debug(f"Chart {self.window_tag}: converting potential ms to s.")
+                            processed_data['dates'] = processed_data['dates'] / 1000
+            elif not processed_data['dates'].isna().all() and processed_data['dates'].max() > 2_000_000_000:
+                logging.debug(f"Chart {self.window_tag}: numeric dates, converting potential ms to s.")
+                processed_data['dates'] = processed_data['dates'] / 1000
+
+            if processed_data['dates'].isnull().any():
+                logging.error(f"Chart {self.window_tag} received invalid dates after conversion.")
+                return
+
+        except Exception as e:
+            logging.error(f"Failed to process dates in bulk update for chart {self.window_tag}: {e}")
+            return
+
+        # Update the internal data
+        self.ohlcv = processed_data.copy()
+        
+        # Update cached lists for efficient DPG updates
+        self._dates_list = self.ohlcv["dates"].tolist()
+        self._opens_list = self.ohlcv["opens"].tolist()
+        self._highs_list = self.ohlcv["highs"].tolist()
+        self._lows_list = self.ohlcv["lows"].tolist()
+        self._closes_list = self.ohlcv["closes"].tolist()
+        self._volumes_list = self.ohlcv["volumes"].tolist()
+        
+        # Update the chart display
+        self._update_chart(partial=False)
+        
+        logging.info(f"Chart {self.window_tag} successfully updated with {len(self.ohlcv)} candles")
     
     def _on_new_candles(self, exchange: str, symbol: str, timeframe: str, candles: pd.DataFrame):
         """Handle initial bulk loading of candle data."""
@@ -388,16 +454,6 @@ class ChartWidget(DockableWidget):
                  # Reset the index to get a clean DataFrame with RangeIndex
                  clean_df = processed_candles.reset_index(drop=True)
                  update_row = clean_df.iloc[0] # Get the single row as a Series
-                 
-                 # DEBUG: Log the data structures to identify mismatch
-                 logging.debug(f"Chart {self.window_tag} DEBUG - update_row type: {type(update_row)}")
-                 logging.debug(f"Chart {self.window_tag} DEBUG - update_row index: {update_row.index.tolist()}")
-                 logging.debug(f"Chart {self.window_tag} DEBUG - update_row values: {update_row.values}")
-                 logging.debug(f"Chart {self.window_tag} DEBUG - self.ohlcv columns: {self.ohlcv.columns.tolist()}")
-                 logging.debug(f"Chart {self.window_tag} DEBUG - self.ohlcv shape: {self.ohlcv.shape}")
-                 if not self.ohlcv.empty:
-                     logging.debug(f"Chart {self.window_tag} DEBUG - self.ohlcv dtypes:\n{self.ohlcv.dtypes}")
-                     logging.debug(f"Chart {self.window_tag} DEBUG - last row dtypes: {self.ohlcv.iloc[-1:].dtypes}")
                  
             else:
                # Should not happen if Factory is correct, but handle defensively

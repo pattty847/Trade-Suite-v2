@@ -3,25 +3,25 @@ import os
 import sys
 import logging
 import argparse
+import platform
 
 from datetime import datetime
 from dotenv import load_dotenv
 
+import dearpygui.dearpygui as dpg
+
 from trade_suite.config import ConfigManager
-from trade_suite.data.data_source import Data
-from trade_suite.data.influx import InfluxDB
-from trade_suite.gui.signals import SignalEmitter
+from trade_suite.gui.utils import load_font, load_theme
+from trade_suite.core.facade import CoreServicesFacade
 from trade_suite.gui.viewport import Viewport
 
 # Ensure logs directory exists
 os.makedirs('logs', exist_ok=True)
 
+# This is not strictly necessary anymore since DPG runs on the main thread
+# and asyncio in a background thread, but it doesn't hurt.
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-elif sys.platform == 'linux':
-    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
-elif sys.platform == 'macos':
-    asyncio.set_event_loop_policy(asyncio.MacOSSelectorEventLoopPolicy())
 
 def _setup_logging(level=logging.INFO):
     """Configure logging to both console and file with timestamps."""
@@ -88,7 +88,10 @@ def _get_args():
 
 
 def main():
-    """Main entry point for the application."""
+    """
+    The main entry point for the Trade Suite GUI application.
+    """
+    # --- Setup Logging and Config ---
     args = _get_args()
     
     # Set the logging level based on command line argument
@@ -125,49 +128,19 @@ def main():
     
     logging.info(f"Using exchanges: {exchanges_to_use}")
     
-    # Create signal emitter
-    emitter = SignalEmitter()
-    
-    # Create InfluxDB
-    influx = InfluxDB()
-    
-    # Create data source with exchanges
-    data = Data(influx, emitter, exchanges_to_use)
-    
-    # If --reset-layout flag is set, delete the user layout file
-    if args.reset_layout:
-        user_layout_file = "config/user_layout.ini"
-        if os.path.exists(user_layout_file):
-            logging.info(f"Removing user layout file: {user_layout_file}")
-            os.remove(user_layout_file)
-    
-    # Ensure the config directory exists
-    os.makedirs('config', exist_ok=True)
-    
-    # Optionally start profiler
-    if args.profile:
-        try:
-            import yappi, atexit, pathlib, time
+    # --- Core Services Initialization via Facade ---
+    # The facade handles the creation of the TaskManager, Data source, etc.
+    # and ensures the async event loop is running in its own thread.
+    core = CoreServicesFacade()
 
-            yappi.set_clock_type("cpu")
-            yappi.start()
-
-            def _stop_profiler():
-                yappi.stop()
-                stats = yappi.get_func_stats()
-                ts = time.strftime("%Y%m%d_%H%M%S")
-                out_path = pathlib.Path("logs") / f"yappi_{ts}.pstat"
-                stats.save(str(out_path), type="pstat")
-                logging.info(f"Yappi profile saved to {out_path}")
-
-            atexit.register(_stop_profiler)
-            logging.info("Yappi profiler started (CPU mode).")
-        except ImportError as e:
-            logging.error("--profile requested but yappi not installed: %s", e)
+    # Get exchanges from config and start the core services.
+    # The facade's start method will block until exchanges are loaded.
+    core.start(exchanges=exchanges_to_use)
     
-    # Create and run the viewport (main application window)
-    with Viewport(data=data, config_manager=config_manager) as viewport:
-        viewport.start_program()
+    # --- DPG Viewport and GUI Program Execution ---
+    with Viewport(config_manager=config_manager, core=core) as viewport:
+        # The viewport now only needs the config and the core facade
+        viewport.run()
 
 
 if __name__ == "__main__":

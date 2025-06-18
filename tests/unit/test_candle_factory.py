@@ -1,11 +1,11 @@
 import pytest
+from unittest.mock import MagicMock, AsyncMock
 import pandas as pd
-from unittest.mock import MagicMock
 from datetime import datetime, timezone
 
-from trade_suite.data.candle_factory import CandleFactory
+from trade_suite.core.data.candle_factory import CandleFactory
+from trade_suite.core.signals import Signals
 from trade_suite.gui.utils import timeframe_to_seconds
-from trade_suite.gui.signals import Signals
 
 # --- Test Setup ---
 

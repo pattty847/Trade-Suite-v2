@@ -4,10 +4,11 @@ from typing import Dict, Any, Set, Tuple, List, Optional
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Trade Suite components (adjust path if necessary)
-from trade_suite.data.data_source import Data
-from trade_suite.gui.task_manager import TaskManager
-from trade_suite.gui.signals import SignalEmitter, Signals
+# Trade Suite components
+from trade_suite.core.data.data_source import Data
+from trade_suite.core.task_manager import TaskManager
+from trade_suite.core.signals import SignalEmitter, Signals
+from trade_suite.core.facade import CoreServicesFacade
 
 # Alert Bot components
 from sentinel.alert_bot.config.loader import load_alerts_from_yaml, GlobalAlertConfig
@@ -29,19 +30,18 @@ from sentinel.alert_bot.notifier.async_email_notifier import AsyncEmailNotifier
 logger = logging.getLogger(__name__)
 
 class AlertDataManager:
-    def __init__(self, data_source: Any, task_manager: Any, signal_emitter: Any, config_file_path: str):
+    def __init__(self, core_services: CoreServicesFacade, config_file_path: str):
         """
         Initializes the AlertDataManager.
 
         Args:
-            data_source: Instance of trade_suite.Data.
-            task_manager: Instance of trade_suite.TaskManager.
-            signal_emitter: Instance of trade_suite.SignalEmitter.
+            core_services: The main CoreServicesFacade providing access to backend services.
             config_file_path: Path to the alerts configuration YAML file.
         """
-        self.data_source = data_source
-        self.task_manager = task_manager
-        self.signal_emitter = signal_emitter
+        self.core = core_services
+        self.data_source = core_services.data
+        self.task_manager = core_services.task_manager
+        self.signal_emitter = core_services.emitter
         self.config_file_path = config_file_path
 
         self.global_config: Optional[GlobalAlertConfig] = None
@@ -403,11 +403,11 @@ class AlertDataManager:
         self._is_running = False # Set at the very end of cleanup
         logger.info("AlertDataManager stopped and cleaned up.")
 
-    async def _on_updated_candles(self, exchange: str, symbol: str, timeframe: str, candles_df: pd.DataFrame):
-        if not self._is_running or candles_df.empty:
-            return
-        
-        logger.debug(f"Received candle update: {exchange} {symbol} {timeframe}, {len(candles_df)} candles")
+    async def _on_updated_candles(self, exchange: str, symbol: str, timeframe: str, candles: pd.DataFrame):
+        if not self._is_running: return
+        # The DataFrame of candles is now received as `candles`
+        candles_df = candles
+        logger.debug(f"Received updated candles for {exchange} {symbol} {timeframe}. Shape: {candles_df.shape}")
 
         symbol_alert_config = self._get_symbol_config(exchange, symbol)
         if not symbol_alert_config or not hasattr(symbol_alert_config, 'rules') or not symbol_alert_config.rules:
@@ -443,8 +443,13 @@ class AlertDataManager:
                         price_point_to_use = 'close'
                     
                     if price_point_to_use not in candles_df.columns:
-                        logger.warning(f"Price point '{price_point_to_use}' not found in candles_df columns for {exchange} {symbol} {timeframe}. Columns: {candles_df.columns}")
-                        continue
+                        # Attempt to correct for singular vs. plural (e.g., 'close' vs 'closes')
+                        corrected_price_point = f"{price_point_to_use}s"
+                        if corrected_price_point in candles_df.columns:
+                            price_point_to_use = corrected_price_point
+                        else:
+                            logger.warning(f"Price point '{price_point_to_use}' not found in candles_df columns for {exchange} {symbol} {timeframe}. Columns: {candles_df.columns}")
+                            continue
 
                     lookback_total_minutes = self._convert_duration_to_minutes(lookback_duration_str)
                     if lookback_total_minutes is None:
@@ -511,21 +516,31 @@ class AlertDataManager:
                 except Exception as e:
                     logger.error(f"Error evaluating percentage_change rule for {exchange} {symbol} {timeframe}: {e} - Rule: {vars(rule_config) if hasattr(rule_config, '__dict__') else rule_config}", exc_info=True)
 
-    async def _on_new_trade(self, exchange: str, symbol: str, trade_data: dict):
+    async def _on_new_trade(self, exchange: str, trade_data: dict):
         if not self._is_running: return
         # trade_data is assumed to be a dictionary from SignalEmitter, potentially raw from CCXT
+        # The 'symbol' is inside the trade_data dictionary.
+        symbol = trade_data.get('symbol')
+        if not symbol:
+            logger.warning(f"Received trade data for exchange {exchange} without a symbol: {trade_data}")
+            return
+            
         logger.debug(f"Received new trade: {exchange} {symbol}, Price: {trade_data.get('price')}, Amount: {trade_data.get('amount')}")
         
         unique_key = f"{exchange}_{symbol}"
+        
+        # Parse the raw dictionary into a TradeData object first.
+        trade_obj = TradeData.from_ccxt_trade(trade_data)
+        if not trade_obj:
+            logger.warning(f"Failed to parse live trade for {unique_key}: {trade_data}")
+            return # Cannot proceed without a valid trade object
+
         calculator = self.cvd_calculators.get(unique_key)
 
         if calculator:
             try:
-                # CVDCalculator needs to handle the structure of trade_data.
-                # It might have a method like add_trade_from_source_dict(trade_data)
-                # or expect a pre-parsed TradeData object.
-                # For now, assume add_trade_from_dict can handle it or it will be adapted.
-                calculator.add_trade_from_dict(trade_data) 
+                # Add the parsed TradeData object to the calculator
+                calculator.add_trade(trade_obj)
             except Exception as e:
                 logger.error(f"Error adding live trade to CVDCalculator for {unique_key}: {e} - Data: {trade_data}", exc_info=True)
                 return # If CVD update fails, probably best not to evaluate rules based on stale CVD data
@@ -572,12 +587,15 @@ class AlertDataManager:
                     cvd_percentage_threshold = getattr(rule_config, 'cvd_percentage_threshold', None)
                     
                     if cvd_threshold is not None:
-                        cvd_change_val = calculator.get_cvd_change_value(minutes=lookback_minutes)
+                        # Corrected method call from get_cvd_change_value to get_cvd_change
+                        cvd_change_val = calculator.get_cvd_change(minutes=lookback_minutes)
                         if cvd_change_val is not None and abs(cvd_change_val) >= float(cvd_threshold):
                             alert_triggered_for_rule = True
                             alert_details = {"type": "value", "value": cvd_change_val, "threshold": float(cvd_threshold)}
                     
                     if not alert_triggered_for_rule and cvd_percentage_threshold is not None:
+                        # Assuming a percentage change method might exist or be added later
+                        # For now, this part remains as is but depends on a method like get_cvd_change_percentage
                         cvd_change_pct = calculator.get_cvd_change_percentage(minutes=lookback_minutes)
                         if cvd_change_pct is not None and abs(cvd_change_pct) >= float(cvd_percentage_threshold):
                             alert_triggered_for_rule = True
@@ -659,9 +677,10 @@ class AlertDataManager:
             except Exception as e:
                 logger.error(f"Error evaluating {rule_type} rule for {exchange} {symbol}: {e} - Rule: {vars(rule_config) if hasattr(rule_config, '__dict__') else rule_config}", exc_info=True)
 
-    async def _on_new_ticker_data(self, exchange: str, symbol: str, ticker_data: dict):
+    async def _on_new_ticker_data(self, exchange: str, symbol: str, ticker_data_dict: dict):
         if not self._is_running: return
         # Initial log kept for verbosity during development, can be changed to debug level later
+        ticker_data = ticker_data_dict
         logger.info(f"Received ticker: {exchange} {symbol}, Last: {ticker_data.get('last')}, Bid: {ticker_data.get('bid')}, Ask: {ticker_data.get('ask')}")
 
         symbol_alert_config = self._get_symbol_config(exchange, symbol)
@@ -776,9 +795,13 @@ class AlertDataManager:
                                 historical_trades.reverse()
                                 calculator = self.cvd_calculators[unique_key]
                                 for trade_dict in historical_trades:
-                                    # Assuming CVDCalculator has add_trade_from_dict or similar
-                                    # and it handles the structure of trade_dict from fetch_historical_trades
-                                    calculator.add_trade_from_dict(trade_dict) 
+                                    # Convert the raw trade dictionary to a TradeData object
+                                    trade_obj = TradeData.from_ccxt_trade(trade_dict)
+                                    if trade_obj:
+                                        # Now pass the object to the calculator
+                                        calculator.add_trade(trade_obj)
+                                    else:
+                                        logger.warning(f"Failed to parse historical trade for {unique_key}: {trade_dict}")
                                 logger.info(f"Seeded CVDCalculator for {unique_key} with {len(historical_trades)} trades.")
                             else:
                                 logger.info(f"No historical trades returned for {unique_key} for CVD seeding.")
@@ -845,12 +868,15 @@ class AlertDataManager:
             logger.warning("ALERT TRIGGERED but no active notifiers to dispatch to.")
             return
 
+        # Format a simple message for the notifier queue
+        formatted_message = f"[{title}] {message}"
+
         logger.info(f"Dispatching alert to {len(self.active_notifiers)} notifiers...")
         notification_tasks = []
         for notifier in self.active_notifiers:
             try:
-                # Create a task for each notification to send them concurrently
-                task = asyncio.create_task(notifier.send_notification(message=message, title=title, alert_context=context))
+                # Use the correct method: queue_notification
+                task = asyncio.create_task(notifier.queue_notification(message=formatted_message))
                 notification_tasks.append(task)
             except Exception as e:
                 logger.error(f"Error creating notification task for notifier {type(notifier).__name__} for alert '{title}': {e}", exc_info=True)

@@ -6,6 +6,8 @@ from typing import Callable
 import dearpygui.dearpygui as dpg
 from collections import deque
 from functools import partial
+import asyncio
+import inspect
 
 
 class Signals(Enum):
@@ -34,6 +36,7 @@ class Signals(Enum):
 
     # Dashboard/Widget Management Signals
     NEW_SEC_FILING_VIEWER_REQUESTED = auto() # Added for SEC Filing Viewer
+    WIDGET_CLOSED = auto() # payload: {'widget_id': str}
 
     # Data Fetching Signals (Example - Adapt as needed)
     FETCH_OHLCV = auto() # payload: {'exchange': str, 'symbol': str, 'timeframe': str}
@@ -49,12 +52,17 @@ class SignalEmitter:
         self._callbacks = {}
         self._queue = queue.Queue()
         self._main_thread_id = threading.get_ident()
+        self.loop: asyncio.AbstractEventLoop = None
 
         # --- Object pool for small payload dictionaries to reduce GC churn ---
         # We keep a fixed-size deque; when we need a fresh dict we try to re-use one
         # instead of allocating a brand-new object.  The pool size is kept modest
         # (1024) so memory usage stays predictable even during heavy bursts.
         self._pool: "deque[dict]" = deque(maxlen=1024)
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop):
+        """Set the asyncio event loop for scheduling async callbacks."""
+        self.loop = loop
 
     # ------------------------------------------------------------------
     # Public helpers for borrowing & recycling small payload dicts
@@ -143,8 +151,16 @@ class SignalEmitter:
         logging.debug(f"[SignalQueue] Executing {len(callbacks)} callbacks for {signal.name}")
         for callback in callbacks:
             try:
-                logging.debug(f"[SignalQueue] Calling: {callback.__name__} for {signal.name}")
-                callback(*args, **kwargs)
+                if inspect.iscoroutinefunction(callback):
+                    if self.loop:
+                        # Schedule the async callback on the provided event loop
+                        asyncio.run_coroutine_threadsafe(callback(*args, **kwargs), self.loop)
+                    else:
+                        logging.warning(f"Async callback {callback.__name__} for signal {signal.name} cannot be run without an event loop. Use set_loop().")
+                else:
+                    # Execute synchronous callback directly
+                    logging.debug(f"[SignalQueue] Calling: {callback.__name__} for {signal.name}")
+                    callback(*args, **kwargs)
             except Exception as e:
                 # Log the exception and the callback that caused it
                 logging.error(f"Error in callback {callback.__name__} for signal {signal.name}: {e}", exc_info=True)

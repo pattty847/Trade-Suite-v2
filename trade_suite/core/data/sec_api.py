@@ -8,11 +8,13 @@ import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Union, Tuple, Any, Callable, Awaitable
 from dotenv import load_dotenv
-from trade_suite.data.sec.http_client import SecHttpClient
-from trade_suite.data.sec.cache_manager import SecCacheManager
-from trade_suite.data.sec.document_handler import FilingDocumentHandler
-from trade_suite.data.sec.form4_processor import Form4Processor
-from trade_suite.data.sec.financial_processor import FinancialDataProcessor
+from .sec.http_client import SecHttpClient
+from .sec.cache_manager import SecCacheManager
+from .sec.document_handler import FilingDocumentHandler
+from .sec.form4_processor import Form4Processor
+from .sec.financial_processor import FinancialDataProcessor
+
+import pandas as pd
 
 load_dotenv()
 class SECDataFetcher:

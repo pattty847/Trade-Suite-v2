@@ -1,18 +1,22 @@
-import asyncio
+import dearpygui.dearpygui as dpg
+from dearpygui.dearpygui import mvThemeCol_Text, mvThemeCol_WindowBg
 import logging
-from typing import List, Dict, Any
-from contextlib import asynccontextmanager # Added for lifespan manager
+import platform
+import asyncio
+from typing import Dict, Any, List
 
-import pandas as pd
-import uvicorn
-from fastapi import FastAPI, HTTPException, Depends, Request
-from pydantic import BaseModel, Field
+from trade_suite.config import ConfigManager
+from trade_suite.gui.utils import load_font, load_theme
+from trade_suite.core.data.data_source import Data
+from trade_suite.core.signals import SignalEmitter, Signals # Keep original imports
+from trade_suite.core.data.influx import InfluxDB # Keep original imports
+from trade_suite.gui.dashboard_program import DashboardProgram
 
 # Assuming data_source.py is in the trade_suite.data package and accessible
 # Adjust the import path if your project structure is different
-from trade_suite.data.data_source import Data
-from trade_suite.gui.signals import SignalEmitter, Signals # Keep original imports
-from trade_suite.data.influx import InfluxDB # Keep original imports
+# from trade_suite.data.data_source import Data
+# from trade_suite.gui.signals import SignalEmitter, Signals # Keep original imports
+# from trade_suite.data.influx import InfluxDB # Keep original imports
 # --- Placeholder Imports for Sentinel and AlertBot ---
 # Make sure to adjust these paths to your actual project structure.
 # from sentinel.supervisor import Supervisor

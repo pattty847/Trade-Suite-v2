@@ -4,18 +4,19 @@ import threading
 from typing import Any, Dict, List, Set, Tuple, TYPE_CHECKING
 from collections import defaultdict
 
-from trade_suite.gui.stream_subscription import StreamSubscription
+from .data.candle_factory import CandleFactory
+from .data.sec_api import SECDataFetcher
+from .signals import Signals
 
-from trade_suite.data.candle_factory import CandleFactory
-from trade_suite.data.sec_api import SECDataFetcher
-from trade_suite.gui.signals import Signals
-from trade_suite.gui.utils import (
+from ..gui.stream_subscription import StreamSubscription
+
+from ..gui.utils import (
     calculate_since,
     create_timed_popup,
 )
 
 if TYPE_CHECKING:
-    from trade_suite.data.data_source import Data
+    from .data.data_source import Data
 
 
 class TaskManager:
@@ -38,18 +39,21 @@ class TaskManager:
             defaultdict(set)
         )
 
+        # In-memory mapping of resource key to the widgets subscribed to it
+        self.resource_to_widgets: Dict[
+            str | Tuple[str, str, str], Set[Any]
+        ] = defaultdict(set)
+
         # Lock for thread synchronization (primarily for accessing shared resources like factories/counts)
         self.lock = threading.Lock()
 
         # Event used to signal when the asyncio loop has been created
         self.loop_ready = threading.Event()
 
-        # Start the event loop in a separate thread
-        self.thread = threading.Thread(target=self.run_loop, daemon=False)  #
+        # TaskManager always runs its own event loop in a separate thread.
+        self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()
-
-        # Wait for the loop to be initialized
-        self.loop_ready.wait()
+        self.loop_ready.wait() # Wait for the loop to be initialized
 
         # Now that the asyncio loop is ready, inform Data so it can emit
         # signals thread-safely without the intermediate queue.
@@ -75,7 +79,12 @@ class TaskManager:
         self.loop_ready.set()
 
         # Run the event loop (no longer schedules a separate data-queue consumer)
-        self.loop.run_forever()
+        try:
+            self.loop.run_forever()
+        finally:
+            self.loop.close()
+
+        logging.info("TaskManager event loop has stopped.")
 
     # ------------------------------------------------------------------
     # Direct emit helpers (used by worker tasks) – they forward the data to
@@ -197,105 +206,75 @@ class TaskManager:
                 )
                 return
 
-            widget_id = id(widget)  # Use widget id as key for simplicity
+            widget_id = id(widget)
             logging.info(
                 f"Subscribing widget {widget_id} with requirements {requirements}. Resources: {resource_keys}"
             )
             self.widget_subscriptions[widget_id].update(resource_keys)
 
-            needs_initial_candles = False
-            initial_candle_details = {}
-
             for key in resource_keys:
-                if isinstance(key, tuple):  # Factory key (exchange, symbol, timeframe)
-                    exchange, symbol, timeframe = key
+                # Map the resource back to the widget instance
+                self.resource_to_widgets[key].add(widget)
+
+                if isinstance(key, tuple):  # Factory key
+                    if self.factory_ref_counts.get(key, 0) == 0:
+                        # First subscription for this factory, create it and fetch initial data
+                        self._create_candle_factory_if_needed(key)
                     self.factory_ref_counts[key] += 1
-                    logging.debug(
-                        f"Factory ref count for {key} incremented to {self.factory_ref_counts[key]}"
-                    )
-                    if self.factory_ref_counts[key] == 1:
-                        # Create CandleFactory if it doesn't exist
-                        if key not in self.candle_factories:
-                            logging.debug(f"Creating new CandleFactory for key: {key}")
-                            # Ensure required arguments are passed
-                            ccxt_exchange = self.data.exchange_list.get(exchange)
-                            if not ccxt_exchange:
-                                logging.error(
-                                    f"CCXT exchange object not found for '{exchange}' in TaskManager. Cannot fetch initial candles."
-                                )
-                                return
-                            candle_factory = CandleFactory(
-                                exchange=exchange,
-                                symbol=symbol,  # Added symbol to constructor if needed
-                                timeframe_str=timeframe,
-                                emitter=self.data.emitter,
-                                task_manager=self,  # Pass the TaskManager instance
-                                data=self.data,  # Pass the Data instance
-                            )
-                            self.candle_factories[key] = candle_factory
-                            # Mark that initial candles are needed for this new factory
-                            needs_initial_candles = True
-                            initial_candle_details = {
-                                "exchange": exchange,
-                                "symbol": symbol,
-                                "timeframe": timeframe,
-                            }
-                            logging.info(f"CandleFactory created and stored for {key}.")
-                        else:
-                            logging.info(f"CandleFactory already exists for {key}")
-
+                
                 elif isinstance(key, str):  # Stream key
-                    sub = self.stream_subscriptions.setdefault(
-                        key, StreamSubscription()
-                    )
-                    sub.acquire()
-                    logging.debug(
-                        f"Stream ref count for {key} incremented to {sub.ref_count}"
-                    )
-                    if sub.ref_count == 1:
-                        # Start the stream task if it's the first subscriber
-                        if key not in self.tasks or self.tasks[key].done():
-                            logging.info(f"Starting new stream task for key: {key}")
-                            coro = None
-                            
-                            stop_event = sub.stop_event
-                            
-                            # Determine which watch function to call based on the key
-                            if key.startswith("trades_"):
-                                _, exchange, symbol = key.split("_", 2)
-                                coro = self._get_watch_trades_coro(
-                                    exchange, symbol, stop_event
-                                )  # Pass event
-                            elif key.startswith("orderbook_"):
-                                _, exchange, symbol = key.split("_", 2)
-                                coro = self._get_watch_orderbook_coro(
-                                    exchange, symbol, stop_event
-                                )  # Pass event
-                            elif key.startswith("ticker_"):  # Added ticker stream
-                                _, exchange, symbol = key.split("_", 2)
-                                # Assuming Data class has watch_ticker(exchange_id, symbol, stop_event)
-                                coro = self.data.watch_ticker(
-                                    exchange, symbol, stop_event
-                                )
-                            # Add other stream types here if needed
+                    if key not in self.stream_subscriptions:
+                        # First subscription for this stream, start it
+                        self._start_stream_if_needed(key)
 
-                            if coro:
-                                self.start_task(key, coro)
-                            else:
-                                logging.warning(
-                                    f"Could not determine coroutine for stream key: {key}"
-                                )
-                                # Clean up subscription if task isn't started
-                                self.stream_subscriptions.pop(key, None)
-                        else:
-                            logging.info(f"Stream task {key} is already running.")
+    def _create_candle_factory_if_needed(self, factory_key: Tuple[str, str, str]):
+        """Creates and initializes a CandleFactory."""
+        if factory_key in self.candle_factories:
+            logging.warning(f"Attempted to create already existing CandleFactory for {factory_key}")
+            return
 
-            # After potentially creating a new CandleFactory, fetch initial candles
-            if needs_initial_candles and initial_candle_details:
-                # Run fetching in the background, do not block subscription
-                self.run_task_until_complete(
-                    self._fetch_initial_candles_for_factory(**initial_candle_details),
-                )
+        exchange, symbol, timeframe = factory_key
+        logging.info(f"Creating new CandleFactory for key: {factory_key}")
+        
+        candle_factory = CandleFactory(
+            exchange=exchange,
+            symbol=symbol,
+            timeframe_str=timeframe,
+            emitter=self.data.emitter,
+            task_manager=self,
+            data=self.data,
+        )
+        self.candle_factories[factory_key] = candle_factory
+        
+        # Asynchronously fetch initial candles
+        fetch_coro = self._fetch_initial_candles_for_factory(exchange, symbol, timeframe)
+        self.start_task(f"initial_candles_{exchange}_{symbol}_{timeframe}", fetch_coro)
+
+    def _start_stream_if_needed(self, stream_key: str):
+        """Starts a data stream coroutine."""
+        if stream_key in self.stream_subscriptions:
+            logging.warning(f"Attempted to start already running stream for {stream_key}")
+            return
+
+        stop_event = asyncio.Event()
+        coro = None
+        if stream_key.startswith("trades_"):
+            _, exchange, symbol = stream_key.split("_")
+            coro = self._get_watch_trades_coro(exchange, symbol, stop_event)
+        elif stream_key.startswith("orderbook_"):
+            _, exchange, symbol = stream_key.split("_")
+            coro = self._get_watch_orderbook_coro(exchange, symbol, stop_event)
+        # Add other stream types here...
+
+        if coro:
+            logging.info(f"Starting new stream task for key: {stream_key}")
+            task = asyncio.run_coroutine_threadsafe(coro, self.loop)
+            # Store the task in the main tasks dictionary
+            self.tasks[stream_key] = task
+            # Store the subscription object with just the stop event
+            self.stream_subscriptions[stream_key] = StreamSubscription(stop_event=stop_event)
+        else:
+            logging.warning(f"No coroutine found for stream key: {stream_key}")
 
     def unsubscribe(self, widget):
         """
@@ -305,107 +284,61 @@ class TaskManager:
         with self.lock:
             widget_id = id(widget)
             if widget_id not in self.widget_subscriptions:
-                logging.warning(f"Widget {widget_id} not found in subscriptions.")
+                logging.warning(f"Attempted to unsubscribe a widget ({widget_id}) that was not subscribed.")
                 return
 
-            resource_keys = self.widget_subscriptions.pop(widget_id)
-            logging.info(
-                f"Unsubscribing widget {widget_id}. Resources: {resource_keys}"
-            )
+            logging.info(f"Unsubscribing widget {widget_id}")
+            resource_keys = self.widget_subscriptions.pop(widget_id, set())
 
             for key in resource_keys:
+                # Remove widget from the resource's set of subscribers
+                if key in self.resource_to_widgets:
+                    self.resource_to_widgets[key].discard(widget)
+
                 if isinstance(key, tuple):  # Factory key
-                    if key in self.factory_ref_counts:
-                        self.factory_ref_counts[key] -= 1
-                        logging.debug(
-                            f"Factory ref count for {key} decremented to {self.factory_ref_counts[key]}"
-                        )
-                        if self.factory_ref_counts[key] == 0:
-                            logging.info(
-                                f"Removing CandleFactory for key {key} as ref count is zero."
-                            )
-                            del self.factory_ref_counts[key]
-                            # Remove the factory instance itself
-                            if key in self.candle_factories:
-                                # Clean up factory resources if necessary (e.g., unregister listeners)
-                                factory = self.candle_factories[key]
-                                factory.cleanup()
-                                del self.candle_factories[key]
-                            else:
-                                logging.warning(
-                                    f"Factory {key} not found in candle_factories dict during cleanup."
-                                )
-                    else:
-                        logging.warning(
-                            f"Factory key {key} not found in ref counts during unsubscribe."
-                        )
-
+                    self.factory_ref_counts[key] -= 1
+                    logging.debug(f"Factory ref count for {key} decremented to {self.factory_ref_counts[key]}")
+                    if self.factory_ref_counts[key] == 0:
+                        logging.info(f"Reference count for factory {key} is zero. Removing factory.")
+                        del self.candle_factories[key]
+                        del self.factory_ref_counts[key]
+                
                 elif isinstance(key, str):  # Stream key
-                    sub = self.stream_subscriptions.get(key)
-                    if sub:
-                        sub.release()
-                        logging.debug(
-                            f"Stream ref count for {key} decremented to {sub.ref_count}"
-                        )
-                        if sub.ref_count == 0:
-                            logging.info(
-                                f"Stopping stream task for key {key} as ref count is zero."
-                            )
-                            # Signal the task to stop
-                            self.loop.call_soon_threadsafe(sub.stop_event.set)
+                    # If no more widgets are listening to this resource, stop the stream
+                    if not self.resource_to_widgets.get(key):
+                        self._stop_stream(key)
 
-                            # Additionally, cancel the task if it's still running
-                            if key in self.tasks and not self.tasks[key].done():
-                                logging.debug(
-                                    f"Cancelling task for stream {key} as a fallback."
-                                )
-                                self.stop_task(key)
+    def _stop_stream(self, stream_key: str):
+        """Stops a stream and cleans up its resources."""
+        logging.info(f"Stopping stream for key: {stream_key}")
+        subscription = self.stream_subscriptions.pop(stream_key, None)
+        if subscription:
+            self.loop.call_soon_threadsafe(subscription.stop_event.set)
+            # The task will be cancelled within the coroutine, but we also remove it from our tracking
+            self.tasks.pop(stream_key, None)
+            
+        # Also clean up the resource_to_widgets entry
+        if stream_key in self.resource_to_widgets:
+            del self.resource_to_widgets[stream_key]
 
-                            # Remove subscription object
-                            self.stream_subscriptions.pop(key, None)
-                    else:
-                        logging.warning(
-                            f"Stream key {key} not found in ref counts during unsubscribe."
-                        )
-
-    def _get_watch_trades_coro(
-        self, exchange: str, symbol: str, stop_event: asyncio.Event
-    ):
+    def _get_watch_trades_coro(self, exchange: str, symbol: str, stop_event: asyncio.Event):
         """Returns the coroutine for watching trades, passing the stop event."""
-
         async def wrapped_watch_trades():
             try:
-                await self.data.watch_trades(
-                    exchange=exchange, symbol=symbol, stop_event=stop_event
-                )
+                # The data source's watch method handles the loop and stop event
+                await self.data.watch_trades(exchange=exchange, symbol=symbol, stop_event=stop_event)
             except Exception as e:
-                # Log specifics about the stream that failed
-                logging.error(
-                    f"Error in watch_trades task for {exchange}/{symbol}: {e}",
-                    exc_info=True,
-                )
-                # Optionally, attempt recovery or notify user
-
+                logging.error(f"Error in watch_trades task for {exchange}/{symbol}: {e}", exc_info=True)
         return wrapped_watch_trades()
 
-    def _get_watch_orderbook_coro(
-        self, exchange: str, symbol: str, stop_event: asyncio.Event
-    ):
+    def _get_watch_orderbook_coro(self, exchange: str, symbol: str, stop_event: asyncio.Event):
         """Returns the coroutine for watching orderbook, passing the stop event."""
-
         async def wrapped_watch_orderbook():
             try:
-                await self.data.watch_orderbook(
-                    exchange=exchange, symbol=symbol, stop_event=stop_event
-                )
+                # The data source's watch method handles the loop and stop event
+                await self.data.watch_orderbook(exchange=exchange, symbol=symbol, stop_event=stop_event)
             except Exception as e:
-                # Log specifics about the stream that failed
-                logging.error(
-                    f"Error in watch_orderbook task for {exchange}/{symbol}: {e}",
-                    exc_info=True,
-                )
-                # Optionally, attempt recovery or notify user
-
+                logging.error(f"Error in watch_orderbook task for {exchange}/{symbol}: {e}", exc_info=True)
         return wrapped_watch_orderbook()
 
     async def _fetch_initial_candles_for_factory(
@@ -476,20 +409,25 @@ class TaskManager:
     def run_task_until_complete(self, coro):
         """
         The run_task_until_complete function runs a coroutine until it completes.
-        It creates a future and runs it in the event loop.
+        It creates a future and runs it in the event loop, blocking the calling
+        thread until the result is available.
 
         :param self: Access the class instance
         :param coro: Specify the coroutine to run
         :return: The result of the coroutine
-        :doc-author: Trelent
         """
+        if threading.current_thread() is self.thread:
+            # If we are already in the event loop's thread, we can't block.
+            # This is an advanced case, but good to handle.
+            # Consider if this should raise an error instead.
+            logging.warning("run_task_until_complete called from within the event loop thread. This can cause deadlocks.")
+            task = self.loop.create_task(coro)
+            return task # Return the task, can't await it here.
+
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        try:
-            running_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return future.result()
-        else:
-            return asyncio.wrap_future(future, loop=running_loop)
+        # This blocks the calling thread (e.g., the main GUI thread)
+        # until the coroutine is done executing in the event loop thread.
+        return future.result()
 
     def run_task_with_loading_popup(self, coro, message="Please wait..."):
         """
@@ -650,13 +588,11 @@ class TaskManager:
         Cleans up resources when the application is shutting down.
         Stops all tasks, closes async resources, and closes the event loop thread.
         """
-        self.running = False  # Signal processing loops to stop
+        logging.info("TaskManager cleanup initiated.")
+        self.running = False
 
-        # Stop the data processing queue loop
-        # await self.data_queue.join() # Wait for queue to empty (might block shutdown)
-        # TODO: Consider a timeout for joining the queue or just cancel the processor task
-
-        self.stop_all_tasks()  # Ensure all tasks are stopped and events cleared
+        # Stop all running tasks and clear subscriptions
+        self.stop_all_tasks()
 
         # --- Close async resources BEFORE stopping the loop ---
         if self.loop and self.loop.is_running() and self.sec_fetcher:
@@ -664,37 +600,67 @@ class TaskManager:
                 logging.info("Closing SECDataFetcher resources...")
                 close_coro = self.sec_fetcher.close()
                 future = asyncio.run_coroutine_threadsafe(close_coro, self.loop)
-                # Wait for the close operation to complete, with a timeout
                 future.result(timeout=5)
                 logging.info("SECDataFetcher resources closed.")
             except asyncio.TimeoutError:
                 logging.error("Timeout waiting for SECDataFetcher to close.")
             except Exception as e:
                 logging.error(f"Error closing SECDataFetcher: {e}", exc_info=True)
-        # Add other async resource cleanup here if needed
-        # --- End async resource cleanup ---
-
-        # No thread-pool executor anymore – left here for backward-compat documentation
-
+        
+        # Stop the event loop itself
         if self.loop and self.loop.is_running():
             logging.info("Stopping event loop...")
-            # Use call_soon_threadsafe to stop the loop from the current thread
             self.loop.call_soon_threadsafe(self.loop.stop)
 
+        # Wait for the event loop thread to finish
         if self.thread and self.thread.is_alive():
             logging.info("Waiting for event loop thread to join...")
-            self.thread.join(timeout=2)  # Wait for the thread to finish
+            self.thread.join(timeout=5)
             if self.thread.is_alive():
                 logging.warning("Event loop thread did not join cleanly.")
 
         logging.info("TaskManager cleanup complete.")
 
+    async def stop_all_tasks_async(self):
+        """The async part of stopping all tasks. Cancels and gathers them."""
+        logging.info("Stopping all tasks asynchronously...")
+        # Your existing logic to cancel tasks, but now it's a native coroutine
+        # This simplifies things as you don't need run_coroutine_threadsafe here
+
+        # Stop stream tasks
+        stream_keys_to_stop = list(self.stream_subscriptions.keys())
+        for key in stream_keys_to_stop:
+            if key in self.tasks and not self.tasks[key].done():
+                logging.info(f"Stopping stream task for key {key} async.")
+                self.tasks[key].cancel()
+                try:
+                    await self.tasks[key]
+                except asyncio.CancelledError:
+                    pass # Expected
+        
+        # Cleanup factories
+        factory_keys_to_clean = list(self.candle_factories.keys())
+        for key in factory_keys_to_clean:
+            factory = self.candle_factories.get(key)
+            if factory:
+                factory.cleanup()
+        
+        self.tasks.clear()
+        self.candle_factories.clear()
+        self.stream_subscriptions.clear()
+        self.factory_ref_counts.clear()
+        self.widget_subscriptions.clear()
+
+        logging.info("All async tasks have been requested to stop.")
+
     def is_stream_running(self, stream_id: str) -> bool:
         """Checks if a stream task is running and its event is set."""
-        task_running = self.is_task_running(stream_id)
-        running = False
         with self.lock:
             sub = self.stream_subscriptions.get(stream_id)
-            if sub:
-                running = sub.is_running
-        return task_running and running
+            # A stream is running if it has a subscription object
+            # and that object's ref_count > 0
+            if sub and sub.ref_count > 0:
+                is_subscribed = True
+
+        task_running = self.tasks.get(stream_id) is not None and not self.tasks[stream_id].done()
+        return task_running and is_subscribed
