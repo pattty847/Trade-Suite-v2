@@ -19,6 +19,9 @@ For a detailed overview of the new architecture, technology stack, and implement
 - Real-time candlestick charts, order book and price level DOM
 - Optional Sentinel alert bot for automated monitoring
 
+## Sentinel Monitoring Through Grafana
+![image](https://github.com/user-attachments/assets/47341fd4-f6e9-4344-9b27-88aa574ab001)
+
 ## Documentation
 
 Full documentation lives in the [docs](docs/README.md) directory. The legacy application can be installed by following the original [Getting Started](docs/user_guide/getting_started.md) guide. Documentation for v2 will be updated as development progresses.
