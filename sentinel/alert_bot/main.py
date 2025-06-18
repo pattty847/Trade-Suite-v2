@@ -147,9 +147,13 @@ async def async_main():
             logger.error("No exchanges specified for Data source. Please use --exchange argument.")
             return
         logger.info(f"Initializing Data source for exchanges: {exchanges_to_use}")
-        data_source = Data(influx=influx_db, emitter=signal_emitter, exchanges=exchanges_to_use)
+        data_source = Data(influx=influx_db, emitter=signal_emitter, exchanges=exchanges_to_use, force_public=True)
+        await data_source.load_exchanges() # Await loading of exchange data before proceeding
         
-        task_manager = TaskManager(data=data_source, sec_fetcher=None)
+        # Pass TaskManager to Data source for integration if needed by other components
+        # For AlertBot's standalone run, we create a new TaskManager.
+        task_manager = TaskManager(data=data_source, sec_fetcher=None) # sec_fetcher can be None if not used
+        data_source.task_manager = task_manager # Link TaskManager back to data_source
         
         logger.info("Initializing AlertDataManager...")
         alert_manager = AlertDataManager(

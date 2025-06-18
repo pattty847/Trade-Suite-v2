@@ -30,6 +30,7 @@ class PriceLevelRule(BaseModel):
 
 class PercentageChangeRule(BaseModel):
     """Rule that triggers when price changes by X% within specified timeframe"""
+    type: Literal['percentage_change'] = 'percentage_change'
     percentage: float
     lookback_duration_str: str = Field(description="The total lookback period (e.g., '60m', '4h', '1d')")
     candle_timeframe: str = Field(description="The timeframe of the candles this rule applies to (e.g., '5m', '1h')")
@@ -45,6 +46,7 @@ class PercentageChangeRule(BaseModel):
 
 class VolatilityRule(BaseModel):
     """Rule that triggers when price volatility exceeds threshold within timeframe"""
+    type: Literal['volatility'] = 'volatility'
     threshold: float
     timeframe_duration_str: str = Field(description="Timeframe for volatility calculation (e.g., '30m')")
     candle_timeframe: str = Field(description="Candle timeframe for data source (e.g., '1m')")

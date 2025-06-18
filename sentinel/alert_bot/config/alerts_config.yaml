@@ -1,0 +1,70 @@
+alerts:
+  symbols:
+    BTC/USD:
+      exchange: coinbase
+      symbol: BTC/USD
+      price_precision: 2
+      volume_precision: 3
+      rules:
+      # Price Level Alerts - CURRENT PRICE: 104528
+      - type: price_level
+        target_price: 104600.0 # Above current
+        condition: above
+        cooldown: 60 # Short cooldown for testing
+        enabled: true
+      - type: price_level
+        target_price: 104400.0 # Below current
+        condition: below
+        cooldown: 60
+        enabled: true
+      
+      # Percentage Change Alerts
+      - type: percentage_change
+        percentage: 0.01 # Very sensitive for testing
+        lookback_duration_str: 5m
+        candle_timeframe: 1m # Requires 1m candle data
+        price_point_to_use: close
+        cooldown: 60
+        enabled: true
+      - type: percentage_change
+        percentage: 0.05 # Less sensitive
+        lookback_duration_str: 15m
+        candle_timeframe: 5m # Requires 5m candle data
+        price_point_to_use: close
+        cooldown: 120
+        enabled: true
+        
+      # CVD Alerts
+      - type: cvd_change
+        timeframe_duration_str: 5m
+        cvd_threshold: 50 # Absolute change, adjust based on typical BTC/USD CVD on coinbase
+        cooldown: 120
+        enabled: true
+      - type: cvd_level
+        timeframe_duration_str: 10m # Lookback for current CVD value determination
+        cvd_level: 100 # Target CVD level
+        condition: above
+        cooldown: 120
+        enabled: true
+      - type: cvd_ratio
+        timeframe_duration_str: 5m
+        buy_ratio_threshold: 0.65 # Buy ratio > 65%
+        cooldown: 120
+        enabled: true
+notification_settings:
+  notifiers:
+  - id: console_1
+    type: console
+    enabled: true
+    config: {}
+  - id: email_1
+    type: email
+    enabled: false # Keep email disabled for this test
+    config:
+      email_to:
+      - alerts@example.com
+      smtp_host: smtp.example.com
+      smtp_port: 587
+      smtp_user: user@example.com
+      smtp_password_env_var: SMTP_PASSWORD # IMPORTANT: Store actual password in env var
+      email_from: bot@example.com

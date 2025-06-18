@@ -144,3 +144,25 @@ class Data(CCXTInterface):
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
         return await self.fetcher.fetch_candles(exchanges, symbols, since, timeframes, write_to_db)
 
+    async def fetch_historical_trades(self, exchange: str, symbol: str, since: Optional[int] = None, limit: Optional[int] = None) -> List[Dict]:
+        """
+        Fetches historical trade data for a given symbol from an exchange.
+
+        This is a passthrough to the underlying ccxt_interface method.
+        """
+        logging.debug(f"Fetching historical trades for {symbol} on {exchange} (since: {since}, limit: {limit})")
+        
+        exchange_instance = self.exchange_list.get(exchange)
+        if not exchange_instance:
+            logging.error(f"Exchange '{exchange}' not loaded in CCXTInterface.")
+            return []
+            
+        try:
+            # CCXT's fetch_trades returns a list of trade dicts
+            trades = await exchange_instance.fetch_trades(symbol, since=since, limit=limit)
+            logging.info(f"Fetched {len(trades)} historical trades for {symbol} on {exchange}.")
+            return trades
+        except Exception as e:
+            logging.error(f"Error fetching historical trades for {symbol} on {exchange}: {e}", exc_info=True)
+            return []
+

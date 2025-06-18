@@ -152,3 +152,19 @@
     *   The `Supervisor.stop()` method calls `await self.data_source.close_all_exchanges()`. Verify this method is correctly implemented in `CCXTInterface` or `Data` within `trade_suite.data.data_source` to ensure all underlying CCXT WebSocket connections are properly closed during shutdown.
 
 This detailed breakdown should provide a solid foundation for planning the next development phases.
+
+- **[COMPLETED] Phase 3: InfluxDB Gap Audit & Nonce Checking.**
+  - **Status:** Done.
+  - **Details:** Implemented nonce checking in `sentinel/collectors/coinbase.py` to detect and log gaps in the WebSocket stream sequence, ensuring application-level data integrity. The system now logs warnings for missed messages.
+
+- **[COMPLETED] Phase 4: Standalone Service Hardening & Bug Fixing.**
+  - **Status:** Done.
+  - **Details:** Performed a comprehensive debugging session on the standalone `AlertBot` service. Resolved a cascade of startup errors, including `ValueError` on signal registration, `TypeError` on `CVDCalculator` instantiation, multiple `AttributeError`s due to inconsistent Pydantic models and missing `Data` facade methods. This has significantly improved the service's stability.
+
+- **[IN PROGRESS] Phase 5: Feature Implementation & Rule Engine.**
+  - **Status:** In Progress.
+  - **Next Step:** The `AlertBot` fails on startup because the `CVDCalculator` is being passed a raw trade `dict` instead of the expected `TradeData` Pydantic model during historical data seeding. The immediate next task is to modify `sentinel/alert_bot/manager.py` to correctly parse the dictionary into a `TradeData` object before calling the calculator's `add_trade` method.
+
+### Backlog / Future Work
+- **Advanced Alert Rules:**
+  - **Order Book Imbalance:** Alert on significant, persistent imbalances in the order book.

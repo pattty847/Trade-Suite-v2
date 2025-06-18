@@ -308,19 +308,19 @@ class AlertDataManager:
         # Register listeners with SignalEmitter
         # Ensure signal names match what trade_suite.SignalEmitter uses.
         # Using Signals enum/class members is preferred if available.
-        self.signal_emitter.register(self._on_updated_candles, Signals.UPDATED_CANDLES)
-        self.signal_emitter.register(self._on_new_trade, Signals.NEW_TRADE)
-        self.signal_emitter.register(self._on_new_ticker_data, Signals.NEW_TICKER_DATA)
-        logger.info("Registered signal handlers with SignalEmitter.")
+        self.signal_emitter.register(Signals.UPDATED_CANDLES, self._on_updated_candles)
+        self.signal_emitter.register(Signals.NEW_TRADE, self._on_new_trade)
+        self.signal_emitter.register(Signals.NEW_TICKER_DATA, self._on_new_ticker_data)
+        logger.info("AlertDataManager successfully registered its listeners with the SignalEmitter.")
 
     def _teardown_subscriptions(self):
         logger.info("AlertDataManager tearing down subscriptions from TaskManager and SignalEmitter...")
         
         # Unregister signal handlers first
         try:
-            self.signal_emitter.unregister(self._on_updated_candles, Signals.UPDATED_CANDLES)
-            self.signal_emitter.unregister(self._on_new_trade, Signals.NEW_TRADE)
-            self.signal_emitter.unregister(self._on_new_ticker_data, Signals.NEW_TICKER_DATA)
+            self.signal_emitter.unregister(Signals.UPDATED_CANDLES, self._on_updated_candles)
+            self.signal_emitter.unregister(Signals.NEW_TRADE, self._on_new_trade)
+            self.signal_emitter.unregister(Signals.NEW_TICKER_DATA, self._on_new_ticker_data)
             logger.info("Unregistered signal handlers from SignalEmitter.")
         except Exception as e: # Catch broad exceptions if unregister can fail (e.g., if not registered)
             logger.warning(f"Error unregistering signal handlers from AlertDataManager: {e}")
@@ -739,46 +739,51 @@ class AlertDataManager:
             logger.warning("No active symbol configurations to initialize processors for.")
             return
 
-        for symbol_config_key, symbol_config in self.active_alerts_config.symbols.items():
-            # Assuming Pydantic models (SymbolAlertConfig) ensure 'exchange' and 'symbol' are present.
-            exchange = symbol_config.exchange
-            symbol_name = symbol_config.symbol
-            rules = getattr(symbol_config, 'rules', []) # rules can be optional or empty
-
-            requires_cvd = any(getattr(rule, 'type', '').startswith("cvd") for rule in rules if getattr(rule, 'enabled', True))
-
-            if requires_cvd:
-                unique_key = f"{exchange}_{symbol_name}"
-                if unique_key not in self.cvd_calculators:
-                    logger.info(f"Initializing CVDCalculator for {unique_key}.")
-                    self.cvd_calculators[unique_key] = CVDCalculator(exchange=exchange, symbol=symbol_name)
+        for req_type, details_set in self._subscribed_requirements.items():
+            if req_type == "trades":
+                for exchange, symbol_name in details_set:
+                    # Find all CVD rules for this symbol to determine max lookback needed
+                    max_lookback_minutes = 0
                     
-                    # Fetch historical trades for seeding
-                    try:
-                        logger.info(f"Fetching historical trades for {unique_key} (limit 900) for CVD seeding...")
-                        # Assuming fetch_historical_trades can take a limit and returns newest first typically
-                        historical_trades = await self.data_source.fetch_historical_trades(
-                            exchange_id=exchange, 
-                            symbol=symbol_name, 
-                            limit=900
-                        )
+                    symbol_config = self._get_symbol_config(exchange, symbol_name)
+                    if symbol_config and hasattr(symbol_config, 'rules'):
+                        for rule in symbol_config.rules:
+                            if rule.type.startswith('cvd_'):
+                                # Duration string like "5m", "1h"
+                                duration_str = getattr(rule, 'timeframe_duration_str', '5m') # Default to 5m
+                                lookback_minutes = self._convert_duration_to_minutes(duration_str)
+                                if lookback_minutes and lookback_minutes > max_lookback_minutes:
+                                    max_lookback_minutes = lookback_minutes
+                    
+                    if max_lookback_minutes > 0:
+                        unique_key = f"{exchange}_{symbol_name}"
+                        if unique_key not in self.cvd_calculators:
+                            logger.info(f"Initializing CVDCalculator for {unique_key} with a lookback of {max_lookback_minutes} minutes.")
+                            # Pass the lookback period to the calculator
+                            self.cvd_calculators[unique_key] = CVDCalculator(lookback_minutes=max_lookback_minutes)
 
-                        if historical_trades:
-                            # CCXT often returns newest trades first, reverse for chronological order (oldest first for seeding)
-                            historical_trades.reverse()
-                            calculator = self.cvd_calculators[unique_key]
-                            for trade_dict in historical_trades:
-                                # Assuming CVDCalculator has add_trade_from_dict or similar
-                                # and it handles the structure of trade_dict from fetch_historical_trades
-                                calculator.add_trade_from_dict(trade_dict) 
-                            logger.info(f"Seeded CVDCalculator for {unique_key} with {len(historical_trades)} trades.")
+                            # Now, fetch historical data to seed it
+                            # The `fetch_candles` method in data_source is for OHLCV, we need raw trades.
+                            # Assuming fetch_historical_trades can take a limit and returns newest first typically
+                            historical_trades = await self.data_source.fetch_historical_trades(
+                                exchange=exchange, 
+                                symbol=symbol_name, 
+                                limit=900
+                            )
+
+                            if historical_trades:
+                                # CCXT often returns newest trades first, reverse for chronological order (oldest first for seeding)
+                                historical_trades.reverse()
+                                calculator = self.cvd_calculators[unique_key]
+                                for trade_dict in historical_trades:
+                                    # Assuming CVDCalculator has add_trade_from_dict or similar
+                                    # and it handles the structure of trade_dict from fetch_historical_trades
+                                    calculator.add_trade_from_dict(trade_dict) 
+                                logger.info(f"Seeded CVDCalculator for {unique_key} with {len(historical_trades)} trades.")
+                            else:
+                                logger.info(f"No historical trades returned for {unique_key} for CVD seeding.")
                         else:
-                            logger.info(f"No historical trades returned for {unique_key} for CVD seeding.")
-                    except Exception as e:
-                        logger.error(f"Error fetching or seeding historical trades for {unique_key}: {e}", exc_info=True)
-                else:
-                    logger.debug(f"CVDCalculator for {unique_key} already initialized.")
-            # Add other processor initializations here (e.g., for different rule types)
+                            logger.debug(f"CVDCalculator for {unique_key} already initialized.")
         logger.info("Finished initializing processors and fetching history.")
 
     async def _initialize_notifiers(self):
