@@ -50,7 +50,7 @@ class OhlcvDownloader:
             write_to_db=write_to_db
         )
         self.logger.info("\nCandle data fetching complete.")
-        self.logger.info(f"CSV files should be saved in the '{self.data_handler.cache_dir}' directory.")
+        self.logger.info(f"CSV files should be saved in the '{self.data_handler.cache_store.cache_dir}' directory.")
 
     async def close_connections(self):
         if hasattr(self.data_handler, 'close_all_exchanges'):
