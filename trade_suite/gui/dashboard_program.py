@@ -226,7 +226,6 @@ class DashboardProgram:
         with dpg.window(label="Debug Info", width=400, height=300):
             dpg.add_text(f"Platform: {platform.system()} {platform.release()}")
             dpg.add_text(f"Python: {platform.python_version()}")
-            dpg.add_text(f"DearPyGui: {dpg.get_version()}")
             dpg.add_separator()
             dpg.add_text("Loaded Exchanges:")
             for ex in self.core.data.exchange_list.keys():
