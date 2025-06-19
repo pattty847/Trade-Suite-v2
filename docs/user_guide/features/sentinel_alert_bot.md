@@ -6,10 +6,14 @@ graph TD
 
     subgraph TradeSuite_Core
         style TradeSuite_Core fill:#e1f5fe,stroke:#b3e5fc
-        TS_Data["DataFacade (data_source.py)"] -- Fetches/Streams --> Internet["Exchanges (CCXT Pro)"]
-        TS_TaskManager["TaskManager (task_manager.py)"]
-        TS_SignalEmitter["SignalEmitter (signals.py)"]
+        TS_CoreFacade["CoreServicesFacade (core/facade.py)"]
+        TS_Data["DataFacade (core/data/data_source.py)"] -- Fetches/Streams --> Internet["Exchanges (CCXT Pro)"]
+        TS_TaskManager["TaskManager (core/task_manager.py)"]
+        TS_SignalEmitter["SignalEmitter (core/signals.py)"]
         TS_CandleFactory["CandleFactory Instances"]
+        TS_CoreFacade --> TS_TaskManager
+        TS_CoreFacade --> TS_Data
+        TS_CoreFacade --> TS_SignalEmitter
         
         TS_TaskManager -- Manages Lifecycle --> TS_Data
         TS_TaskManager -- Manages Lifecycle --> TS_CandleFactory
@@ -43,7 +47,6 @@ graph TD
     TS_Data -- Emits NEW_TRADE, NEW_TICKER_DATA --> TS_SignalEmitter
     TS_CandleFactory -- Emits UPDATED_CANDLES --> TS_SignalEmitter
     TS_SignalEmitter -- Publishes Events --> ADM
-
     ADM -- Handles UPDATED_CANDLES --> AB_RuleLogic
     ADM -- Handles NEW_TRADE --> AB_Processors
     AB_Processors -- Updates State --> AB_Processors
