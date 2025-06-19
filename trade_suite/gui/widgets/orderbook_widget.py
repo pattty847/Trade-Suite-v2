@@ -1,15 +1,15 @@
 import logging
-import dearpygui.dearpygui as dpg
-import numpy as np
-from typing import Optional, List, Dict, Any, Tuple, TYPE_CHECKING
+from typing import Optional, Dict, Any, TYPE_CHECKING
 
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.widgets.base_widget import DockableWidget
+from .base_widget import DockableWidget
+from ...core.facade import CoreServicesFacade
+from trade_suite.core.signals import SignalEmitter, Signals
 from trade_suite.analysis.orderbook_processor import OrderBookProcessor
+import dearpygui.dearpygui as dpg
 
 # Forward declaration for type hinting
 if TYPE_CHECKING:
-    from trade_suite.gui.task_manager import TaskManager
+    from trade_suite.core.task_manager import TaskManager
 
 
 class OrderbookWidget(DockableWidget):
@@ -17,40 +17,38 @@ class OrderbookWidget(DockableWidget):
     Widget for displaying and interacting with order book data.
     """
     
+    WIDGET_TYPE = "orderbook"
+    WIDGET_TITLE = "Orderbook"
+
     def __init__(
         self,
-        emitter: SignalEmitter,
-        task_manager: 'TaskManager',
+        core: CoreServicesFacade,
+        instance_id: str,
         exchange: str,
         symbol: str,
-        instance_id: Optional[str] = None,
         width: int = 400,
         height: int = 500,
+        **kwargs,
     ):
         """
         Initialize an order book widget.
         
         Args:
-            emitter: Signal emitter
-            task_manager: Task manager instance
+            core: The core services facade.
+            instance_id: Unique identifier for this widget instance.
             exchange: Exchange name (e.g., 'coinbase')
             symbol: Trading pair (e.g., 'BTC/USD')
-            instance_id: Optional unique instance identifier
             width: Initial widget width
             height: Initial widget height
         """
-        # Create a unique ID if not provided
-        if instance_id is None:
-            instance_id = f"{exchange}_{symbol}".lower().replace("/", "")
-            
+        self.WIDGET_TITLE = f"Orderbook - {exchange.upper()} {symbol}"
+
         super().__init__(
-            title=f"Orderbook - {exchange.upper()} {symbol}",
-            widget_type="orderbook",
-            emitter=emitter,
-            task_manager=task_manager,
+            core=core,
             instance_id=instance_id,
             width=width,
             height=height,
+            **kwargs,
         )
         
         # Configuration

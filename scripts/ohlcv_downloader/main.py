@@ -27,7 +27,7 @@ if __name__ == "__main__":
         top_symbols_config = None
         symbols_to_fetch = ["BTC/USD"]
     
-    timeframes_to_use = ['6h']
+    timeframes_to_use = ['1d']
     since_date_to_use = '2024-09-01T00:00:00Z'
     # --- End User-defined parameters ---
 

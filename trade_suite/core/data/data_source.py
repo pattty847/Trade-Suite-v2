@@ -4,10 +4,10 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, TYPE_CHECKING
 import pandas as pd
 
 from trade_suite.analysis.market_aggregator import MarketAggregator
-from trade_suite.data.ccxt_interface import CCXTInterface
-from trade_suite.data.influx import InfluxDB
-from trade_suite.gui.signals import SignalEmitter
-from trade_suite.gui.task_manager import TaskManager
+from .ccxt_interface import CCXTInterface
+from .influx import InfluxDB
+from ..signals import SignalEmitter
+from ..task_manager import TaskManager
 
 from .cache_store import CacheStore
 from .candle_fetcher import CandleFetcher

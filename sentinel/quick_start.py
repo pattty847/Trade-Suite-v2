@@ -1,8 +1,9 @@
 import asyncio
 
+from trade_suite.core.data.data_source import Data
+import asyncio, os
+
 async def smoke():
-    from trade_suite.data.data_source import Data
-    import asyncio, os
     ds = Data(influx=None, emitter=None, exchanges=['coinbase'], force_public=True)
     await ds.load_exchanges()
     stop = asyncio.Event()

@@ -6,9 +6,10 @@ import signal # For graceful shutdown
 import logging.handlers # For RotatingFileHandler
 from typing import Optional
 
-from trade_suite.data.data_source import Data as TradeSuiteData # Alias to avoid confusion
 from sentinel.collectors.coinbase import stream_data_to_queues
+from sentinel.config import INFLUX_CONFIG, WS_RECONNECT_BACKOFF
 from sentinel.writers.influx_writer import InfluxWriter
+from trade_suite.core.data.data_source import Data as TradeSuiteData # Alias to avoid confusion
 from sentinel import config
 
 # Basic logging setup - consider using structlog as planned for richer logs
@@ -56,7 +57,7 @@ class Supervisor:
         # The actual counters should be accessed from collector or passed via a shared mechanism if needed here
 
         # Initialize InfluxWriter
-        influx_token = os.getenv("INFLUXDB_TOKEN_LOCAL") # Or your preferred token env var
+        influx_token = os.getenv("INFLUXDB_TOKEN_LOCAL")
         if not influx_token:
             logger.critical("INFLUXDB_TOKEN_LOCAL environment variable not set. Sentinel cannot start.")
             raise ValueError("InfluxDB token not found in environment.")

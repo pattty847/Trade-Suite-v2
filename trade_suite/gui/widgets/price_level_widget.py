@@ -1,61 +1,60 @@
+import dearpygui.dearpygui as dpg
 import logging
 import time
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
-import dearpygui.dearpygui as dpg
 import numpy as np  # Local import to avoid global dependency issues if NumPy is unavailable at import time
 
-from trade_suite.gui.signals import SignalEmitter, Signals
-from trade_suite.gui.widgets.base_widget import DockableWidget
+from .base_widget import DockableWidget
+from ...core.facade import CoreServicesFacade
+from ...analysis.orderbook_processor import OrderBookProcessor
+from ...core.signals import Signals
 
 # Forward declaration for type hinting
 if TYPE_CHECKING:
-    from trade_suite.gui.task_manager import TaskManager
+    from trade_suite.core.task_manager import TaskManager
 
 
 class PriceLevelWidget(DockableWidget):
     """
     Widget for displaying aggregated order book depth in a table format (Price Levels / DOM).
     """
+    WIDGET_TYPE = "price_level"
+    WIDGET_TITLE = "Price Levels"
 
     def __init__(
         self,
-        emitter: SignalEmitter,
-        task_manager: 'TaskManager', # Added TaskManager
+        core: CoreServicesFacade,
+        instance_id: str,
         exchange: str,
         symbol: str,
-        instance_id: Optional[str] = None,
         max_depth: int = 15,
-        default_tick_size: float = 1.0, # Changed default for broader applicability
+        default_tick_size: float = 1.0,
         width: int = 250,
-        height: int = 600, # Adjusted default height
+        height: int = 600,
+        **kwargs,
     ):
         """
         Initialize a Price Level widget.
 
         Args:
-            emitter: Signal emitter
-            task_manager: Task manager instance
+            core: The core services facade.
+            instance_id: Unique identifier for this widget instance.
             exchange: Exchange name (e.g., 'coinbase')
             symbol: Trading pair (e.g., 'BTC/USD')
-            instance_id: Optional unique instance identifier
             max_depth: Number of price levels to show on each side
             default_tick_size: Initial aggregation level
             width: Initial widget width
             height: Initial widget height
         """
-        # Create a unique ID if not provided
-        if instance_id is None:
-            instance_id = f"{exchange}_{symbol}_pricelevel".lower().replace("/", "")
-
+        self.WIDGET_TITLE = f"Levels - {exchange.upper()} {symbol}"
+        
         super().__init__(
-            title=f"Levels - {exchange.upper()} {symbol}",
-            widget_type="price_level", # Use a distinct type
-            emitter=emitter,
-            task_manager=task_manager, # Pass task_manager to base
+            core=core,
             instance_id=instance_id,
             width=width,
             height=height,
+            **kwargs,
         )
 
         # Configuration
@@ -68,7 +67,6 @@ class PriceLevelWidget(DockableWidget):
         self.price_precision = default_tick_size if default_tick_size > 0 else 0.01
 
         # Use shared OrderBookProcessor for fast NumPy aggregation & cumulative calcs
-        from trade_suite.analysis.orderbook_processor import OrderBookProcessor
         self.processor = OrderBookProcessor(price_precision=self.price_precision, initial_tick_size=self.tick_size)
 
         # UI Tags

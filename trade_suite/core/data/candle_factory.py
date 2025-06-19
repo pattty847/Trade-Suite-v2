@@ -7,12 +7,12 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 import numpy as np
 
-from trade_suite.gui.signals import SignalEmitter, Signals
+from ..signals import SignalEmitter, Signals
 from trade_suite.gui.utils import timeframe_to_seconds
 
 if TYPE_CHECKING:
-    from trade_suite.data.data_source import Data
-    from trade_suite.gui.task_manager import TaskManager
+    from .data_source import Data
+    from ..task_manager import TaskManager
 
 
 class CandleFactory:
@@ -134,20 +134,24 @@ class CandleFactory:
 
         # If candles were updated, emit the update with full market identifiers
         if updated_candles is not None and not updated_candles.empty:
-            # Emit the updated candle (or the whole series if needed, but usually just the last one)
-            last_candle = self.ohlcv.iloc[-1:] # Get last row as DataFrame
-            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) emitting UPDATED_CANDLES signal - shape: {last_candle.shape}")
-            # Log the actual data being emitted
-            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) Emitting Candle Data:\n{last_candle.to_string()}")
+            # Get the last row, which is the updated candle
+            last_candle_series = self.ohlcv.iloc[-1]
+            
+            # Create a new DataFrame from this series.
+            last_candle_df = pd.DataFrame([last_candle_series])
+            
+            # Set the index to be a DatetimeIndex, but KEEP the original 'dates' column.
+            # This makes the format consistent with the initial historical data load.
+            last_candle_df.set_index(pd.to_datetime(last_candle_df['dates'], unit='s'), inplace=True, drop=False)
+            
+            logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) emitting UPDATED_CANDLES signal")
             self.emitter.emit(
                 Signals.UPDATED_CANDLES,
                 exchange=self.exchange,
                 symbol=self.symbol,
                 timeframe=self.timeframe_str,
-                candles=last_candle,
+                candles=last_candle_df,
             )
-        # else: # Log if no update occurred (optional)
-            # logging.debug(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) - processor returned no candle updates after processing {len(batch_trades)} trades")
             
         self.last_update_time = time.time()
 
@@ -179,7 +183,7 @@ class CandleFactory:
         elif self.last_candle_timestamp is None:
             # If OHLCV is empty and no last timestamp, this is the very first trade
             logging.info(f"CandleFactory ({self.exchange}/{self.symbol}/{self.timeframe_str}) processing first trade.")
-            self.last_candle_timestamp = adjusted_timestamp # Start from this trade's candle boundary
+            self.last_candle_timestamp = adjusted_timestamp
 
         # Check if this trade belongs to a new candle
         # Use >= for safety, although > should be sufficient if timestamps are precise

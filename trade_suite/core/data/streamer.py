@@ -3,9 +3,9 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 import ccxt
 
-from trade_suite.data.influx import InfluxDB
+from .influx import InfluxDB
 from trade_suite.analysis.market_aggregator import MarketAggregator
-from trade_suite.gui.signals import SignalEmitter, Signals
+from ..signals import SignalEmitter, Signals
 
 
 class Streamer:
