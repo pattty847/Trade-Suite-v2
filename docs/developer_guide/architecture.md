@@ -46,8 +46,8 @@ graph TD
 ## 4. Runtime Flow (Happy Path)
 1.  **`[BOOT]`**: `python -m trade_suite` executes `src/trade_suite/__main__.py`.
 2.  **`[BOOT]`**: Parses CLI args (`argparse`), loads `.env`, sets up logging.
-3.  **`[BOOT]`**: Initializes core services: `SignalEmitter`, `CCXTInterface`, `DataSource`, `TaskManager` (starts its background `asyncio` loop thread).
-4.  **`[BOOT]`**: Instantiates `Viewport`.
+3.  **`[BOOT]`**: Creates a `CoreServicesFacade` instance which sets up `SignalEmitter`, `CCXTInterface`, `DataFacade`, and `TaskManager` in `trade_suite.core`.
+4.  **`[BOOT]`**: Instantiates `Viewport` and passes the `CoreServicesFacade`.
 5.  **`[BOOT]`**: `Viewport` configures DPG (`docking=True`, `init_file='config/user_layout.ini'`), creates main window, viewport menu bar, and docking space.
 6.  **`[BOOT]`**: `Viewport` instantiates `DashboardManager` (loads layout `.ini`) and `DashboardProgram`.
 7.  **`[BOOT]`**: `Viewport` calls `DashboardProgram.initialize_program()`.
@@ -72,11 +72,12 @@ graph TD
 |----------------|----------------------------------------|---------------------------------------------|-------------------------------------|---------------------------------------------|
 | **UI**         | `src/trade_suite/gui/widgets/`         | `BaseWidget` subclasses, `Viewport`         | DashboardProgram (via signals), TaskManager (subscribe/unsubscribe) | Rendering, User Input, Local State Mgmt     |
 | **Dashboard**  | `src/trade_suite/gui/dashboard_program.py` | `DashboardProgram`, `DashboardManager`      | Viewport, TaskManager, Widgets (creation), Config | Widget Lifecycle, Layout Mgmt, Creation Dialogs |
-| **Orchestration**| `src/trade_suite/task_manager.py`      | `TaskManager`, `StreamKey`                  | DataSource, CandleFactory, Widgets (data delivery), DPG Job Pool | Data Routing, Resource Lifecycle (Streams/Factories), Async Task Mgmt |
-| **Data Source**| `src/trade_suite/data/data_source.py`  | `DataFacade`                                | External Exchanges (CCXT), TaskManager (queues) | Orchestrates `CacheStore`, `CandleFetcher`, `Streamer` |
+| **Core Services** | `src/trade_suite/core/facade.py` | `CoreServicesFacade` | Viewport, DashboardProgram, AlertBot | Aggregates DataFacade, TaskManager, SignalEmitter |
+| **Orchestration**| `src/trade_suite/core/task_manager.py`      | `TaskManager`, `StreamKey`                  | DataSource, CandleFactory, Widgets (data delivery), DPG Job Pool | Data Routing, Resource Lifecycle (Streams/Factories), Async Task Mgmt |
+| **Data Source**| `src/trade_suite/core/data/data_source.py`  | `DataFacade`                                | External Exchanges (CCXT), TaskManager (queues) | Orchestrates `CacheStore`, `CandleFetcher`, `Streamer` |
 | **Data Proc.** | `src/trade_suite/data/candle_factory.py`| `CandleFactory`                             | TaskManager (signals/queues)        | Trade Aggregation -> Candles              |
 | **Config**     | `config/`, `.ini`, `src/trade_suite/config.py` | `ConfigManager` (implicitly via DPG/DashMgr) | Filesystem, (Read by DashboardManager, DPG) | Startup Settings, Layout Persistence        |
-| **Shared**     | `src/trade_suite/gui/signals.py`       | `SignalEmitter`, `Signals`                  | (Used by multiple layers)           | Application-wide Pub/Sub Events           |
+| **Shared**     | `src/trade_suite/core/signals.py`       | `SignalEmitter`, `Signals`                  | (Used by multiple layers)           | Application-wide Pub/Sub Events           |
 
 ## 6. Core Classes (Illustrative Signatures)
 
@@ -124,7 +125,7 @@ class BaseWidget:
 ```
 
 ```python
-# src/trade_suite/task_manager.py
+# src/trade_suite/core/task_manager.py
 from collections import namedtuple
 StreamKey = namedtuple('StreamKey', ['type', 'exchange', 'symbol', 'timeframe', 'misc'])
 
@@ -138,7 +139,7 @@ class TaskManager:
 ```
 
 ```python
-# src/trade_suite/data/data_source.py
+# src/trade_suite/core/data/data_source.py
 class DataFacade:
     def __init__(self, influx, emitter, exchanges=None): ...
     async def watch_trades(self, symbol: str, exchange: str, stop_event: asyncio.Event) -> None: ...
