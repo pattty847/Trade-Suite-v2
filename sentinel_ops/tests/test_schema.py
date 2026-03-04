@@ -1,6 +1,6 @@
 import unittest
-from sentinel import schema
-from sentinel import config # For accessing constants like RAW_BOOK_TOP_N for tests
+from sentinel_ops import schema
+from sentinel_ops import config # For accessing constants like RAW_BOOK_TOP_N for tests
 
 class TestSchemaBuilders(unittest.TestCase):
 

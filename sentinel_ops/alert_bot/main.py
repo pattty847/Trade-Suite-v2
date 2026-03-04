@@ -2,7 +2,7 @@ import sys
 import os
 
 # Add the project root (Trade-Suite-v2) to sys.path
-# This allows imports like `from sentinel...` and `from trade_suite...` to work correctly
+# This allows imports like `from sentinel_ops...` and `from trade_suite...` to work correctly
 # when the script is run as `python sentinel/alert_bot/main.py` from the project root.
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if project_root not in sys.path:
@@ -20,11 +20,11 @@ from typing import Optional
 # from typing import Any, Optional, Dict, Set, List # No longer directly used here
 
 # Updated imports for AlertDataManager and trade_suite components
-from sentinel.alert_bot.config.loader import load_alerts_from_yaml, create_example_global_config_file # Changed from load_config
-from sentinel.alert_bot.manager import AlertDataManager
-from sentinel.alert_bot.notifier.async_email_notifier import AsyncEmailNotifier # Keep for --test-email
-# from sentinel.alert_bot.notifier.async_console_notifier import AsyncConsoleNotifier # Not directly used in main after refactor
-from sentinel.alert_bot.metrics import start_metrics_server
+from sentinel_ops.alert_bot.config.loader import load_alerts_from_yaml, create_example_global_config_file # Changed from load_config
+from sentinel_ops.alert_bot.manager import AlertDataManager
+from sentinel_ops.alert_bot.notifier.async_email_notifier import AsyncEmailNotifier # Keep for --test-email
+# from sentinel_ops.alert_bot.notifier.async_console_notifier import AsyncConsoleNotifier # Not directly used in main after refactor
+from sentinel_ops.alert_bot.metrics import start_metrics_server
 
 # Trade Suite components
 from trade_suite.core.facade import CoreServicesFacade
@@ -83,7 +83,7 @@ async def async_main():
     
     if args.create_config:
         try:
-            from sentinel.alert_bot.config.loader import create_example_global_config_file
+            from sentinel_ops.alert_bot.config.loader import create_example_global_config_file
             # Determine the path relative to the main.py script's location or project root
             # Assuming main.py is in sentinel/alert_bot/
             output_dir = Path(__file__).parent / "config"

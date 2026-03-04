@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import logging
 import threading
 from typing import Any, Dict, List, Set, Tuple, TYPE_CHECKING
@@ -10,7 +11,7 @@ from .signals import Signals
 
 from ..gui.stream_subscription import StreamSubscription
 
-from ..gui.utils import (
+from .runtime_utils import (
     calculate_since,
     create_timed_popup,
 )
@@ -20,13 +21,24 @@ if TYPE_CHECKING:
 
 
 class TaskManager:
-    def __init__(self, data: "Data", sec_fetcher: SECDataFetcher):
+    def __init__(
+        self,
+        data: "Data",
+        sec_fetcher: SECDataFetcher,
+        mode: str = "thread",
+        loop: asyncio.AbstractEventLoop | None = None,
+    ):
+        if mode not in {"thread", "external"}:
+            raise ValueError(f"Invalid TaskManager mode: {mode}")
+
+        self.mode = mode
         self.data = data
         self.sec_fetcher = sec_fetcher
-        self.tasks: Dict[str, asyncio.Task] = {}
+        self.tasks: Dict[str, Any] = {}
         self.loop: asyncio.AbstractEventLoop = None
         self.thread: threading.Thread = None
         self.running = True
+        self._closing = False
 
         # Centralized factory storage (keyed by (exchange, symbol, timeframe))
         self.candle_factories: Dict[Tuple[str, str, str], CandleFactory] = {}
@@ -50,10 +62,16 @@ class TaskManager:
         # Event used to signal when the asyncio loop has been created
         self.loop_ready = threading.Event()
 
-        # TaskManager always runs its own event loop in a separate thread.
-        self.thread = threading.Thread(target=self.run_loop, daemon=True)
-        self.thread.start()
-        self.loop_ready.wait() # Wait for the loop to be initialized
+        if self.mode == "thread":
+            # Thread mode keeps legacy behavior.
+            self.thread = threading.Thread(target=self.run_loop, daemon=True)
+            self.thread.start()
+            self.loop_ready.wait()  # Wait for the loop to be initialized
+        else:
+            if loop is None:
+                raise ValueError("External mode requires an asyncio loop.")
+            self.loop = loop
+            self.loop_ready.set()
 
         # Now that the asyncio loop is ready, inform Data so it can emit
         # signals thread-safely without the intermediate queue.
@@ -149,8 +167,21 @@ class TaskManager:
                 logging.error(f"Error in task '{name}': {e}", exc_info=True)
                 return None, e  # Return no result and the error
 
-        task = asyncio.run_coroutine_threadsafe(wrapped_coro(), self.loop)
-        return task
+        return self._schedule_coro(wrapped_coro())
+
+    def _schedule_coro(self, coro):
+        if self.mode == "thread":
+            return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+        if not self.loop:
+            raise RuntimeError("TaskManager loop is not available in external mode.")
+
+        # In external mode (qasync), this is normally called from the Qt/UI thread
+        # that owns the loop, so create_task is the safe/default path.
+        if threading.current_thread() is threading.main_thread():
+            return self.loop.create_task(coro)
+
+        return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
     def _get_resource_keys(
         self, requirements: dict
@@ -227,6 +258,32 @@ class TaskManager:
                         # First subscription for this stream, start it
                         self._start_stream_if_needed(key)
 
+            # If a candle factory already has data, immediately replay it so late-subscribing
+            # charts do not render a single live candle while waiting for fresh history fetches.
+            if requirements.get("type") == "candles":
+                exchange = requirements.get("exchange")
+                symbol = requirements.get("symbol")
+                timeframe = requirements.get("timeframe")
+                factory_key = (exchange, symbol, timeframe)
+                factory = self.candle_factories.get(factory_key)
+                if factory is not None:
+                    candles_df = factory.get_candle_data()
+                    if candles_df is not None and not candles_df.empty:
+                        logging.info(
+                            "Replaying %d cached candles for %s/%s/%s to new subscriber %s",
+                            len(candles_df),
+                            exchange,
+                            symbol,
+                            timeframe,
+                            widget_id,
+                        )
+                        self._update_ui_with_candles(
+                            exchange=exchange,
+                            symbol=symbol,
+                            timeframe=timeframe,
+                            candles=candles_df,
+                        )
+
     def _create_candle_factory_if_needed(self, factory_key: Tuple[str, str, str]):
         """Creates and initializes a CandleFactory."""
         if factory_key in self.candle_factories:
@@ -268,7 +325,7 @@ class TaskManager:
 
         if coro:
             logging.info(f"Starting new stream task for key: {stream_key}")
-            task = asyncio.run_coroutine_threadsafe(coro, self.loop)
+            task = self._schedule_coro(coro)
             # Store the task in the main tasks dictionary
             self.tasks[stream_key] = task
             # Store the subscription object with just the stop event
@@ -313,7 +370,10 @@ class TaskManager:
         logging.info(f"Stopping stream for key: {stream_key}")
         subscription = self.stream_subscriptions.pop(stream_key, None)
         if subscription:
-            self.loop.call_soon_threadsafe(subscription.stop_event.set)
+            if self.mode == "thread":
+                self.loop.call_soon_threadsafe(subscription.stop_event.set)
+            else:
+                subscription.stop_event.set()
             # The task will be cancelled within the coroutine, but we also remove it from our tracking
             self.tasks.pop(stream_key, None)
             
@@ -416,6 +476,11 @@ class TaskManager:
         :param coro: Specify the coroutine to run
         :return: The result of the coroutine
         """
+        if self.mode == "external":
+            raise RuntimeError(
+                "run_task_until_complete is not available in external mode. Use await instead."
+            )
+
         if threading.current_thread() is self.thread:
             # If we are already in the event loop's thread, we can't block.
             # This is an advanced case, but good to handle.
@@ -441,6 +506,9 @@ class TaskManager:
         :doc-author: Trelent
         """
         # Create a future to run the coroutine
+        if self.mode == "external":
+            raise RuntimeError("run_task_with_loading_popup is unsupported in external mode.")
+
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
 
         # Log start of task to avoid blocking UI thread with prints
@@ -475,7 +543,10 @@ class TaskManager:
         if task_future:
             if not task_future.done():
                 # Schedule cancellation in the event loop thread
-                self.loop.call_soon_threadsafe(task_future.cancel)
+                if self.mode == "thread":
+                    self.loop.call_soon_threadsafe(task_future.cancel)
+                else:
+                    task_future.cancel()
                 logging.info(f"Cancellation requested for task '{name}'.")
                 # Note: Cancellation is requested, but the task might take time to actually stop.
                 # We don't explicitly wait here to avoid blocking.
@@ -589,12 +660,11 @@ class TaskManager:
         Stops all tasks, closes async resources, and closes the event loop thread.
         """
         logging.info("TaskManager cleanup initiated.")
+        if self.mode == "external":
+            raise RuntimeError("cleanup() is not supported in external mode; use await aclose().")
         self.running = False
-
-        # Stop all running tasks and clear subscriptions
         self.stop_all_tasks()
 
-        # --- Close async resources BEFORE stopping the loop ---
         if self.loop and self.loop.is_running() and self.sec_fetcher:
             try:
                 logging.info("Closing SECDataFetcher resources...")
@@ -606,13 +676,11 @@ class TaskManager:
                 logging.error("Timeout waiting for SECDataFetcher to close.")
             except Exception as e:
                 logging.error(f"Error closing SECDataFetcher: {e}", exc_info=True)
-        
-        # Stop the event loop itself
+
         if self.loop and self.loop.is_running():
             logging.info("Stopping event loop...")
             self.loop.call_soon_threadsafe(self.loop.stop)
 
-        # Wait for the event loop thread to finish
         if self.thread and self.thread.is_alive():
             logging.info("Waiting for event loop thread to join...")
             self.thread.join(timeout=5)
@@ -620,6 +688,95 @@ class TaskManager:
                 logging.warning("Event loop thread did not join cleanly.")
 
         logging.info("TaskManager cleanup complete.")
+
+    async def aclose(self):
+        """Graceful async shutdown for both thread and external loop modes."""
+        if self._closing:
+            return
+        self._closing = True
+        self.running = False
+        logging.info("TaskManager async shutdown initiated (mode=%s).", self.mode)
+
+        for sub in self.stream_subscriptions.values():
+            try:
+                sub.stop_event.set()
+            except Exception:
+                pass
+
+        task_items = list(self.tasks.items())
+        for name, task in task_items:
+            if isinstance(task, asyncio.Task):
+                task.cancel()
+                continue
+            if isinstance(task, concurrent.futures.Future):
+                task.cancel()
+                continue
+            try:
+                task.cancel()
+            except Exception:
+                logging.debug("Task %s could not be cancelled directly", name)
+
+        awaitables = []
+        for _name, task in task_items:
+            if isinstance(task, asyncio.Task):
+                awaitables.append(task)
+            elif isinstance(task, concurrent.futures.Future):
+                try:
+                    awaitables.append(asyncio.wrap_future(task))
+                except Exception:
+                    pass
+
+        if awaitables:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*awaitables, return_exceptions=True),
+                    timeout=10.0,
+                )
+            except asyncio.TimeoutError:
+                logging.warning("Timed out waiting for TaskManager tasks to finish.")
+
+        self.tasks.clear()
+        self.stream_subscriptions.clear()
+        self.widget_subscriptions.clear()
+        self.resource_to_widgets.clear()
+
+        for key, factory in list(self.candle_factories.items()):
+            try:
+                factory.cleanup()
+            except Exception as exc:
+                logging.warning("Factory cleanup failed for %s: %s", key, exc)
+        self.candle_factories.clear()
+        self.factory_ref_counts.clear()
+
+        if self.sec_fetcher:
+            try:
+                await self.sec_fetcher.close()
+            except Exception as exc:
+                logging.warning("SECDataFetcher close failed: %s", exc)
+
+        if self.data:
+            try:
+                await self.data.close_all_exchanges()
+            except Exception as exc:
+                logging.warning("Exchange close_all_exchanges failed: %s", exc)
+
+        if self.mode == "thread" and self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            if self.thread and self.thread.is_alive():
+                self.thread.join(timeout=5)
+
+        try:
+            pending = [
+                t
+                for t in asyncio.all_tasks(self.loop)
+                if not t.done() and t is not asyncio.current_task(self.loop)
+            ]
+            if pending:
+                logging.warning("TaskManager shutdown left %d pending tasks.", len(pending))
+            else:
+                logging.info("TaskManager shutdown complete with no pending tasks.")
+        except Exception:
+            logging.info("TaskManager shutdown complete.")
 
     async def stop_all_tasks_async(self):
         """The async part of stopping all tasks. Cancels and gathers them."""
@@ -655,6 +812,7 @@ class TaskManager:
 
     def is_stream_running(self, stream_id: str) -> bool:
         """Checks if a stream task is running and its event is set."""
+        is_subscribed = False
         with self.lock:
             sub = self.stream_subscriptions.get(stream_id)
             # A stream is running if it has a subscription object

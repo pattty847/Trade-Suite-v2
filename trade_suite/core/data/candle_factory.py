@@ -8,7 +8,7 @@ from datetime import datetime
 import numpy as np
 
 from ..signals import SignalEmitter, Signals
-from trade_suite.gui.utils import timeframe_to_seconds
+from trade_suite.core.runtime_utils import timeframe_to_seconds
 
 if TYPE_CHECKING:
     from .data_source import Data

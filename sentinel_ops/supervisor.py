@@ -6,11 +6,10 @@ import signal # For graceful shutdown
 import logging.handlers # For RotatingFileHandler
 from typing import Optional
 
-from sentinel.collectors.coinbase import stream_data_to_queues
-from sentinel.config import INFLUX_CONFIG, WS_RECONNECT_BACKOFF
-from sentinel.writers.influx_writer import InfluxWriter
+from sentinel_ops.collectors.coinbase import stream_data_to_queues
+from sentinel_ops.writers.influx_writer import InfluxWriter
 from trade_suite.core.data.data_source import Data as TradeSuiteData # Alias to avoid confusion
-from sentinel import config
+from sentinel_ops import config
 
 # Basic logging setup - consider using structlog as planned for richer logs
 # Get the root logger

@@ -1,6 +1,7 @@
-# TradeSuite - A Multi-Exchange Cryptocurrency Trading Platform
+# Sentinel - Qt Trading Workstation
 
-TradeSuite is a multi-exchange cryptocurrency trading platform. It is currently being re-architected into a high-performance, distributed client-server system designed for 24/7 operation and advanced AI-driven analysis.
+Sentinel is the actively developed PySide6/pyqtgraph desktop workstation in this repository.  
+Legacy DearPyGUI code remains in-repo as reference, but Sentinel is the primary runtime.
 
 ![ezgif-8fe9048b423618](https://github.com/user-attachments/assets/e703a1f7-d0be-487e-bdfb-695e34073d53)
 ![image](https://github.com/user-attachments/assets/6f49af6f-3e56-43ce-aba0-24d8aca29b1b)
@@ -13,20 +14,28 @@ The development environment is being standardized on WSL2, and we will be levera
 
 For a detailed overview of the new architecture, technology stack, and implementation plan, please see the full design blueprint: **[Blueprint: TradeSuite v2 - Full System Architecture](docs/design_documents/active_proposals/trade_suite_full_ai_sentinel_integration.md)**.
 
-## Features (Legacy v1)
+## Quick Start
 
-- Dockable widgets and persistent layouts
-- Shared data streams for efficient multi-widget updates
-- Real-time candlestick charts, order book and price level DOM
-- Optional Sentinel alert bot for automated monitoring
+```bash
+uv sync
+uv run python -m sentinel
+```
+
+## Current Scope
+
+- Dockable Qt widgets with persistent layout restore
+- Real-time chart and orderbook widgets
+- Shared async market data runtime via `trade_suite.core`
+- `sentinel_ops` package retained for collector/alert-bot workflows
 
 ## Sentinel Monitoring Through Grafana
 ![image](https://github.com/user-attachments/assets/fc11ca26-ec19-43ca-8739-b9b1972db1f7)
 
 ## Documentation
 
-Full documentation lives in the [docs](docs/README.md) directory. The legacy application can be installed by following the original [Getting Started](docs/user_guide/getting_started.md) guide. Documentation for v2 will be updated as development progresses.
-See [Autonomous Agent Playground](docs/design_documents/active_proposals/autonomous_agent_playground.md) for the new AutoGen framework blueprint.
+Full docs live under [docs](docs/README.md).  
+Sentinel runtime path: `python -m sentinel`  
+Collector/ops runtime path: `python -m sentinel_ops.run`
 
 ## Contributing
 

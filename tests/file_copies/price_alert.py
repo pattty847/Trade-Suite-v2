@@ -5,7 +5,7 @@
 This module has been refactored into a more modular structure.
 Please use the new implementation in the sentinel/alert_bot/ package:
 
-    python -m sentinel.alert_bot.main
+    python -m sentinel_ops.alert_bot.main
 
 This monolithic version is kept for backwards compatibility only
 and will be removed in a future release.

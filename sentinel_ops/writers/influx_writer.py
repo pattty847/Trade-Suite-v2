@@ -8,7 +8,7 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.exceptions import InfluxDBError
 from influxdb_client.client.write_api import ASYNCHRONOUS, WriteOptions
 
-from sentinel import config
+from sentinel_ops import config
 
 class InfluxWriter:
     def __init__(self, influx_url: str, influx_token: str, influx_org: str):
@@ -235,6 +235,6 @@ async def main_writer_test():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-    # To run this test: python -m sentinel.writers.influx_writer
+    # To run this test: python -m sentinel_ops.writers.influx_writer
     # Ensure InfluxDB is running locally and INFLUXDB_TOKEN_LOCAL is set.
     asyncio.run(main_writer_test()) 

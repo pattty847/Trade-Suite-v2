@@ -3,7 +3,6 @@ import logging
 import queue
 import threading
 from typing import Callable
-import dearpygui.dearpygui as dpg
 from collections import deque
 from functools import partial
 import asyncio

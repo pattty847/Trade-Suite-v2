@@ -60,7 +60,7 @@ def build_trade_lp(exchange: str, symbol: str, side: str, size: float, price: fl
 #     }
 # }
 
-from sentinel import config # For binning constants
+from sentinel_ops import config # For binning constants
 import math # For rounding
 
 def build_book_lp(

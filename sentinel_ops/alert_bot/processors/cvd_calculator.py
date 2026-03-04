@@ -2,7 +2,7 @@ import logging
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 from collections import deque
-from sentinel.alert_bot.models.trade_data import TradeData
+from sentinel_ops.alert_bot.models.trade_data import TradeData
 
 logger = logging.getLogger(__name__)
 

@@ -60,4 +60,4 @@ if __name__ == "__main__":
     config_path = create_example_config()
     print(f"Example configuration created at: {config_path}")
     print("You can now run the alert bot with:")
-    print(f"  python -m sentinel.alert_bot.main --config {config_path}") 
+    print(f"  python -m sentinel_ops.alert_bot.main --config {config_path}") 

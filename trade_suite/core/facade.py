@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from typing import Callable
 
 from .signals import SignalEmitter, Signals
@@ -18,7 +19,12 @@ class CoreServicesFacade:
     It initializes and holds the instances of TaskManager, Data, and SignalEmitter,
     and exposes a clean, high-level API for clients to use.
     """
-    def __init__(self, force_public: bool = True):
+    def __init__(
+        self,
+        force_public: bool = True,
+        task_mode: str = "thread",
+        loop: asyncio.AbstractEventLoop | None = None,
+    ):
         """
         Initializes all core backend services. This is a synchronous operation.
         The TaskManager will start its own asyncio event loop in a background thread.
@@ -36,7 +42,12 @@ class CoreServicesFacade:
 
         # The TaskManager is the owner of the asyncio event loop.
         # It creates the loop in a separate thread upon initialization.
-        self.task_manager = TaskManager(data=self.data, sec_fetcher=self.sec_fetcher)
+        self.task_manager = TaskManager(
+            data=self.data,
+            sec_fetcher=self.sec_fetcher,
+            mode=task_mode,
+            loop=loop,
+        )
         
         # Now that the TaskManager has a running loop, provide it to the emitter
         # and data source for thread-safe operations.
@@ -53,11 +64,18 @@ class CoreServicesFacade:
         Args:
             exchanges (list[str]): A list of exchange IDs to load (e.g., ['coinbase', 'binance']).
         """
+        if self.task_manager.mode == "external":
+            raise RuntimeError("Use await start_async() when TaskManager is in external mode.")
         # Use the task manager to run the async load_exchanges method and wait for it to complete.
         self.task_manager.run_task_until_complete(
             self.data.load_exchanges(exchanges)
         )
         logger.info(f"Core services started for exchanges: {exchanges}")
+
+    async def start_async(self, exchanges: list[str]):
+        """Starts core services asynchronously (required for external loop mode)."""
+        await self.data.load_exchanges(exchanges)
+        logger.info("Core services started asynchronously for exchanges: %s", exchanges)
 
     def subscribe_to_candles(self, exchange: str, symbol: str, timeframe: str, widget_instance: object):
         """
@@ -101,5 +119,13 @@ class CoreServicesFacade:
     def cleanup(self):
         """Shuts down all core services gracefully."""
         logger.info("CoreServicesFacade cleanup initiated.")
+        if self.task_manager.mode == "external":
+            raise RuntimeError("Use await aclose() in external mode.")
         self.task_manager.cleanup()
-        logger.info("CoreServicesFacade cleanup complete.") 
+        logger.info("CoreServicesFacade cleanup complete.")
+
+    async def aclose(self):
+        """Async shutdown path for external loop integrations."""
+        logger.info("CoreServicesFacade async cleanup initiated.")
+        await self.task_manager.aclose()
+        logger.info("CoreServicesFacade async cleanup complete.")

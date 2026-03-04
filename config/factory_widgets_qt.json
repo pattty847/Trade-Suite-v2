@@ -1,0 +1,28 @@
+[
+  {
+    "instance_id": "chart_coinbase_btcusd_1m",
+    "widget_type": "chart",
+    "config": {
+      "exchange": "coinbase",
+      "symbol": "BTC/USD",
+      "timeframe": "1m"
+    }
+  },
+  {
+    "instance_id": "dom_coinbase_btcusd",
+    "widget_type": "dom",
+    "config": {
+      "exchange": "coinbase",
+      "symbol": "BTC/USD",
+      "levels": 18
+    }
+  },
+  {
+    "instance_id": "orderbook_coinbase_btcusd_depth",
+    "widget_type": "orderbook",
+    "config": {
+      "exchange": "coinbase",
+      "symbol": "BTC/USD"
+    }
+  }
+]

@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from trade_suite.data.data_source import Data
-from sentinel.alert_bot.manager import AlertDataManager
+from sentinel_ops.alert_bot.manager import AlertDataManager
 
 from .base import Agent
 

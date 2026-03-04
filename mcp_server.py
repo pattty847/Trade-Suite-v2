@@ -19,8 +19,8 @@ from trade_suite.gui.dashboard_program import DashboardProgram
 # from trade_suite.data.influx import InfluxDB # Keep original imports
 # --- Placeholder Imports for Sentinel and AlertBot ---
 # Make sure to adjust these paths to your actual project structure.
-# from sentinel.supervisor import Supervisor
-# from sentinel.alert_bot.manager import AlertDataManager
+# from sentinel_ops.supervisor import Supervisor
+# from sentinel_ops.alert_bot.manager import AlertDataManager
 
 # --- Configuration ---
 # For simplicity, we'll use basic logging. You might want to enhance this.

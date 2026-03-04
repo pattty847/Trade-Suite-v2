@@ -11,7 +11,7 @@ from pathlib import Path
 # Add the project root to Python path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from sentinel.alert_bot.fetcher.trade_streamer import TradeStreamer, CVDCalculator, TradeData
+from sentinel_ops.alert_bot.fetcher.trade_streamer import TradeStreamer, CVDCalculator, TradeData
 from datetime import datetime, timedelta
 
 # Setup logging
@@ -100,8 +100,8 @@ async def test_cvd_rule():
     """Test CVD rule evaluation with mock data"""
     logger.info("Testing CVD Rule...")
     
-    from sentinel.alert_bot.rules.cvd import CVDRule
-    from sentinel.alert_bot.state.manager import StateManager
+    from sentinel_ops.alert_bot.rules.cvd import CVDRule
+    from sentinel_ops.alert_bot.state.manager import StateManager
     
     # Create a CVD rule
     config = {

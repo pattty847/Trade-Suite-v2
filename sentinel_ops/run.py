@@ -10,8 +10,8 @@ import logging
 import signal
 import os
 
-from sentinel.supervisor import Supervisor
-from sentinel import config
+from sentinel_ops.supervisor import Supervisor
+from sentinel_ops import config
 
 # Logger setup is handled in supervisor.py, but run.py can also use it.
 logger = logging.getLogger("sentinel.run")

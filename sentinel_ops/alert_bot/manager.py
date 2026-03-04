@@ -11,21 +11,21 @@ from trade_suite.core.signals import SignalEmitter, Signals
 from trade_suite.core.facade import CoreServicesFacade
 
 # Alert Bot components
-from sentinel.alert_bot.config.loader import load_alerts_from_yaml, GlobalAlertConfig
-from sentinel.alert_bot.state.manager import StateManager
-from sentinel.alert_bot.models.trade_data import TradeData
-from sentinel.alert_bot.processors.cvd_calculator import CVDCalculator
-from sentinel.alert_bot.notifier.base import AsyncBaseNotifier
+from sentinel_ops.alert_bot.config.loader import load_alerts_from_yaml, GlobalAlertConfig
+from sentinel_ops.alert_bot.state.manager import StateManager
+from sentinel_ops.alert_bot.models.trade_data import TradeData
+from sentinel_ops.alert_bot.processors.cvd_calculator import CVDCalculator
+from sentinel_ops.alert_bot.notifier.base import AsyncBaseNotifier
 
 # Placeholder for rule engine and notifiers, will be used later
-# from sentinel.alert_bot.rules.engine import RuleEngine
-# from sentinel.alert_bot.notifier.base import Notifier # Or specific notifier instances
+# from sentinel_ops.alert_bot.rules.engine import RuleEngine
+# from sentinel_ops.alert_bot.notifier.base import Notifier # Or specific notifier instances
 
 # Import concrete notifier classes for Phase 5
-from sentinel.alert_bot.notifier.async_console_notifier import AsyncConsoleNotifier
-from sentinel.alert_bot.notifier.async_email_notifier import AsyncEmailNotifier
+from sentinel_ops.alert_bot.notifier.async_console_notifier import AsyncConsoleNotifier
+from sentinel_ops.alert_bot.notifier.async_email_notifier import AsyncEmailNotifier
 # Add other notifiers here as they are implemented, e.g.:
-# from sentinel.alert_bot.notifier.async_telegram_notifier import AsyncTelegramNotifier
+# from sentinel_ops.alert_bot.notifier.async_telegram_notifier import AsyncTelegramNotifier
 
 logger = logging.getLogger(__name__)
 

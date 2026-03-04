@@ -14,8 +14,8 @@ from .candle_fetcher import CandleFetcher
 from .streamer import Streamer
 
 if TYPE_CHECKING:
-    from sentinel.supervisor import Supervisor as SentinelSupervisor
-    from sentinel.alert_bot.manager import AlertDataManager
+    from sentinel_ops.supervisor import Supervisor as SentinelSupervisor
+    from sentinel_ops.alert_bot.manager import AlertDataManager
 
 
 class Data(CCXTInterface):
@@ -57,8 +57,8 @@ class Data(CCXTInterface):
         Initializes and starts Sentinel components (Supervisor and AlertDataManager).
         """
         # --- Local imports to break circular dependency ---
-        from sentinel.supervisor import Supervisor as SentinelSupervisor
-        from sentinel.alert_bot.manager import AlertDataManager
+        from sentinel_ops.supervisor import Supervisor as SentinelSupervisor
+        from sentinel_ops.alert_bot.manager import AlertDataManager
         
         logging.info("Initializing Sentinel services within TradeSuite...")
 
