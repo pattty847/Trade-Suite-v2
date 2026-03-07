@@ -2,8 +2,8 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from trade_suite.data.data_source import Data
-from trade_suite.data.ccxt_interface import CCXTInterface
+from sentinel.core.data.data_source import Data
+from sentinel.core.data.ccxt_interface import CCXTInterface
 
 
 @pytest.fixture
@@ -14,6 +14,7 @@ def data_instance():
     data = Data(influx=influx, emitter=emitter, exchanges=[])
     data.fetcher = MagicMock()
     data.streamer = MagicMock()
+    data.streamer.watch_trades = AsyncMock()
     return data
 
 

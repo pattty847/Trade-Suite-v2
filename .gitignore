@@ -30,6 +30,14 @@ sec_api_test.log
 # Data and logs
 /data/
 logs/
+sentinel.log
+
+# Qt local user state
+config/user_layout_qt.json
+config/user_widgets_qt.json
+
+# Local packaging artifacts
+*.egg-info/
 
 # PyInstaller build files
 build/

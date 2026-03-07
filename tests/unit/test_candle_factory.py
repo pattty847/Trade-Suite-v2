@@ -1,11 +1,10 @@
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 import pandas as pd
 from datetime import datetime, timezone
 
-from trade_suite.core.data.candle_factory import CandleFactory
-from trade_suite.core.signals import Signals
-from trade_suite.gui.utils import timeframe_to_seconds
+from sentinel.core.data.candle_factory import CandleFactory
+from sentinel.core.signals import Signals
 
 # --- Test Setup ---
 
@@ -14,12 +13,10 @@ def mock_dependencies():
     """Provides mock objects for CandleFactory dependencies."""
     emitter = MagicMock()
     task_manager = MagicMock()
-    # Mock the Data object and its exchange_list lookup
     mock_data = MagicMock()
     mock_exchange = MagicMock()
-    # Ensure market method returns a dict with precision
-    mock_market = MagicMock(return_value={'precision': {'price': 0.01}}) # Example precision
-    mock_exchange.market.side_effect = lambda symbol: mock_market() if symbol == "BTC/USDT" else None
+    mock_exchange.parse_timeframe.return_value = 60
+    mock_exchange.market.return_value = {"precision": {"price": 0.01}}
     mock_data.exchange_list = {"binance": mock_exchange}
     return emitter, task_manager, mock_data
 
@@ -68,7 +65,7 @@ def test_process_trade_creates_first_candle(candle_factory):
     first_candle = candle_factory.ohlcv.iloc[0]
 
     # Calculate expected candle start timestamp (floored to the minute)
-    expected_candle_start_ts = trade_ts_ms / 1000 - (trade_ts_ms / 1000 % candle_factory.timeframe_seconds)
+    expected_candle_start_ts = trade_ts_ms / 1000 - (trade_ts_ms / 1000 % candle_factory.timeframe_in_seconds)
 
     assert first_candle["dates"] == expected_candle_start_ts
     assert first_candle["opens"] == 50000.0
@@ -119,7 +116,7 @@ def test_process_trade_updates_existing_candle(candle_factory):
     updated_candle = candle_factory.ohlcv.iloc[0] # Get the (only) candle
 
     # Calculate expected candle start timestamp (should be the same as before)
-    expected_candle_start_ts = trade_ts_1_ms / 1000 - (trade_ts_1_ms / 1000 % candle_factory.timeframe_seconds)
+    expected_candle_start_ts = trade_ts_1_ms / 1000 - (trade_ts_1_ms / 1000 % candle_factory.timeframe_in_seconds)
 
     assert updated_candle["dates"] == expected_candle_start_ts
     assert updated_candle["opens"] == 50000.0  # Open remains from the first trade
@@ -164,7 +161,7 @@ def test_process_trade_creates_new_bar(candle_factory):
     new_candle = candle_factory.ohlcv.iloc[1] # Get the second candle
 
     # Calculate expected timestamp for the new candle (start of the 10:01 interval)
-    expected_new_candle_ts = first_candle_ts + candle_factory.timeframe_seconds
+    expected_new_candle_ts = first_candle_ts + candle_factory.timeframe_in_seconds
 
     assert new_candle["dates"] == expected_new_candle_ts
     # New candle OHLCV should be based *only* on the second trade
@@ -188,7 +185,7 @@ def test_on_new_trade_filters_correctly(candle_factory: CandleFactory, mock_depe
     Test that _on_new_trade only queues trades matching the factory's
     exchange and symbol.
     """
-    emitter, task_manager, data = mock_dependencies # We might need the emitter later
+    _, _, _ = mock_dependencies
 
     # Arrange: Define trades - one matching, one with wrong symbol, one with wrong exchange
     trade_ts_ms = int(datetime(2023, 1, 1, 10, 0, 30, tzinfo=timezone.utc).timestamp() * 1000)
@@ -256,7 +253,12 @@ def test_process_trade_batch_emits_signal(candle_factory: CandleFactory, mock_de
 
     # The emitted candle should be the last (and only, in this case) candle in the dataframe
     assert not candle_factory.ohlcv.empty # Ensure a candle was actually created
-    expected_candles_df = candle_factory.ohlcv.iloc[-1:] # Get last row as DataFrame
+    expected_candles_df = candle_factory.ohlcv.iloc[-1:].copy()
+    expected_candles_df.set_index(
+        pd.to_datetime(expected_candles_df["dates"], unit="s"),
+        inplace=True,
+        drop=False,
+    )
 
     assert len(args) == 1 # Only the signal name is positional
     assert args[0] == expected_signal

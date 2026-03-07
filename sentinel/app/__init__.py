@@ -1,0 +1,1 @@
+"""Sentinel Qt app infrastructure."""
