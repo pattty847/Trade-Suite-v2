@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 import pandas as pd
 
 from sentinel.analysis.market_aggregator import MarketAggregator
@@ -141,7 +141,7 @@ class Data(CCXTInterface):
         since: str,
         timeframes: List[str],
         write_to_db: bool = False,
-    ) -> Dict[str, Dict[str, pd.DataFrame]]:
+    ) -> Tuple[Dict[str, Dict[str, pd.DataFrame]], Dict[str, Dict[str, Dict[str, int]]]]:
         return await self.fetcher.fetch_candles(exchanges, symbols, since, timeframes, write_to_db)
 
     async def fetch_historical_trades(self, exchange: str, symbol: str, since: Optional[int] = None, limit: Optional[int] = None) -> List[Dict]:

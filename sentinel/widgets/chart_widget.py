@@ -26,6 +26,12 @@ _LABEL_CSS = {"color": "#3f5a76", "font-size": "10pt"}
 _VOL_FRACTION = 0.18
 _CROSSHAIR_PEN = pg.mkPen(color="#2a4060", width=1, style=Qt.PenStyle.DashLine)
 
+# Muted TV-style palette
+_UP_COLOR = QColor(38, 166, 154)      # teal-green
+_DN_COLOR = QColor(239, 83, 80)       # muted red
+_UP_HEX = "#26a69a"
+_DN_HEX = "#ef5350"
+
 
 def _style_pg_plot(plot: pg.PlotWidget) -> None:
     """Apply consistent dark-theme styling to a pyqtgraph PlotWidget."""
@@ -71,12 +77,12 @@ class CandlestickItem(pg.GraphicsObject):
     def _generate_picture(self) -> None:
         self._picture = QPicture()
         painter = QPainter(self._picture)
-        up_pen = QPen(QColor(35, 200, 110))
-        dn_pen = QPen(QColor(220, 70, 85))
+        up_pen = QPen(_UP_COLOR)
+        dn_pen = QPen(_DN_COLOR)
         up_pen.setWidthF(1.0)
         dn_pen.setWidthF(1.0)
-        up_brush = QBrush(QColor(35, 200, 110))
-        dn_brush = QBrush(QColor(220, 70, 85))
+        up_brush = QBrush(_UP_COLOR)
+        dn_brush = QBrush(_DN_COLOR)
         no_pen = QPen(Qt.PenStyle.NoPen)
 
         width = self._body_width
@@ -173,6 +179,11 @@ class ChartDockWidget(QDockWidget):
         self.price_plot.addItem(self._v_line, ignoreBounds=True)
         self.price_plot.addItem(self._h_line, ignoreBounds=True)
 
+        # ── Floating current-price tag (right axis) ───────────────────────────
+        self._price_line: pg.InfiniteLine | None = None
+        self._price_line_up: bool | None = None   # tracks direction for color changes
+        self._current_candle_width: float = 60.0
+
         # ── Data items ────────────────────────────────────────────────────────
         self.candle_item = CandlestickItem()
         self.price_plot.addItem(self.candle_item)
@@ -195,7 +206,7 @@ class ChartDockWidget(QDockWidget):
         self._ohlcv_label.setStyleSheet("color: #5a7a9a; background: transparent; padding: 2px 8px;")
         self._ohlcv_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._ohlcv_label.move(8, 4)
-        self._ohlcv_label.show()
+        self._ohlcv_label.hide()
 
         # ── Mouse proxy for hover/crosshair ──────────────────────────────────
         self._mouse_proxy = pg.SignalProxy(
@@ -240,6 +251,30 @@ class ChartDockWidget(QDockWidget):
             vol_h,
         )
 
+    # ── Current-price floating tag ────────────────────────────────────────────
+
+    def _update_price_line(self) -> None:
+        if not self.closes:
+            return
+        price = self.closes[-1]
+        is_up = len(self.closes) < 2 or price >= self.closes[-2]
+        hex_color = _UP_HEX if is_up else _DN_HEX
+
+        if is_up != self._price_line_up:
+            # Recreate with new color when direction flips
+            if self._price_line is not None:
+                self.price_plot.removeItem(self._price_line)
+            self._price_line = pg.InfiniteLine(
+                angle=0, movable=False,
+                pen=pg.mkPen(hex_color, width=1, style=Qt.PenStyle.DashLine),
+                label="{value:.2f}",
+                labelOpts={"position": 1.0, "color": "#ffffff", "fill": pg.mkBrush(hex_color)},
+            )
+            self.price_plot.addItem(self._price_line, ignoreBounds=True)
+            self._price_line_up = is_up
+
+        self._price_line.setPos(price)
+
     # ── Mouse hover / crosshair ───────────────────────────────────────────────
 
     def _on_mouse_moved(self, evt) -> None:
@@ -247,9 +282,9 @@ class ChartDockWidget(QDockWidget):
         if not self.price_plot.sceneBoundingRect().contains(pos):
             self._v_line.hide()
             self._h_line.hide()
+            self._ohlcv_label.hide()
             return
 
-        self._v_line.show()
         self._h_line.show()
 
         vb = self.price_plot.getViewBox()
@@ -266,14 +301,74 @@ class ChartDockWidget(QDockWidget):
         elif idx > 0 and (x - self.timestamps[idx - 1]) < (self.timestamps[idx] - x):
             idx -= 1
 
+        # Only show vertical snap + OHLCV when inside a candle's column
+        if abs(x - self.timestamps[idx]) > self._current_candle_width * 0.5:
+            self._v_line.hide()
+            self._ohlcv_label.hide()
+            return
+
+        self._v_line.show()
         self._v_line.setPos(self.timestamps[idx])
 
         o, h, l, c, v = (
             self.opens[idx], self.highs[idx], self.lows[idx],
             self.closes[idx], self.volumes[idx],
         )
-        self._ohlcv_label.setText(f"O {o:.2f}  H {h:.2f}  L {l:.2f}  C {c:.2f}  V {v:.4f}")
+        delta = c - o
+        pct = (delta / o * 100) if o != 0 else 0.0
+        color = _UP_HEX if c >= o else _DN_HEX
+
+        self._ohlcv_label.setText(
+            f"O {o:.2f}  H {h:.2f}  L {l:.2f}  C {c:.2f}  "
+            f"{delta:+.2f} ({pct:+.2f}%)  Vol: {v:.0f}"
+        )
+        self._ohlcv_label.setStyleSheet(
+            f"color: {color}; background: transparent; padding: 2px 8px;"
+        )
         self._ohlcv_label.adjustSize()
+        self._ohlcv_label.show()
+
+    # ── Subscription management ───────────────────────────────────────────────
+
+    def change_subscription(self, exchange: str, symbol: str, timeframe: str) -> None:
+        """Switch to a different exchange/symbol/timeframe without recreating the widget."""
+        if exchange == self.exchange and symbol == self.symbol and timeframe == self.timeframe:
+            return
+        self._unsubscribe()
+        self.exchange = exchange
+        self.symbol = symbol
+        self.timeframe = timeframe
+        self.setWindowTitle(f"Chart - {exchange.upper()} {symbol} ({timeframe})")
+
+        # Clear data
+        self.timestamps.clear()
+        self.opens.clear()
+        self.highs.clear()
+        self.lows.clear()
+        self.closes.clear()
+        self.volumes.clear()
+        self._did_initial_fit = False
+        self._dirty = False
+
+        # Clear rendered items
+        self.candle_item.set_data([], [], [], [], [], body_width=1.0)
+        if self.volume_item is not None:
+            self.vb_vol.removeItem(self.volume_item)
+            self.volume_item = None
+        if self.ema_item is not None:
+            self.price_plot.removeItem(self.ema_item)
+            self.ema_item = None
+        if self._price_line is not None:
+            self.price_plot.removeItem(self._price_line)
+            self._price_line = None
+            self._price_line_up = None
+
+        self._ohlcv_label.hide()
+        self._v_line.hide()
+        self._h_line.hide()
+
+        self._subscribe()
+        LOGGER.debug("Chart resubscribed: %s/%s/%s", exchange, symbol, timeframe)
 
     # ── Runtime wiring ────────────────────────────────────────────────────────
 
@@ -407,17 +502,19 @@ class ChartDockWidget(QDockWidget):
 
         x = self.timestamps
         candle_width = self._infer_candle_width_seconds()
+        self._current_candle_width = candle_width
         self.candle_item.set_data(
             x, self.opens, self.highs, self.lows, self.closes,
             body_width=candle_width * 0.72,
         )
+        self._update_price_line()
 
         # Volume bars in the overlay ViewBox — explicit pen=None to suppress
         # pyqtgraph's default foreground pen overriding the per-bar brush colors.
         if self.volume_item is not None:
             self.vb_vol.removeItem(self.volume_item)
         brushes = [
-            QBrush(QColor(35, 200, 110, 160)) if c >= o else QBrush(QColor(220, 70, 85, 160))
+            QBrush(QColor(38, 166, 154, 140)) if c >= o else QBrush(QColor(239, 83, 80, 140))
             for o, c in zip(self.opens, self.closes)
         ]
         self.volume_item = pg.BarGraphItem(

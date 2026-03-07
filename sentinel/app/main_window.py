@@ -151,6 +151,7 @@ class SentinelMainWindow(QMainWindow):
                 border-top: 1px solid #1a2535;
                 font-size: 11px;
             }
+            QStatusBar::item { border: none; }
 
             /* ── Push buttons ───────────────────────────────────────────────── */
             QPushButton {
@@ -304,11 +305,13 @@ class SentinelMainWindow(QMainWindow):
         self._toolbar_asset = QComboBox()
         self._toolbar_asset.addItems(["BTC/USD", "ETH/USD", "SOL/USD"])
         self._toolbar_asset.setCurrentText("BTC/USD")
+        self._toolbar_asset.currentTextChanged.connect(self._on_selector_changed)
         bar.addWidget(self._toolbar_asset)
 
         self._toolbar_timeframe = QComboBox()
         self._toolbar_timeframe.addItems(["1m", "5m", "15m", "1h", "4h", "1d"])
         self._toolbar_timeframe.setCurrentText("1m")
+        self._toolbar_timeframe.currentTextChanged.connect(self._on_selector_changed)
         bar.addWidget(self._toolbar_timeframe)
 
         _ic = "#6a85a8"  # icon tint for combo labels
@@ -482,14 +485,39 @@ class SentinelMainWindow(QMainWindow):
         self.layout_manager.save_layout(self)
 
     def _setup_status(self) -> None:
+        sb = self.statusBar()
+
+        # Permanent right-side: exchange badge + connection dot
+        exchanges = getattr(self.runtime, "exchanges", []) if self.runtime else []
+        if exchanges:
+            ex_label = QLabel("  ".join(e.upper() for e in exchanges))
+            ex_label.setStyleSheet("color: #3f5a76; padding: 0 10px; font-size: 11px;")
+            sb.addPermanentWidget(ex_label)
+
+        self._conn_dot = QLabel("●  Connecting")
+        self._conn_dot.setStyleSheet("color: #ef5350; padding: 0 10px; font-size: 11px;")
+        sb.addPermanentWidget(self._conn_dot)
+
         if self.runtime is None:
-            self.statusBar().showMessage("Shell only (no runtime)")
+            sb.showMessage("Shell only (no runtime)")
+            self._conn_dot.setText("●  No runtime")
             return
+
         self.widget_registry.attach_runtime(self.runtime)
         self.runtime.started.connect(lambda: self.widget_registry.attach_runtime(self.runtime))
-        self.runtime.status_changed.connect(self.statusBar().showMessage)
+        self.runtime.started.connect(self._on_runtime_started)
+        self.runtime.stopped.connect(self._on_runtime_stopped)
+        self.runtime.status_changed.connect(sb.showMessage)
         self.runtime.runtime_error.connect(self._show_runtime_error)
-        self.statusBar().showMessage("Initializing runtime...")
+        sb.showMessage("Initializing runtime...")
+
+    def _on_runtime_started(self) -> None:
+        self._conn_dot.setText("●  Connected")
+        self._conn_dot.setStyleSheet("color: #26a69a; padding: 0 10px; font-size: 11px;")
+
+    def _on_runtime_stopped(self) -> None:
+        self._conn_dot.setText("●  Disconnected")
+        self._conn_dot.setStyleSheet("color: #ef5350; padding: 0 10px; font-size: 11px;")
 
     def _show_runtime_error(self, message: str) -> None:
         QMessageBox.warning(self, "Runtime Error", message)

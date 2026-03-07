@@ -467,7 +467,7 @@ class TaskManager:
             # Fetch candles using data source method (assuming it's adapted or suitable)
             # Assuming fetch_candles now returns the dataframe directly
             # And does NOT interact with the queue or signals itself.
-            candles_dict = await self.data.fetch_candles(  # Renamed to candles_dict
+            candles_dict, cache_stats = await self.data.fetch_candles(
                 exchanges=[exchange],
                 symbols=[symbol],
                 timeframes=[timeframe],
@@ -490,10 +490,18 @@ class TaskManager:
                 )
 
             if candles_df is not None and not candles_df.empty:
-                logging.info(
-                    "Candles %s/%s/%s: %d bars",
-                    exchange, symbol, timeframe, len(candles_df),
-                )
+                stats = (cache_stats.get(exchange) or {}).get(cache_key)
+                if stats is not None:
+                    logging.info(
+                        "Candles %s/%s/%s: %d bars (%d from cache + %d new)",
+                        exchange, symbol, timeframe, len(candles_df),
+                        stats["from_cache"], stats["delta"],
+                    )
+                else:
+                    logging.info(
+                        "Candles %s/%s/%s: %d bars",
+                        exchange, symbol, timeframe, len(candles_df),
+                    )
                 # Emit directly instead of queuing
                 self._update_ui_with_candles(
                     exchange=exchange,

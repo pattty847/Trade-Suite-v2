@@ -27,7 +27,7 @@ class CandleFetcher:
         since: str,
         timeframes: List[str],
         write_to_db: bool = False,
-    ) -> Dict[str, Dict[str, pd.DataFrame]]:
+    ) -> Tuple[Dict[str, Dict[str, pd.DataFrame]], Dict[str, Dict[str, Dict[str, int]]]]:
         all_candles: Dict[str, Dict[str, pd.DataFrame]] = {}
         tasks = []
         for exchange in exchanges:
@@ -62,7 +62,11 @@ class CandleFetcher:
                         )
                         tasks.append(task)
 
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+        cache_stats: Dict[str, Dict[str, Dict[str, int]]] = {}
+        for exchange_name, key, stats in results:
+            if stats is not None:
+                cache_stats.setdefault(exchange_name, {})[key] = stats
 
         if write_to_db:
             try:
@@ -70,7 +74,7 @@ class CandleFetcher:
             except Exception as e:
                 logging.error(f"Error writing to DB: {e}")
 
-        return all_candles
+        return all_candles, cache_stats
 
     async def _prepend_historic_candles(
         self,
@@ -193,7 +197,8 @@ class CandleFetcher:
         since_timestamp: int,
         exchange_name: str,
         all_candles: Dict[str, Dict[str, pd.DataFrame]],
-    ) -> None:
+    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+        """Fetch candles, merge with cache, save. Returns (exchange_name, cache_key, stats with from_cache and delta)."""
         logging.debug(
             "Fetching %s %s from %s for %s",
             symbol, timeframe,
@@ -206,6 +211,9 @@ class CandleFetcher:
         now = exchange.milliseconds()
 
         existing_df, first_cached_timestamp, last_cached_timestamp, data_loaded_from_cache = await self.cache_store.load_cache(path, key)
+
+        n_cached = len(existing_df) if data_loaded_from_cache else 0
+        n_prepended = 0
 
         if data_loaded_from_cache and first_cached_timestamp is not None and since_timestamp < first_cached_timestamp:
             logging.debug(
@@ -221,6 +229,7 @@ class CandleFetcher:
                 timeframe_duration_in_ms,
                 key,
             )
+            n_prepended = len(existing_df) - n_cached
 
         if data_loaded_from_cache and last_cached_timestamp is not None:
             fetch_from_ts_for_new_data = last_cached_timestamp + timeframe_duration_in_ms
@@ -238,6 +247,8 @@ class CandleFetcher:
             timeframe_duration_in_ms,
             is_initial_cache_fill_for_fetch,
         )
+
+        n_delta = len(all_newly_fetched_ohlcv)
 
         if all_newly_fetched_ohlcv:
             new_data_df = pd.DataFrame(
@@ -266,6 +277,7 @@ class CandleFetcher:
         if not existing_df.empty:
             await self.cache_store.save_cache(existing_df, path, key, exchange.id, symbol, timeframe)
             all_candles[exchange_name][key] = existing_df.copy()
+            return (exchange_name, key, {"from_cache": n_cached, "delta": n_prepended + n_delta})
         else:
             logging.debug(
                 "No data fetched or found in cache for %s %s %s. CSV not created/updated at %s.",
@@ -274,6 +286,7 @@ class CandleFetcher:
             if exchange_name not in all_candles:
                 all_candles[exchange_name] = {}
             all_candles[exchange_name][key] = pd.DataFrame()
+            return (exchange_name, key, None)
 
     async def retry_fetch_ohlcv(
         self, exchange: ccxt.Exchange, symbol: str, timeframe: str, since: int, limit: Optional[int] = None

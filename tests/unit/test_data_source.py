@@ -56,12 +56,13 @@ async def test_watch_trades_delegates(data_instance):
 
 @pytest.mark.asyncio
 async def test_fetch_candles_returns_fetcher_result(data_instance):
-    """`fetch_candles` should return whatever the fetcher yields."""
-    expected = {"coinbase": {"BTC-1m": MagicMock()}}
-    data_instance.fetcher.fetch_candles = AsyncMock(return_value=expected)
+    """`fetch_candles` should return (candles_dict, cache_stats) from the fetcher."""
+    expected_candles = {"coinbase": {"coinbase_BTC-USD_1m": MagicMock()}}
+    expected_stats = {"coinbase": {"coinbase_BTC-USD_1m": {"from_cache": 100, "delta": 29}}}
+    data_instance.fetcher.fetch_candles = AsyncMock(return_value=(expected_candles, expected_stats))
     result = await data_instance.fetch_candles(
         ["coinbase"], ["BTC/USD"], "2023-01-01T00:00:00Z", ["1m"], False
     )
-    assert result == expected
+    assert result == (expected_candles, expected_stats)
     data_instance.fetcher.fetch_candles.assert_awaited_once()
 
