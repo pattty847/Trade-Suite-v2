@@ -27,7 +27,7 @@ from sentinel_ops.alert_bot.notifier.async_email_notifier import AsyncEmailNotif
 from sentinel_ops.alert_bot.metrics import start_metrics_server
 
 # Trade Suite components
-from trade_suite.core.facade import CoreServicesFacade
+from sentinel.core.facade import CoreServicesFacade
 
 # Setup logging
 logger = logging.getLogger(__name__) # Changed from "price_alert" to module name for consistency

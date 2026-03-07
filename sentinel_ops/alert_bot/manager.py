@@ -5,10 +5,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # Trade Suite components
-from trade_suite.core.data.data_source import Data
-from trade_suite.core.task_manager import TaskManager
-from trade_suite.core.signals import SignalEmitter, Signals
-from trade_suite.core.facade import CoreServicesFacade
+from sentinel.core.data.data_source import Data
+from sentinel.core.task_manager import TaskManager
+from sentinel.core.signals import SignalEmitter, Signals
+from sentinel.core.facade import CoreServicesFacade
 
 # Alert Bot components
 from sentinel_ops.alert_bot.config.loader import load_alerts_from_yaml, GlobalAlertConfig

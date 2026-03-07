@@ -1,7 +1,9 @@
 import logging
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QCloseEvent
+import pyqtgraph as pg
+import qtawesome as qta
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QLabel,
@@ -45,73 +47,246 @@ class SentinelMainWindow(QMainWindow):
         self._setup_status()
 
     def _apply_theme(self) -> None:
+        # Set pyqtgraph defaults before any plots are created.
+        pg.setConfigOptions(foreground="#8fa4c2", background="#060a11", antialias=True)
+
         self.setStyleSheet(
             """
+            /* ── Base ──────────────────────────────────────────────────────── */
             QMainWindow { background: #0b0f14; color: #d4dae3; }
-            QMainWindow::separator {
-                background: #1f2733;
-                width: 1px;
-                height: 1px;
-            }
+            QMainWindow::separator { background: #1a2535; width: 2px; height: 2px; }
+            QMainWindow::separator:hover { background: #3a5878; }
+
+            /* pyqtgraph PlotWidget lives in a QGraphicsView — strip its frame */
+            QGraphicsView { border: none; background: #060a11; }
+
+            /* ── Menu bar ───────────────────────────────────────────────────── */
             QMenuBar {
                 background: #0d131b;
                 color: #cdd3de;
-                border-bottom: 1px solid #1f2733;
+                border-bottom: 1px solid #1a2535;
+                font-size: 12px;
             }
-            QMenuBar::item {
-                spacing: 3px;
-                padding: 5px 9px;
-                background: transparent;
-            }
+            QMenuBar::item { padding: 5px 9px; background: transparent; }
             QMenuBar::item:selected { background: #172131; }
+
             QMenu {
                 background: #0f1620;
                 color: #d4dae3;
                 border: 1px solid #273142;
                 padding: 4px;
             }
-            QMenu::item {
-                padding: 5px 18px;
-                border: 1px solid transparent;
-            }
-            QMenu::item:selected {
-                background: #1a2638;
-                border: 1px solid #2a3a52;
-            }
+            QMenu::item { padding: 5px 20px; border: 1px solid transparent; }
+            QMenu::item:selected { background: #1a2638; border: 1px solid #2a3a52; }
+            QMenu::separator { height: 1px; background: #1a2535; margin: 3px 6px; }
+
+            /* ── Toolbars ───────────────────────────────────────────────────── */
             QToolBar {
                 background: #0d131b;
                 border: none;
-                spacing: 4px;
+                border-bottom: 1px solid #1a2535;
+                spacing: 3px;
                 padding: 2px 4px;
             }
-            QDockWidget::title {
-                background: #121a26;
-                color: #a8bad7;
-                padding: 4px 8px;
-                border-bottom: 1px solid #223045;
+            QToolBar#toolbar\\:drawing {
+                border-bottom: none;
+                border-right: 1px solid #1a2535;
+                padding: 4px 2px;
             }
+            QToolBar::separator {
+                background: #1a2535;
+                width: 1px;
+                margin: 3px 2px;
+            }
+
+            /* ── Tool buttons (toolbar actions render as these) ─────────────── */
+            QToolButton {
+                background: transparent;
+                color: #9db8d6;
+                border: 1px solid transparent;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+            QToolButton:hover {
+                background: #172131;
+                border: 1px solid #2a3e5a;
+                color: #d4dae3;
+            }
+            QToolButton:checked, QToolButton:pressed {
+                background: #152338;
+                border: 1px solid #3d6090;
+                color: #8fb3ff;
+            }
+
+            /* ── Dock widgets ───────────────────────────────────────────────── */
+            QDockWidget {
+                color: #7a99be;
+                font-size: 11px;
+                titlebar-close-icon: none;
+                titlebar-normal-icon: none;
+            }
+            QDockWidget::title {
+                background: #0e1520;
+                color: #7a99be;
+                padding: 3px 8px;
+                border-bottom: 1px solid #1a2535;
+                text-align: left;
+            }
+            QDockWidget::close-button, QDockWidget::float-button {
+                background: transparent;
+                border: 1px solid transparent;
+                padding: 1px;
+                icon-size: 10px;
+                subcontrol-position: top right;
+            }
+            QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+                background: #1e2e45;
+                border: 1px solid #2a3e5a;
+            }
+
+            /* ── Status bar ─────────────────────────────────────────────────── */
             QStatusBar {
                 background: #0d131b;
-                color: #8fa4c2;
-                border-top: 1px solid #1f2733;
+                color: #6a85a8;
+                border-top: 1px solid #1a2535;
+                font-size: 11px;
             }
+
+            /* ── Push buttons ───────────────────────────────────────────────── */
+            QPushButton {
+                background: #111924;
+                color: #b8c8d8;
+                border: 1px solid #253446;
+                padding: 3px 10px;
+                min-width: 20px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #182337;
+                border: 1px solid #3a5878;
+                color: #d4dae3;
+            }
+            QPushButton:pressed {
+                background: #0c1520;
+                border: 1px solid #2a4a6a;
+            }
+            QPushButton:flat { border: none; background: transparent; }
+
+            /* ── Combo boxes ────────────────────────────────────────────────── */
             QComboBox {
                 background: #111924;
-                color: #d4dae3;
-                border: 1px solid #2a3446;
+                color: #d0d8e4;
+                border: 1px solid #253446;
                 padding: 3px 8px;
-                min-width: 84px;
+                min-width: 80px;
+                font-size: 12px;
             }
-            QComboBox:hover { border: 1px solid #39506f; }
-            QComboBox::drop-down { border: none; width: 18px; }
-            QToolButton {
-                background: #101722;
+            QComboBox:hover { border: 1px solid #3a5878; }
+            QComboBox::drop-down { border: none; width: 16px; }
+            QComboBox QAbstractItemView {
+                background: #0f1620;
                 color: #d4dae3;
-                border: 1px solid #273347;
-                padding: 3px 8px;
+                border: 1px solid #273142;
+                selection-background-color: #1a2638;
+                outline: none;
             }
-            QToolButton:hover { background: #182337; border: 1px solid #365173; }
-            QLabel { color: #c7ced9; }
+
+            /* ── Labels ─────────────────────────────────────────────────────── */
+            QLabel { color: #b8c8d8; font-size: 12px; }
+
+            /* ── Check boxes ────────────────────────────────────────────────── */
+            QCheckBox { color: #b8c8d8; spacing: 6px; font-size: 12px; }
+            QCheckBox::indicator {
+                width: 13px;
+                height: 13px;
+                background: #111924;
+                border: 1px solid #253446;
+            }
+            QCheckBox::indicator:hover { border: 1px solid #3a5878; }
+            QCheckBox::indicator:checked {
+                background: #1a3d6a;
+                border: 1px solid #2d6aaa;
+            }
+
+            /* ── Sliders ────────────────────────────────────────────────────── */
+            QSlider::groove:horizontal {
+                height: 3px;
+                background: #1a2535;
+                border-radius: 1px;
+            }
+            QSlider::handle:horizontal {
+                background: #3a5a8a;
+                border: 1px solid #2d4e7a;
+                width: 10px;
+                height: 10px;
+                border-radius: 5px;
+                margin: -4px 0;
+            }
+            QSlider::handle:horizontal:hover { background: #4a70aa; }
+            QSlider::sub-page:horizontal { background: #1e3a5f; border-radius: 1px; }
+
+            /* ── Tables ─────────────────────────────────────────────────────── */
+            QTableWidget {
+                background: #0b0f14;
+                alternate-background-color: #0e1520;
+                gridline-color: #131d2c;
+                border: none;
+                outline: none;
+                selection-background-color: #1a2638;
+                font-size: 12px;
+            }
+            QTableWidget::item { padding: 1px 4px; border: none; }
+            QTableWidget::item:selected { background: #1a2638; }
+
+            QHeaderView { background: #0d131b; border: none; }
+            QHeaderView::section {
+                background: #0d131b;
+                color: #6a85a8;
+                border: none;
+                border-right: 1px solid #1a2535;
+                border-bottom: 1px solid #1a2535;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QHeaderView::section:last { border-right: none; }
+
+            /* ── Scrollbars ─────────────────────────────────────────────────── */
+            QScrollBar:vertical {
+                background: #0b0f14;
+                width: 5px;
+                margin: 0;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background: #243044;
+                min-height: 24px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical:hover { background: #3a5070; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+
+            QScrollBar:horizontal {
+                background: #0b0f14;
+                height: 5px;
+                margin: 0;
+                border: none;
+            }
+            QScrollBar::handle:horizontal {
+                background: #243044;
+                min-width: 24px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:horizontal:hover { background: #3a5070; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+
+            /* ── Splitter handles ───────────────────────────────────────────── */
+            QSplitter::handle { background: #151f2e; }
+            QSplitter::handle:vertical { height: 3px; }
+            QSplitter::handle:horizontal { width: 3px; }
+            QSplitter::handle:hover { background: #2a4060; }
             """
         )
 
@@ -119,10 +294,11 @@ class SentinelMainWindow(QMainWindow):
         bar = QToolBar("Global")
         bar.setObjectName("toolbar:global")
         bar.setMovable(False)
+        bar.setIconSize(QSize(16, 16))
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, bar)
 
         brand = QLabel("Sentinel")
-        brand.setStyleSheet("font-weight:700; color:#8fb3ff; padding-right:8px;")
+        brand.setStyleSheet("font-weight:700; color:#8fb3ff; padding: 0 10px 0 4px; font-size:13px;")
         bar.addWidget(brand)
 
         self._toolbar_asset = QComboBox()
@@ -135,32 +311,63 @@ class SentinelMainWindow(QMainWindow):
         self._toolbar_timeframe.setCurrentText("1m")
         bar.addWidget(self._toolbar_timeframe)
 
+        _ic = "#6a85a8"  # icon tint for combo labels
         mode = QComboBox()
         mode.addItems(["Candles", "Line", "Bars", "Heikin Ashi"])
+        mode.setItemIcon(0, qta.icon("mdi6.chart-box-outline", color=_ic))
+        mode.setItemIcon(1, qta.icon("mdi6.chart-line", color=_ic))
+        mode.setItemIcon(2, qta.icon("mdi6.chart-bar", color=_ic))
+        mode.setItemIcon(3, qta.icon("mdi6.chart-areaspline", color=_ic))
         bar.addWidget(mode)
 
         indicators = QComboBox()
         indicators.addItems(["Indicators", "EMA", "VWAP", "RSI", "MACD"])
+        indicators.setItemIcon(0, qta.icon("mdi6.chart-bell-curve-cumulative", color=_ic))
         bar.addWidget(indicators)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         bar.addWidget(spacer)
 
-        bar.addAction("Search")
-        bar.addAction("Replay")
-        bar.addAction("Layout")
+        _btn = "#7a99be"
+        search_act = QAction(qta.icon("mdi6.magnify", color=_btn), "Search", self)
+        replay_act = QAction(qta.icon("mdi6.history", color=_btn), "Replay", self)
+        layout_act = QAction(qta.icon("mdi6.view-dashboard-outline", color=_btn), "Layout", self)
+        for act in (search_act, replay_act, layout_act):
+            bar.addAction(act)
 
     def _build_left_toolbar(self) -> None:
         bar = QToolBar("Drawing")
         bar.setObjectName("toolbar:drawing")
         bar.setMovable(False)
         bar.setOrientation(Qt.Orientation.Vertical)
+        bar.setIconSize(QSize(18, 18))
+        bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, bar)
-        bar.setIconSize(bar.iconSize())
 
-        for label in ["Cursor", "Crosshair", "Trend", "Ray", "HLine", "Fib", "Text"]:
-            bar.addAction(label)
+        _ic = "#6a85a8"
+        _tools = [
+            ("Cursor",    "mdi6.cursor-default-outline", "Cursor"),
+            ("Crosshair", "mdi6.crosshairs",             "Crosshair"),
+            ("Trend",     "mdi6.trending-up",            "Trend line"),
+            ("Ray",       "mdi6.ray-start-arrow",        "Ray"),
+            ("HLine",     "mdi6.minus",                  "Horizontal line"),
+            ("Fib",       "mdi6.sine-wave",               "Fibonacci"),
+            ("Text",      "mdi6.format-text",            "Text annotation"),
+        ]
+
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        first = True
+        for name, icon_id, tooltip in _tools:
+            act = QAction(qta.icon(icon_id, color=_ic, color_active="#b8d0f0"), name, self)
+            act.setToolTip(tooltip)
+            act.setCheckable(True)
+            if first:
+                act.setChecked(True)
+                first = False
+            group.addAction(act)
+            bar.addAction(act)
 
     def _build_menus(self) -> None:
         menu = self.menuBar()

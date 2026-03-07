@@ -1,106 +1,101 @@
 from __future__ import annotations
 
+import bisect
 import logging
-from datetime import datetime
 from typing import Any
 
 import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, QTimer, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPicture
-from PySide6.QtWidgets import QDockWidget, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPicture
+from PySide6.QtWidgets import QDockWidget, QLabel, QVBoxLayout, QWidget
 
-from trade_suite.core.signals import Signals
+from sentinel.core.signals import Signals
 
 
 LOGGER = logging.getLogger(__name__)
 
+_AXIS_PEN = pg.mkPen(color="#1e2d3f", width=1)
+_TICK_PEN = pg.mkPen(color="#546d8a")
+_TICK_FONT = QFont("Menlo, Consolas, monospace")
+_TICK_FONT.setStyleHint(QFont.StyleHint.Monospace)
+_TICK_FONT.setPointSize(8)
+_LABEL_CSS = {"color": "#3f5a76", "font-size": "10pt"}
 
-class TimestampAxis(pg.AxisItem):
-    def __init__(self, orientation: str = "bottom") -> None:
-        super().__init__(orientation=orientation)
-        self.timestamps: list[float] = []
+# Volume overlay: fraction of price-plot height reserved for bars
+_VOL_FRACTION = 0.18
+_CROSSHAIR_PEN = pg.mkPen(color="#2a4060", width=1, style=Qt.PenStyle.DashLine)
 
-    def set_timestamps(self, timestamps: list[float]) -> None:
-        self.timestamps = timestamps
 
-    def tickStrings(self, values, scale, spacing):  # noqa: N802
-        labels: list[str] = []
-        for raw in values:
-            idx = int(round(raw))
-            if idx < 0 or idx >= len(self.timestamps):
-                labels.append("")
-                continue
-            ts = self.timestamps[idx]
-            try:
-                dt = datetime.fromtimestamp(ts)
-                labels.append(dt.strftime("%m-%d %H:%M"))
-            except Exception:
-                labels.append("")
-        return labels
+def _style_pg_plot(plot: pg.PlotWidget) -> None:
+    """Apply consistent dark-theme styling to a pyqtgraph PlotWidget."""
+    for axis_name in ("left", "right", "top", "bottom"):
+        ax = plot.getAxis(axis_name)
+        ax.setPen(_AXIS_PEN)
+        ax.setTextPen(_TICK_PEN)
+        ax.setTickFont(_TICK_FONT)
+        ax.setStyle(tickLength=-5)
+    plot.getViewBox().setBorder(pg.mkPen("#1a2535", width=1))
 
 
 class CandlestickItem(pg.GraphicsObject):
     def __init__(self) -> None:
         super().__init__()
         self._picture = QPicture()
-        self._x: list[int] = []
+        self._x: list[float] = []
         self._o: list[float] = []
         self._h: list[float] = []
         self._l: list[float] = []
         self._c: list[float] = []
-        self._body_factor = 0.55
+        self._body_width = 1.0
 
     def set_data(
         self,
-        x: list[int],
+        x: list[float],
         opens: list[float],
         highs: list[float],
         lows: list[float],
         closes: list[float],
+        *,
+        body_width: float,
     ) -> None:
         self._x = x
         self._o = opens
         self._h = highs
         self._l = lows
         self._c = closes
+        self._body_width = max(float(body_width), 1.0)
         self._generate_picture()
         self.update()
 
     def _generate_picture(self) -> None:
         self._picture = QPicture()
         painter = QPainter(self._picture)
-        up_pen = QPen(QColor(86, 230, 160))
-        dn_pen = QPen(QColor(245, 110, 125))
+        up_pen = QPen(QColor(35, 200, 110))
+        dn_pen = QPen(QColor(220, 70, 85))
+        up_pen.setWidthF(1.0)
+        dn_pen.setWidthF(1.0)
         up_brush = QBrush(QColor(35, 200, 110))
         dn_brush = QBrush(QColor(220, 70, 85))
+        no_pen = QPen(Qt.PenStyle.NoPen)
 
-        width = self._auto_body_width()
+        width = self._body_width
         half = width * 0.5
         for i, open_, high, low, close in zip(self._x, self._o, self._h, self._l, self._c):
             rising = close >= open_
             top = max(open_, close)
             bottom = min(open_, close)
-            height = top - bottom
-            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setPen(up_pen if rising else dn_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawLine(QPointF(i, low), QPointF(i, high))
+            painter.setPen(no_pen)
             painter.setBrush(up_brush if rising else dn_brush)
+            height = top - bottom
             if height > 0:
                 painter.drawRect(QRectF(i - half, bottom, width, height))
             else:
-                painter.setPen(up_pen if rising else dn_pen)
-                painter.drawLine(QPointF(i - half, bottom), QPointF(i + half, bottom))
-                painter.setPen(Qt.PenStyle.NoPen)
-            painter.setPen(up_pen if rising else dn_pen)
-            painter.drawLine(QPointF(i, low), QPointF(i, high))
-
+                painter.drawRect(QRectF(i - half, bottom, width, 1.0))
         painter.end()
-
-    def _auto_body_width(self) -> float:
-        if len(self._x) < 2:
-            return self._body_factor
-        diffs = [self._x[idx] - self._x[idx - 1] for idx in range(1, len(self._x))]
-        min_step = min(d for d in diffs if d > 0) if any(d > 0 for d in diffs) else 1
-        return float(min_step) * self._body_factor
 
     def paint(self, painter, *args):
         painter.drawPicture(0, 0, self._picture)
@@ -146,46 +141,69 @@ class ChartDockWidget(QDockWidget):
         self.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
-            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
 
-        self.price_x_axis = TimestampAxis("bottom")
-        self.volume_x_axis = TimestampAxis("bottom")
-
+        # ── Price plot ────────────────────────────────────────────────────────
+        self.price_x_axis = pg.DateAxisItem(orientation="bottom")
         self.price_plot = pg.PlotWidget(axisItems={"bottom": self.price_x_axis})
         self.price_plot.setBackground("#060a11")
-        self.price_plot.showGrid(x=True, y=True, alpha=0.25)
+        self.price_plot.showGrid(x=True, y=True, alpha=0.15)
         self.price_plot.setMouseEnabled(y=True, x=True)
-        self.price_plot.setLabel("right", "Price")
+        self.price_plot.setLabel("right", "Price", **_LABEL_CSS)
         self.price_plot.showAxis("right")
         self.price_plot.hideAxis("left")
         self.price_plot.getAxis("right").setStyle(tickTextOffset=6)
+        _style_pg_plot(self.price_plot)
+        self.price_plot.getViewBox().enableAutoRange(x=False, y=False)
 
-        self.volume_plot = pg.PlotWidget(axisItems={"bottom": self.volume_x_axis})
-        self.volume_plot.setBackground("#060a11")
-        self.volume_plot.showGrid(x=True, y=True, alpha=0.2)
-        self.volume_plot.setMouseEnabled(y=True, x=True)
-        self.volume_plot.setLabel("right", "Volume")
-        self.volume_plot.showAxis("right")
-        self.volume_plot.hideAxis("left")
-        self.volume_plot.setXLink(self.price_plot)
-        self.price_plot.getViewBox().enableAutoRange(x=False, y=True)
-        self.volume_plot.getViewBox().enableAutoRange(x=False, y=True)
+        # ── Volume overlay ViewBox (bottom ~18% of price plot area) ──────────
+        self.vb_vol = pg.ViewBox(enableMenu=False)
+        self.price_plot.scene().addItem(self.vb_vol)
+        self.vb_vol.setXLink(self.price_plot.getViewBox())
+        self.vb_vol.setMouseEnabled(x=False, y=False)
+        # Keep below the price ViewBox so it doesn't intercept mouse events
+        self.vb_vol.setZValue(self.price_plot.getViewBox().zValue() - 1)
+        self.price_plot.getViewBox().sigResized.connect(self._update_vol_geometry)
 
+        # ── Crosshair ─────────────────────────────────────────────────────────
+        self._v_line = pg.InfiniteLine(angle=90, movable=False, pen=_CROSSHAIR_PEN)
+        self._h_line = pg.InfiniteLine(angle=0, movable=False, pen=_CROSSHAIR_PEN)
+        self._v_line.hide()
+        self._h_line.hide()
+        self.price_plot.addItem(self._v_line, ignoreBounds=True)
+        self.price_plot.addItem(self._h_line, ignoreBounds=True)
+
+        # ── Data items ────────────────────────────────────────────────────────
         self.candle_item = CandlestickItem()
         self.price_plot.addItem(self.candle_item)
         self.volume_item: pg.BarGraphItem | None = None
         self.ema_item: pg.PlotDataItem | None = None
 
+        # ── Layout ────────────────────────────────────────────────────────────
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self.price_plot)
-        splitter.addWidget(self.volume_plot)
-        splitter.setSizes([700, 220])
-        layout.addWidget(splitter)
+        layout.addWidget(self.price_plot)
         self.setWidget(body)
+
+        # ── OHLCV overlay label (top-left, transparent, mouse-passthrough) ────
+        _mono = QFont()
+        _mono.setStyleHint(QFont.StyleHint.Monospace)
+        _mono.setPointSize(9)
+        self._ohlcv_label = QLabel("", body)
+        self._ohlcv_label.setFont(_mono)
+        self._ohlcv_label.setStyleSheet("color: #5a7a9a; background: transparent; padding: 2px 8px;")
+        self._ohlcv_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._ohlcv_label.move(8, 4)
+        self._ohlcv_label.show()
+
+        # ── Mouse proxy for hover/crosshair ──────────────────────────────────
+        self._mouse_proxy = pg.SignalProxy(
+            self.price_plot.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_moved
+        )
+
+        # Defer volume geometry until scene is fully laid out
+        QTimer.singleShot(0, self._update_vol_geometry)
 
         interval_ms = max(int(1000 / max(fps, 1)), 16)
         self._render_timer = QTimer(self)
@@ -207,6 +225,57 @@ class ChartDockWidget(QDockWidget):
                 "show_ema": self.show_ema,
             },
         }
+
+    # ── Volume geometry ───────────────────────────────────────────────────────
+
+    def _update_vol_geometry(self) -> None:
+        geom = self.price_plot.getViewBox().sceneBoundingRect()
+        if geom.height() == 0:
+            return
+        vol_h = geom.height() * _VOL_FRACTION
+        self.vb_vol.setGeometry(
+            geom.x(),
+            geom.y() + geom.height() - vol_h,
+            geom.width(),
+            vol_h,
+        )
+
+    # ── Mouse hover / crosshair ───────────────────────────────────────────────
+
+    def _on_mouse_moved(self, evt) -> None:
+        pos = evt[0]
+        if not self.price_plot.sceneBoundingRect().contains(pos):
+            self._v_line.hide()
+            self._h_line.hide()
+            return
+
+        self._v_line.show()
+        self._h_line.show()
+
+        vb = self.price_plot.getViewBox()
+        mp = vb.mapSceneToView(pos)
+        self._h_line.setPos(mp.y())
+
+        if not self.timestamps:
+            return
+
+        x = mp.x()
+        idx = bisect.bisect_left(self.timestamps, x)
+        if idx >= len(self.timestamps):
+            idx = len(self.timestamps) - 1
+        elif idx > 0 and (x - self.timestamps[idx - 1]) < (self.timestamps[idx] - x):
+            idx -= 1
+
+        self._v_line.setPos(self.timestamps[idx])
+
+        o, h, l, c, v = (
+            self.opens[idx], self.highs[idx], self.lows[idx],
+            self.closes[idx], self.volumes[idx],
+        )
+        self._ohlcv_label.setText(f"O {o:.2f}  H {h:.2f}  L {l:.2f}  C {c:.2f}  V {v:.4f}")
+        self._ohlcv_label.adjustSize()
+
+    # ── Runtime wiring ────────────────────────────────────────────────────────
 
     def set_runtime(self, runtime) -> None:
         self.runtime = runtime
@@ -244,7 +313,7 @@ class ChartDockWidget(QDockWidget):
             widget_instance=self,
         )
         self._subscribed = True
-        LOGGER.info("Chart subscribed: %s/%s/%s", self.exchange, self.symbol, self.timeframe)
+        LOGGER.debug("Chart subscribed: %s/%s/%s", self.exchange, self.symbol, self.timeframe)
 
     def _unsubscribe(self) -> None:
         if not self._subscribed or self.runtime is None or self.runtime.core is None:
@@ -254,6 +323,8 @@ class ChartDockWidget(QDockWidget):
         except Exception as exc:
             LOGGER.warning("Chart unsubscribe failed: %s", exc)
         self._subscribed = False
+
+    # ── Data ingestion ────────────────────────────────────────────────────────
 
     def _on_new_candles(self, exchange: str, symbol: str, timeframe: str, candles: pd.DataFrame):
         if exchange != self.exchange or symbol != self.symbol or timeframe != self.timeframe:
@@ -271,12 +342,23 @@ class ChartDockWidget(QDockWidget):
         if data is None or data.empty:
             return
         dates = self._normalize_dates_seconds(data["dates"])
-        self.timestamps = dates[-self.max_points :]
-        self.opens = data["opens"].astype(float).tolist()[-self.max_points :]
-        self.highs = data["highs"].astype(float).tolist()[-self.max_points :]
-        self.lows = data["lows"].astype(float).tolist()[-self.max_points :]
-        self.closes = data["closes"].astype(float).tolist()[-self.max_points :]
-        self.volumes = data["volumes"].astype(float).tolist()[-self.max_points :]
+        df = pd.DataFrame({
+            "dates": dates,
+            "opens": data["opens"].astype(float).tolist(),
+            "highs": data["highs"].astype(float).tolist(),
+            "lows": data["lows"].astype(float).tolist(),
+            "closes": data["closes"].astype(float).tolist(),
+            "volumes": data["volumes"].astype(float).tolist(),
+        })
+        df = df.drop_duplicates(subset=["dates"], keep="last").sort_values("dates")
+        n = min(len(df), self.max_points)
+        tail = df.tail(n)
+        self.timestamps = tail["dates"].astype(float).tolist()
+        self.opens = tail["opens"].tolist()
+        self.highs = tail["highs"].tolist()
+        self.lows = tail["lows"].tolist()
+        self.closes = tail["closes"].tolist()
+        self.volumes = tail["volumes"].tolist()
         self._did_initial_fit = False
         self._dirty = True
 
@@ -316,24 +398,37 @@ class ChartDockWidget(QDockWidget):
             return
         self._dirty = True
 
+    # ── Rendering ─────────────────────────────────────────────────────────────
+
     def _render_if_dirty(self) -> None:
         if not self._dirty or not self.timestamps:
             return
         self._dirty = False
 
-        x = list(range(len(self.timestamps)))
-        self.price_x_axis.set_timestamps(self.timestamps)
-        self.volume_x_axis.set_timestamps(self.timestamps)
-        self.candle_item.set_data(x, self.opens, self.highs, self.lows, self.closes)
+        x = self.timestamps
+        candle_width = self._infer_candle_width_seconds()
+        self.candle_item.set_data(
+            x, self.opens, self.highs, self.lows, self.closes,
+            body_width=candle_width * 0.72,
+        )
 
+        # Volume bars in the overlay ViewBox — explicit pen=None to suppress
+        # pyqtgraph's default foreground pen overriding the per-bar brush colors.
         if self.volume_item is not None:
-            self.volume_plot.removeItem(self.volume_item)
+            self.vb_vol.removeItem(self.volume_item)
         brushes = [
-            QBrush(QColor(35, 200, 110, 180)) if c >= o else QBrush(QColor(220, 70, 85, 180))
+            QBrush(QColor(35, 200, 110, 160)) if c >= o else QBrush(QColor(220, 70, 85, 160))
             for o, c in zip(self.opens, self.closes)
         ]
-        self.volume_item = pg.BarGraphItem(x=x, height=self.volumes, width=0.8, brushes=brushes)
-        self.volume_plot.addItem(self.volume_item)
+        self.volume_item = pg.BarGraphItem(
+            x=x,
+            height=self.volumes,
+            width=candle_width * 0.72,
+            brushes=brushes,
+            pen=pg.mkPen(None),
+        )
+        self.vb_vol.addItem(self.volume_item)
+        self.vb_vol.enableAutoRange(pg.ViewBox.YAxis, True)
 
         if self.show_ema:
             if self.ema_item is not None:
@@ -342,9 +437,41 @@ class ChartDockWidget(QDockWidget):
             self.ema_item = self.price_plot.plot(x=x, y=ema, pen=pg.mkPen(color=(100, 180, 255), width=1.0))
 
         if x and not self._did_initial_fit:
-            window = min(180, max(60, len(x)))
-            self.price_plot.setXRange(max(0, x[-1] - window), x[-1] + 2, padding=0.0)
+            self._fit_initial_view()
             self._did_initial_fit = True
+
+    def _fit_initial_view(self) -> None:
+        if not self.timestamps:
+            return
+        candle_span = self._infer_candle_width_seconds()
+        window_count = min(180, max(60, len(self.timestamps)))
+        start_idx = max(0, len(self.timestamps) - window_count)
+        visible_timestamps = self.timestamps[start_idx:]
+        visible_highs = self.highs[start_idx:]
+        visible_lows = self.lows[start_idx:]
+        if not visible_timestamps or not visible_highs or not visible_lows:
+            return
+
+        x_min = visible_timestamps[0] - candle_span
+        x_max = visible_timestamps[-1] + (2.0 * candle_span)
+        price_min = min(visible_lows)
+        price_max = max(visible_highs)
+        price_pad = max((price_max - price_min) * 0.05, 1e-9)
+
+        self.price_plot.setXRange(x_min, x_max, padding=0.0)
+        self.price_plot.setYRange(price_min - price_pad, price_max + price_pad, padding=0.0)
+        self._update_vol_geometry()
+
+    def _infer_candle_width_seconds(self) -> float:
+        if len(self.timestamps) >= 2:
+            diffs = [
+                float(self.timestamps[idx] - self.timestamps[idx - 1])
+                for idx in range(1, len(self.timestamps))
+                if self.timestamps[idx] > self.timestamps[idx - 1]
+            ]
+            if diffs:
+                return max(min(diffs), 1.0)
+        return float(_timeframe_to_seconds(self.timeframe))
 
     @staticmethod
     def _normalize_dates_seconds(series: pd.Series) -> list[float]:
@@ -361,3 +488,24 @@ class ChartDockWidget(QDockWidget):
         self._unsubscribe()
         self._unregister_handlers()
         super().closeEvent(event)
+
+
+def _timeframe_to_seconds(value: str) -> int:
+    raw = (value or "").strip().lower()
+    if not raw:
+        return 60
+    unit = raw[-1]
+    try:
+        amount = int(raw[:-1]) if unit.isalpha() else int(raw)
+    except ValueError:
+        return 60
+    if not unit.isalpha():
+        return max(amount * 60, 1)
+    multipliers = {
+        "s": 1,
+        "m": 60,
+        "h": 3600,
+        "d": 86400,
+        "w": 604800,
+    }
+    return max(amount * multipliers.get(unit, 60), 1)

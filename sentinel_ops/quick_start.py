@@ -1,6 +1,6 @@
 import asyncio
 
-from trade_suite.core.data.data_source import Data
+from sentinel.core.data.data_source import Data
 import asyncio, os
 
 async def smoke():

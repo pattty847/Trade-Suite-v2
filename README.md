@@ -1,46 +1,49 @@
-# Sentinel - Qt Trading Workstation
+# Sentinel
 
-Sentinel is the actively developed PySide6/pyqtgraph desktop workstation in this repository.  
-Legacy DearPyGUI code remains in-repo as reference, but Sentinel is the primary runtime.
+Sentinel is a desktop trading workstation built with `PySide6`, `PyQtGraph`, and `qasync`.
 
-![ezgif-8fe9048b423618](https://github.com/user-attachments/assets/e703a1f7-d0be-487e-bdfb-695e34073d53)
-![image](https://github.com/user-attachments/assets/6f49af6f-3e56-43ce-aba0-24d8aca29b1b)
+Current scope:
+- live candlestick charting
+- DOM / orderbook widgets
+- dockable Qt layout with persistence
+- shared async market-data runtime
 
-## Project Evolution: TradeSuite v2
-
-The TradeSuite project is undergoing a significant evolution from a desktop-based application to a modern, client-server architecture. This upgrade will enable 24/7 data processing, advanced AI-powered features, and a flexible web-based interface.
-
-The development environment is being standardized on WSL2, and we will be leveraging Redis for high-performance in-memory data management.
-
-For a detailed overview of the new architecture, technology stack, and implementation plan, please see the full design blueprint: **[Blueprint: TradeSuite v2 - Full System Architecture](docs/design_documents/active_proposals/trade_suite_full_ai_sentinel_integration.md)**.
-
-## Quick Start
+## Run
 
 ```bash
-uv sync
+uv sync --group dev
 uv run python -m sentinel
 ```
 
-## Current Scope
+## Stack
 
-- Dockable Qt widgets with persistent layout restore
-- Real-time chart and orderbook widgets
-- Shared async market data runtime via `trade_suite.core`
-- `sentinel_ops` package retained for collector/alert-bot workflows
+- `PySide6`
+- `PyQtGraph`
+- `qasync`
+- `ccxt`
+- `pandas`
 
-## Sentinel Monitoring Through Grafana
-![image](https://github.com/user-attachments/assets/fc11ca26-ec19-43ca-8739-b9b1972db1f7)
+## Project Layout
 
-## Documentation
+- `/Users/copeharder/Programming/Trade-Suite-v2/sentinel/app`: Qt shell, layout management, runtime wiring
+- `/Users/copeharder/Programming/Trade-Suite-v2/sentinel/widgets`: chart, DOM, and orderbook widgets
+- `/Users/copeharder/Programming/Trade-Suite-v2/sentinel/core`: data access, streaming, task/runtime management
+- `/Users/copeharder/Programming/Trade-Suite-v2/sentinel/analysis`: shared analytics and processors
 
-Full docs live under [docs](docs/README.md).  
-Sentinel runtime path: `python -m sentinel`  
-Collector/ops runtime path: `python -m sentinel_ops.run`
+## Development
+
+- Runtime entrypoint: `python -m sentinel`
+- Test entrypoint: `uv run python -m pytest`
+- Dependencies are managed in `/Users/copeharder/Programming/Trade-Suite-v2/pyproject.toml`
+
+## Status
+
+This repository has been reduced to the active Sentinel application. Legacy DearPyGUI-era code has been removed from the runtime path.
 
 ## Contributing
 
-Please read [AGENTS.md](AGENTS.md) for project guidelines.
+Project operating guidance lives in `/Users/copeharder/Programming/Trade-Suite-v2/AGENTS.md`.
 
 ## License
 
-TradeSuite is released under the MIT License. See [LICENSE](LICENSE) for details.
+MIT. See `/Users/copeharder/Programming/Trade-Suite-v2/LICENSE`.

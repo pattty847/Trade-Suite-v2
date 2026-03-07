@@ -5,6 +5,7 @@ from typing import Any
 
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QDockWidget,
@@ -16,11 +17,32 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from trade_suite.analysis.orderbook_processor import OrderBookProcessor
-from trade_suite.core.signals import Signals
+from sentinel.analysis.orderbook_processor import OrderBookProcessor
+from sentinel.core.signals import Signals
 
 
 LOGGER = logging.getLogger(__name__)
+
+_AXIS_PEN = pg.mkPen(color="#1e2d3f", width=1)
+_TICK_PEN = pg.mkPen(color="#546d8a")
+_TICK_FONT = QFont()
+_TICK_FONT.setStyleHint(QFont.StyleHint.Monospace)
+_TICK_FONT.setPointSize(8)
+_LABEL_CSS = {"color": "#3f5a76", "font-size": "10pt"}
+
+_DATA_FONT = QFont()
+_DATA_FONT.setStyleHint(QFont.StyleHint.Monospace)
+_DATA_FONT.setPointSize(9)
+
+
+def _style_pg_plot(plot: pg.PlotWidget) -> None:
+    for axis_name in ("left", "right", "top", "bottom"):
+        ax = plot.getAxis(axis_name)
+        ax.setPen(_AXIS_PEN)
+        ax.setTextPen(_TICK_PEN)
+        ax.setTickFont(_TICK_FONT)
+        ax.setStyle(tickLength=-5)
+    plot.getViewBox().setBorder(pg.mkPen("#1a2535", width=1))
 
 
 class OrderbookDockWidget(QDockWidget):
@@ -53,7 +75,6 @@ class OrderbookDockWidget(QDockWidget):
         self.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
-            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
 
         body = QWidget()
@@ -76,9 +97,12 @@ class OrderbookDockWidget(QDockWidget):
         top_row.addWidget(self.spread_slider, 1)
 
         self.tick_label = QLabel(f"Tick: {self.processor.tick_size:.8g}")
+        self.tick_label.setFont(_DATA_FONT)
         top_row.addWidget(self.tick_label)
         down_btn = QPushButton("-")
         up_btn = QPushButton("+")
+        down_btn.setFixedWidth(26)
+        up_btn.setFixedWidth(26)
         down_btn.clicked.connect(self._decrease_tick)
         up_btn.clicked.connect(self._increase_tick)
         top_row.addWidget(down_btn)
@@ -90,21 +114,21 @@ class OrderbookDockWidget(QDockWidget):
         self.best_bid_label = QLabel("Bid: -")
         self.best_ask_label = QLabel("Ask: -")
         self.spread_label = QLabel("Spread: -")
-        stats_row.addWidget(self.ratio_label)
-        stats_row.addWidget(self.best_bid_label)
-        stats_row.addWidget(self.best_ask_label)
-        stats_row.addWidget(self.spread_label)
+        for lbl in (self.ratio_label, self.best_bid_label, self.best_ask_label, self.spread_label):
+            lbl.setFont(_DATA_FONT)
+            stats_row.addWidget(lbl)
         stats_row.addStretch(1)
         root.addLayout(stats_row)
 
         self.plot = pg.PlotWidget()
         self.plot.setBackground("#060a11")
-        self.plot.setLabel("right", "Volume")
-        self.plot.setLabel("bottom", "Price")
+        self.plot.setLabel("right", "Volume", **_LABEL_CSS)
+        self.plot.setLabel("bottom", "Price", **_LABEL_CSS)
         self.plot.showAxis("right")
         self.plot.hideAxis("left")
-        self.plot.showGrid(x=True, y=True, alpha=0.25)
-        self.plot.addLegend()
+        self.plot.showGrid(x=True, y=True, alpha=0.15)
+        self.plot.addLegend(offset=(10, 10))
+        _style_pg_plot(self.plot)
         root.addWidget(self.plot, 1)
 
         self.bids_line = self.plot.plot([], [], pen=pg.mkPen((40, 210, 120), width=2), name="Bids")
@@ -165,7 +189,7 @@ class OrderbookDockWidget(QDockWidget):
             widget_instance=self,
         )
         self._subscribed = True
-        LOGGER.info("Orderbook subscribed: %s/%s", self.exchange, self.symbol)
+        LOGGER.debug("Orderbook subscribed: %s/%s", self.exchange, self.symbol)
 
     def _unsubscribe(self) -> None:
         if not self._subscribed or self.runtime is None or self.runtime.core is None:
@@ -179,7 +203,8 @@ class OrderbookDockWidget(QDockWidget):
     def _on_order_book_update(self, exchange: str, orderbook: dict):
         if exchange != self.exchange:
             return
-        if orderbook.get("symbol") != self.symbol:
+        ob_symbol = orderbook.get("symbol")
+        if ob_symbol is not None and ob_symbol != self.symbol:
             return
         self.last_orderbook = orderbook
         self._dirty = True

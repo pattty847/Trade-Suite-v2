@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Callable # For type hinting the sink
 
-from trade_suite.core.data.data_source import Data # Assuming Data class is accessible
+from sentinel.core.data.data_source import Data # Assuming Data class is accessible
 from sentinel_ops import schema # For LP building
 from sentinel_ops import config # For constants like CADENCE_MS
 

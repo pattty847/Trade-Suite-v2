@@ -8,7 +8,7 @@ from typing import Optional
 
 from sentinel_ops.collectors.coinbase import stream_data_to_queues
 from sentinel_ops.writers.influx_writer import InfluxWriter
-from trade_suite.core.data.data_source import Data as TradeSuiteData # Alias to avoid confusion
+from sentinel.core.data.data_source import Data as TradeSuiteData # Alias to avoid confusion
 from sentinel_ops import config
 
 # Basic logging setup - consider using structlog as planned for richer logs

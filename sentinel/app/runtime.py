@@ -4,7 +4,7 @@ import logging
 from PySide6.QtCore import QObject, Signal
 
 from sentinel.app.signal_bridge import SentinelSignalBridge
-from trade_suite.core.facade import CoreServicesFacade
+from sentinel.core.facade import CoreServicesFacade
 
 
 LOGGER = logging.getLogger(__name__)

@@ -4,7 +4,7 @@ import json
 import asyncio # Added asyncio
 from datetime import datetime
 import sys
-from trade_suite.data.sec_api import SECDataFetcher
+from sentinel.core.data.sec_api import SECDataFetcher
 from dotenv import load_dotenv
 import pandas as pd # Added for CSV saving
 

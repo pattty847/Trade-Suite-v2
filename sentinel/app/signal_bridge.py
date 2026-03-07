@@ -3,7 +3,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
-from trade_suite.core.signals import Signals
+from sentinel.core.signals import Signals
 
 
 LOGGER = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class SentinelSignalBridge(QObject):
         self.emitter.register(Signals.TASK_ERROR, self._on_task_error)
         self.emitter.register(Signals.WIDGET_CLOSED, self._on_widget_closed)
         self._registered = True
-        LOGGER.info("SentinelSignalBridge registered non-hot-path callbacks.")
+        LOGGER.debug("SentinelSignalBridge registered non-hot-path callbacks.")
 
     def _on_task_success(self, **kwargs: Any) -> None:
         self.task_success.emit(dict(kwargs))

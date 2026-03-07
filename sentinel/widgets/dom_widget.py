@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QDockWidget,
     QHeaderView,
@@ -17,11 +17,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from trade_suite.analysis.orderbook_processor import OrderBookProcessor
-from trade_suite.core.signals import Signals
+from sentinel.analysis.orderbook_processor import OrderBookProcessor
+from sentinel.core.signals import Signals
 
 
 LOGGER = logging.getLogger(__name__)
+
+_MONO_FONT = QFont()
+_MONO_FONT.setStyleHint(QFont.StyleHint.Monospace)
+_MONO_FONT.setPointSize(10)
+
+_LABEL_FONT = QFont()
+_LABEL_FONT.setStyleHint(QFont.StyleHint.Monospace)
+_LABEL_FONT.setPointSize(9)
 
 
 class DomDockWidget(QDockWidget):
@@ -54,7 +62,6 @@ class DomDockWidget(QDockWidget):
         self.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
-            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
 
         body = QWidget()
@@ -65,15 +72,19 @@ class DomDockWidget(QDockWidget):
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Tick"))
         self.tick_label = QLabel(f"{self.processor.tick_size:.8g}")
+        self.tick_label.setFont(_LABEL_FONT)
         controls.addWidget(self.tick_label)
         dec_btn = QPushButton("-")
         inc_btn = QPushButton("+")
+        dec_btn.setFixedWidth(26)
+        inc_btn.setFixedWidth(26)
         dec_btn.clicked.connect(self._decrease_tick)
         inc_btn.clicked.connect(self._increase_tick)
         controls.addWidget(dec_btn)
         controls.addWidget(inc_btn)
         controls.addStretch(1)
         self.spread_label = QLabel("Spread: -")
+        self.spread_label.setFont(_LABEL_FONT)
         controls.addWidget(self.spread_label)
         root.addLayout(controls)
 
@@ -85,6 +96,9 @@ class DomDockWidget(QDockWidget):
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.table.setAlternatingRowColors(True)
+        self.table.setFont(_MONO_FONT)
+        self.table.verticalHeader().setDefaultSectionSize(22)
+        self.table.setShowGrid(False)
         root.addWidget(self.table, 1)
 
         self.setWidget(body)
@@ -141,7 +155,7 @@ class DomDockWidget(QDockWidget):
             widget_instance=self,
         )
         self._subscribed = True
-        LOGGER.info("DOM subscribed: %s/%s", self.exchange, self.symbol)
+        LOGGER.debug("DOM subscribed: %s/%s", self.exchange, self.symbol)
 
     def _unsubscribe(self) -> None:
         if not self._subscribed or self.runtime is None or self.runtime.core is None:
@@ -153,7 +167,11 @@ class DomDockWidget(QDockWidget):
         self._subscribed = False
 
     def _on_order_book_update(self, exchange: str, orderbook: dict) -> None:
-        if exchange != self.exchange or orderbook.get("symbol") != self.symbol:
+        if exchange != self.exchange:
+            return
+        # Stream is per-symbol; if orderbook includes symbol, filter by it
+        ob_symbol = orderbook.get("symbol")
+        if ob_symbol is not None and ob_symbol != self.symbol:
             return
         self.last_orderbook = orderbook
         self._dirty = True

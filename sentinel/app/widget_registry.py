@@ -240,7 +240,7 @@ class WidgetRegistry:
                 }
             )
         USER_WIDGETS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        LOGGER.info("Saved widget definitions to %s", USER_WIDGETS_PATH)
+        LOGGER.debug("Saved widget definitions to %s", USER_WIDGETS_PATH)
 
     def reset_user_definitions(self) -> None:
         if USER_WIDGETS_PATH.exists():

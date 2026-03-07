@@ -62,7 +62,7 @@ class LayoutManager:
         )
         target = FACTORY_LAYOUT_PATH if is_default else USER_LAYOUT_PATH
         target.write_text(json.dumps(payload.to_dict(), indent=2), encoding="utf-8")
-        LOGGER.info("Saved Qt layout to %s", target)
+        LOGGER.debug("Saved Qt layout to %s", target)
         return target
 
     def restore_layout(self, window: QMainWindow) -> bool:
@@ -74,7 +74,7 @@ class LayoutManager:
             ok = window.restoreGeometry(self._decode(payload.geometry_b64))
             ok = bool(window.restoreState(self._decode(payload.state_b64))) and ok
             if ok:
-                LOGGER.info("Restored Qt layout from %s", source)
+                LOGGER.debug("Restored Qt layout from %s", source)
                 return True
             LOGGER.warning("Failed to restore layout bytes from %s; trying fallback", source)
         LOGGER.info("No valid persisted Qt layout found; using default arrangement")
