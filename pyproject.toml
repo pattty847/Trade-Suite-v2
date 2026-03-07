@@ -28,7 +28,7 @@ dependencies = [
 [project.scripts]
 sentinel = "sentinel.__main__:main"
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
   "pytest>=8.3.0",
   "pytest-asyncio>=0.25.0",

@@ -152,7 +152,7 @@ Run appropriate checks before finishing:
 - if full suite is too broad, run the smallest relevant subset
 
 3. Legacy leak check
-- `rg "dearpygui|import dpg|dpg\\.|trade_suite" /Users/copeharder/Programming/Trade-Suite-v2`
+- `rg "dearpygui|import dpg|dpg\\.|trade_suite" .`
 
 4. Layout/runtime sanity
 - layout still restores or falls back cleanly

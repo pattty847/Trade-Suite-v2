@@ -878,13 +878,9 @@ class TaskManager:
 
     def is_stream_running(self, stream_id: str) -> bool:
         """Checks if a stream task is running and its event is set."""
-        is_subscribed = False
         with self.lock:
             sub = self.stream_subscriptions.get(stream_id)
-            # A stream is running if it has a subscription object
-            # and that object's ref_count > 0
-            if sub and sub.ref_count > 0:
-                is_subscribed = True
+            is_subscribed = sub is not None and sub.ref_count > 0
 
         task_running = self.tasks.get(stream_id) is not None and not self.tasks[stream_id].done()
         return task_running and is_subscribed

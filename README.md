@@ -13,7 +13,7 @@ Current scope:
 ## Run
 
 ```bash
-uv sync --group dev
+uv pip install -e ".[dev]"
 uv run python -m sentinel
 ```
 
@@ -27,16 +27,16 @@ uv run python -m sentinel
 
 ## Project Layout
 
-- `/Users/copeharder/Programming/Trade-Suite-v2/sentinel/app`: Qt shell, layout management, runtime wiring
-- `/Users/copeharder/Programming/Trade-Suite-v2/sentinel/widgets`: chart, DOM, and orderbook widgets
-- `/Users/copeharder/Programming/Trade-Suite-v2/sentinel/core`: data access, streaming, task/runtime management
-- `/Users/copeharder/Programming/Trade-Suite-v2/sentinel/analysis`: shared analytics and processors
+- `sentinel/app`: Qt shell, layout management, runtime wiring
+- `sentinel/widgets`: chart, DOM, and orderbook widgets
+- `sentinel/core`: data access, streaming, task/runtime management
+- `sentinel/analysis`: shared analytics and processors
 
 ## Development
 
 - Runtime entrypoint: `python -m sentinel`
 - Test entrypoint: `uv run python -m pytest`
-- Dependencies are managed in `/Users/copeharder/Programming/Trade-Suite-v2/pyproject.toml`
+- Dependencies are managed in `pyproject.toml`
 
 ## Status
 
@@ -44,8 +44,8 @@ This repository has been reduced to the active Sentinel application. Legacy Dear
 
 ## Contributing
 
-Project operating guidance lives in `/Users/copeharder/Programming/Trade-Suite-v2/AGENTS.md`.
+Project operating guidance lives in **AGENTS.md**.
 
 ## License
 
-MIT. See `/Users/copeharder/Programming/Trade-Suite-v2/LICENSE`.
+MIT. See **LICENSE**.
