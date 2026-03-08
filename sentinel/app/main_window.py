@@ -136,8 +136,14 @@ class SentinelMainWindow(QMainWindow):
             bar.addAction(act)
 
     def _on_selector_changed(self, _text: str) -> None:
-        """Called when toolbar asset or timeframe combo changes. No-op for now."""
-        pass
+        """Propagate asset/timeframe combo changes to all open chart widgets."""
+        if self._toolbar_asset is None or self._toolbar_timeframe is None:
+            return
+        symbol = self._toolbar_asset.currentText()
+        timeframe = self._toolbar_timeframe.currentText()
+        for dock in self.widget_registry.docks.values():
+            if isinstance(dock, ChartDockWidget):
+                dock.change_subscription("coinbase", symbol, timeframe)
 
     def _build_menus(self) -> None:
         menu = self.menuBar()

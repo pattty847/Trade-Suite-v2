@@ -332,18 +332,18 @@ class CandleFactory:
 
     def __timeframe_to_pandas_rule(self, timeframe: str) -> str:
         """Converts a timeframe string (e.g., '1m', '1h') to a pandas resampling rule string."""
+        # pandas >= 2.2 removed the old aliases: 'T' → 'min', 'H' → 'h', 'W' → 'W' (still ok)
         if timeframe.endswith('m'):
-            return timeframe[:-1] + 'T'  # Use 'T' for minutes
+            return timeframe[:-1] + 'min'
         elif timeframe.endswith('h'):
-            return timeframe[:-1] + 'H'
+            return timeframe[:-1] + 'h'
         elif timeframe.endswith('d'):
             return timeframe[:-1] + 'D'
         elif timeframe.endswith('w'):
             return timeframe[:-1] + 'W'
         else:
-            # Default or raise error? Let's default to minutes for safety
-            logging.warning(f"Could not convert timeframe '{timeframe}' to pandas rule, defaulting to 'T'.")
-            return 'T'
+            logging.warning(f"Could not convert timeframe '{timeframe}' to pandas rule, defaulting to 'min'.")
+            return 'min'
 
     def get_candle_data(self) -> pd.DataFrame:
         """Returns the current internal OHLCV DataFrame."""
