@@ -6,6 +6,7 @@ from typing import Any
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDockWidget,
     QHeaderView,
     QHBoxLayout,
@@ -57,6 +58,8 @@ class DomDockWidget(QDockWidget):
         self.processor.aggregation_enabled = True
         self.last_orderbook: dict[str, Any] | None = None
         self._dirty = False
+        self._show_cumulative = True
+        self._cell_cache: dict[tuple[int, int], tuple[str, str, str]] = {}
 
         self.setObjectName(f"dock:{instance_id}")
         self.setFeatures(
@@ -82,19 +85,23 @@ class DomDockWidget(QDockWidget):
         inc_btn.clicked.connect(self._increase_tick)
         controls.addWidget(dec_btn)
         controls.addWidget(inc_btn)
+        self.cumulative_checkbox = QCheckBox("Cumulative")
+        self.cumulative_checkbox.setChecked(True)
+        self.cumulative_checkbox.toggled.connect(self._on_toggle_cumulative)
+        controls.addWidget(self.cumulative_checkbox)
         controls.addStretch(1)
         self.spread_label = QLabel("Spread: -")
         self.spread_label.setFont(_LABEL_FONT)
         controls.addWidget(self.spread_label)
         root.addLayout(controls)
 
-        self.table = QTableWidget(self.levels, 5)
+        self.table = QTableWidget((self.levels * 2) + 1, 5)
         self.table.setHorizontalHeaderLabels(["Bid Qty", "Bid Cum", "Price", "Ask Cum", "Ask Qty"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setAlternatingRowColors(True)
         self.table.setFont(_MONO_FONT)
         self.table.verticalHeader().setDefaultSectionSize(22)
@@ -109,7 +116,7 @@ class DomDockWidget(QDockWidget):
         self._timer.setInterval(max(int(1000 / max(fps, 1)), 16))
         self._timer.timeout.connect(self._render_if_dirty)
         self._timer.start()
-        self._apply_table_width_constraints()
+        self._apply_headers()
 
         self.set_runtime(runtime)
 
@@ -195,72 +202,99 @@ class DomDockWidget(QDockWidget):
         self.tick_label.setText(f"{new_tick:.8g}")
         self._dirty = True
 
+    def _on_toggle_cumulative(self, checked: bool) -> None:
+        self._show_cumulative = checked
+        self._apply_headers()
+        self._dirty = True
+
     def _render_if_dirty(self) -> None:
         if not self._dirty or not self.last_orderbook:
             return
         self._dirty = False
 
-        processed = self.processor.process_orderbook(
+        processed = self.processor.build_dom_ladder(
             self.last_orderbook.get("bids", []),
             self.last_orderbook.get("asks", []),
+            self.levels,
             self._current_mid_price(),
         )
         if not processed:
             return
 
-        bids = processed["bids_processed"][: self.levels]
-        asks = processed["asks_processed"][: self.levels]
+        rows = processed["rows"]
+        for row_index, row in enumerate(rows):
+            kind = row["kind"]
+            bid_qty = f"{row['bid_qty']:,.4f}" if row["bid_qty"] > 0 else ""
+            bid_cum = f"{row['bid_cum']:,.4f}" if row["bid_cum"] > 0 and self._show_cumulative else ""
+            ask_cum = f"{row['ask_cum']:,.4f}" if row["ask_cum"] > 0 and self._show_cumulative else ""
+            ask_qty = f"{row['ask_qty']:,.4f}" if row["ask_qty"] > 0 else ""
+            price_val = f"{row['price']:.2f}"
 
-        for row in range(self.levels):
-            bid = bids[row] if row < len(bids) else None
-            ask = asks[row] if row < len(asks) else None
-
-            bid_qty = f"{bid[1]:,.4f}" if bid else ""
-            bid_cum = f"{bid[2]:,.4f}" if bid else ""
-            ask_cum = f"{ask[2]:,.4f}" if ask else ""
-            ask_qty = f"{ask[1]:,.4f}" if ask else ""
-            price_val = ""
-            if bid and ask:
-                price_val = f"{(bid[0] + ask[0]) / 2:.2f}"
-            elif bid:
-                price_val = f"{bid[0]:.2f}"
-            elif ask:
-                price_val = f"{ask[0]:.2f}"
-
-            self._set_cell(row, 0, bid_qty, color_role="bid")
-            self._set_cell(row, 1, bid_cum, color_role="bid")
-            self._set_cell(row, 2, price_val, color_role="mid")
-            self._set_cell(row, 3, ask_cum, color_role="ask")
-            self._set_cell(row, 4, ask_qty, color_role="ask")
+            self._set_cell(row_index, 0, bid_qty, kind=kind, role="bid_qty", magnitude=row["bid_qty"])
+            self._set_cell(row_index, 1, bid_cum, kind=kind, role="bid_cum", magnitude=row["bid_cum"])
+            self._set_cell(row_index, 2, price_val, kind=kind, role="price", magnitude=0.0)
+            self._set_cell(row_index, 3, ask_cum, kind=kind, role="ask_cum", magnitude=row["ask_cum"])
+            self._set_cell(row_index, 4, ask_qty, kind=kind, role="ask_qty", magnitude=row["ask_qty"])
 
         spread = processed["best_ask"] - processed["best_bid"]
         self.spread_label.setText(f"Spread: {spread:.2f}")
-        self._apply_table_width_constraints()
 
-    def _set_cell(self, row: int, col: int, text: str, color_role: str = "mid") -> None:
+        # Clear any extra rows if the ladder size changes in the future.
+        for row_index in range(len(rows), self.table.rowCount()):
+            for col in range(self.table.columnCount()):
+                self._set_cell(row_index, col, "", kind="empty", role="empty", magnitude=0.0)
+
+    def _set_cell(self, row: int, col: int, text: str, *, kind: str, role: str, magnitude: float) -> None:
         item = self.table.item(row, col)
         if item is None:
             item = QTableWidgetItem()
             self.table.setItem(row, col, item)
-        item.setText(text)
-        if color_role == "bid":
-            item.setForeground(QColor(53, 190, 130))
-        elif color_role == "ask":
-            item.setForeground(QColor(230, 92, 104))
-        else:
-            item.setForeground(QColor(210, 214, 220))
-        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        fg, bg = self._cell_palette(kind=kind, role=role, magnitude=magnitude)
+        cache_key = (row, col)
+        state = (text, fg.name(QColor.NameFormat.HexArgb), bg.name(QColor.NameFormat.HexArgb))
+        if self._cell_cache.get(cache_key) == state:
+            return
+        self._cell_cache[cache_key] = state
 
-    def _apply_table_width_constraints(self) -> None:
-        self.table.resizeColumnsToContents()
-        col_total = sum(self.table.columnWidth(i) for i in range(self.table.columnCount()))
-        frame = self.table.frameWidth() * 2
-        vheader = self.table.verticalHeader().width()
-        scrollbar = self.table.verticalScrollBar().sizeHint().width()
-        spacing = 32
-        minimum = col_total + frame + vheader + scrollbar + spacing
-        self.setMinimumWidth(max(360, minimum))
-        self.setMaximumWidth(max(560, minimum + 80))
+        item.setText(text)
+        item.setForeground(fg)
+        item.setBackground(bg)
+        if role == "price":
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        else:
+            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+    def _cell_palette(self, *, kind: str, role: str, magnitude: float) -> tuple[QColor, QColor]:
+        if kind == "mid":
+            if role == "price":
+                return QColor(248, 250, 252), QColor(210, 214, 220, 38)
+            return QColor(170, 176, 184), QColor(210, 214, 220, 20)
+        if kind == "ask":
+            alpha = min(140, 24 + int(magnitude * 180))
+            if role == "price":
+                return QColor(215, 219, 224), QColor(78, 18, 24, 20)
+            return QColor(230, 92, 104), QColor(120, 24, 36, alpha)
+        if kind == "bid":
+            alpha = min(140, 24 + int(magnitude * 180))
+            if role == "price":
+                return QColor(215, 219, 224), QColor(18, 56, 38, 20)
+            return QColor(53, 190, 130), QColor(24, 94, 58, alpha)
+        return QColor(160, 168, 176), QColor(0, 0, 0, 0)
+
+    def _apply_headers(self) -> None:
+        headers = ["Bid Qty", "Bid Cum", "Price", "Ask Cum", "Ask Qty"]
+        self.table.setHorizontalHeaderLabels(headers)
+        self.table.setColumnHidden(1, not self._show_cumulative)
+        self.table.setColumnHidden(3, not self._show_cumulative)
+        header = self.table.horizontalHeader()
+        for col in range(self.table.columnCount()):
+            if self.table.isColumnHidden(col):
+                continue
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+
+    def resizeEvent(self, event):  # noqa: N802
+        self._apply_headers()
+        super().resizeEvent(event)
 
     def closeEvent(self, event):  # noqa: N802
         self._timer.stop()

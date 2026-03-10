@@ -1,7 +1,6 @@
 import math
 import logging
 import numpy as np
-from collections import defaultdict
 
 
 class OrderBookProcessor:
@@ -174,10 +173,14 @@ class OrderBookProcessor:
         """
         if side_raw.size == 0:
             return np.array([])
-            
-        # Group by tick size
-        ticks = np.floor(side_raw[:, 0] / self.tick_size) * self.tick_size
-        
+
+        # Group by tick size. Bids bucket down, asks bucket up, otherwise
+        # adjacent levels collapse onto the same displayed price in the DOM.
+        if descending:
+            ticks = np.floor(side_raw[:, 0] / self.tick_size) * self.tick_size
+        else:
+            ticks = np.ceil(side_raw[:, 0] / self.tick_size) * self.tick_size
+
         # Find unique price levels and their indices
         uniq_prices, inverse_indices = np.unique(ticks, return_inverse=True)
         
@@ -385,6 +388,92 @@ class OrderBookProcessor:
         
         # Sort and remove duplicates
         return sorted(list(set(presets)))
+
+    def build_dom_ladder(self, raw_bids, raw_asks, levels_per_side: int, current_price=None):
+        """
+        Build a DOM ladder centered on a discrete mid-price row.
+
+        Returns:
+            dict with:
+                - rows: list[dict]
+                - best_bid
+                - best_ask
+                - midpoint
+        """
+        processed = self.process_orderbook(raw_bids, raw_asks, current_price)
+        if not processed:
+            return None
+
+        bids = processed["bids_processed"]
+        asks = processed["asks_processed"]
+        if not bids or not asks:
+            return None
+
+        best_bid = float(processed["best_bid"])
+        best_ask = float(processed["best_ask"])
+        midpoint = float(processed["midpoint"])
+        tick = float(self.tick_size)
+        center_price = self._normalize_price(round(midpoint / tick) * tick)
+
+        bid_map = {self._normalize_price(float(row[0])): row for row in bids}
+        ask_map = {self._normalize_price(float(row[0])): row for row in asks}
+
+        # Prepare cumulative values from the inside out so the DOM can render
+        # asks above the midpoint and bids below it with exact tick stepping.
+        ask_rows = []
+        ask_running = 0.0
+        for level in range(levels_per_side, 0, -1):
+            price = self._normalize_price(center_price + (level * tick))
+            row = ask_map.get(price)
+            qty = float(row[1]) if row else 0.0
+            ask_running += qty
+            ask_rows.append(
+                {
+                    "kind": "ask",
+                    "price": price,
+                    "bid_qty": 0.0,
+                    "bid_cum": 0.0,
+                    "ask_cum": ask_running,
+                    "ask_qty": qty,
+                }
+            )
+
+        mid_row = {
+            "kind": "mid",
+            "price": midpoint,
+            "bid_qty": 0.0,
+            "bid_cum": 0.0,
+            "ask_cum": 0.0,
+            "ask_qty": 0.0,
+        }
+
+        bid_rows = []
+        bid_running = 0.0
+        for level in range(1, levels_per_side + 1):
+            price = self._normalize_price(center_price - (level * tick))
+            row = bid_map.get(price)
+            qty = float(row[1]) if row else 0.0
+            bid_running += qty
+            bid_rows.append(
+                {
+                    "kind": "bid",
+                    "price": price,
+                    "bid_qty": qty,
+                    "bid_cum": bid_running,
+                    "ask_cum": 0.0,
+                    "ask_qty": 0.0,
+                }
+            )
+
+        return {
+            "rows": ask_rows + [mid_row] + bid_rows,
+            "best_bid": best_bid,
+            "best_ask": best_ask,
+            "midpoint": midpoint,
+        }
+
+    def _normalize_price(self, price: float) -> float:
+        return round(float(price), 10)
     
     def increase_tick_size(self, current_price):
         """
