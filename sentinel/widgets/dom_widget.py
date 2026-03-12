@@ -32,6 +32,11 @@ _LABEL_FONT = QFont()
 _LABEL_FONT.setStyleHint(QFont.StyleHint.Monospace)
 _LABEL_FONT.setPointSize(9)
 
+_MID_FONT = QFont(_MONO_FONT)
+_MID_FONT.setBold(True)
+
+_EPSILON = 1e-9
+
 
 class DomDockWidget(QDockWidget):
     def __init__(
@@ -224,11 +229,21 @@ class DomDockWidget(QDockWidget):
         rows = processed["rows"]
         for row_index, row in enumerate(rows):
             kind = row["kind"]
-            bid_qty = f"{row['bid_qty']:,.4f}" if row["bid_qty"] > 0 else ""
-            bid_cum = f"{row['bid_cum']:,.4f}" if row["bid_cum"] > 0 and self._show_cumulative else ""
-            ask_cum = f"{row['ask_cum']:,.4f}" if row["ask_cum"] > 0 and self._show_cumulative else ""
-            ask_qty = f"{row['ask_qty']:,.4f}" if row["ask_qty"] > 0 else ""
-            price_val = f"{row['price']:.2f}"
+            has_bid_liquidity = row["bid_qty"] > _EPSILON
+            has_ask_liquidity = row["ask_qty"] > _EPSILON
+            bid_qty = f"{row['bid_qty']:,.4f}" if has_bid_liquidity else ""
+            bid_cum = (
+                f"{row['bid_cum']:,.4f}"
+                if has_bid_liquidity and self._show_cumulative
+                else ""
+            )
+            ask_cum = (
+                f"{row['ask_cum']:,.4f}"
+                if has_ask_liquidity and self._show_cumulative
+                else ""
+            )
+            ask_qty = f"{row['ask_qty']:,.4f}" if has_ask_liquidity else ""
+            price_val = f"{row['price']:.2f}" if kind != "mid" else f"{row['price']:.2f} MID"
 
             self._set_cell(row_index, 0, bid_qty, kind=kind, role="bid_qty", magnitude=row["bid_qty"])
             self._set_cell(row_index, 1, bid_cum, kind=kind, role="bid_cum", magnitude=row["bid_cum"])
@@ -259,6 +274,7 @@ class DomDockWidget(QDockWidget):
         item.setText(text)
         item.setForeground(fg)
         item.setBackground(bg)
+        item.setFont(_MID_FONT if kind == "mid" else _MONO_FONT)
         if role == "price":
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         else:
@@ -267,8 +283,8 @@ class DomDockWidget(QDockWidget):
     def _cell_palette(self, *, kind: str, role: str, magnitude: float) -> tuple[QColor, QColor]:
         if kind == "mid":
             if role == "price":
-                return QColor(248, 250, 252), QColor(210, 214, 220, 38)
-            return QColor(170, 176, 184), QColor(210, 214, 220, 20)
+                return QColor(8, 12, 18), QColor(245, 247, 250, 255)
+            return QColor(228, 232, 238), QColor(255, 255, 255, 50)
         if kind == "ask":
             alpha = min(140, 24 + int(magnitude * 180))
             if role == "price":
