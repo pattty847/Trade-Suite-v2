@@ -415,26 +415,23 @@ class OrderBookProcessor:
         tick = float(self.tick_size)
         center_price = self._normalize_price(round(midpoint / tick) * tick)
 
-        bid_map = {self._normalize_price(float(row[0])): row for row in bids}
-        ask_map = {self._normalize_price(float(row[0])): row for row in asks}
+        ask_rows_inside_out = [
+            row for row in asks if self._normalize_price(float(row[0])) > center_price and float(row[1]) > 0
+        ][:levels_per_side]
+        bid_rows_inside_out = [
+            row for row in bids if self._normalize_price(float(row[0])) < center_price and float(row[1]) > 0
+        ][:levels_per_side]
 
-        # Prepare cumulative values from the inside out so the DOM can render
-        # asks above the midpoint and bids below it with exact tick stepping.
         ask_rows = []
-        ask_running = 0.0
-        for level in range(levels_per_side, 0, -1):
-            price = self._normalize_price(center_price + (level * tick))
-            row = ask_map.get(price)
-            qty = float(row[1]) if row else 0.0
-            ask_running += qty
+        for row in reversed(ask_rows_inside_out):
             ask_rows.append(
                 {
                     "kind": "ask",
-                    "price": price,
+                    "price": self._normalize_price(float(row[0])),
                     "bid_qty": 0.0,
                     "bid_cum": 0.0,
-                    "ask_cum": ask_running,
-                    "ask_qty": qty,
+                    "ask_cum": float(row[2]),
+                    "ask_qty": float(row[1]),
                 }
             )
 
@@ -448,18 +445,13 @@ class OrderBookProcessor:
         }
 
         bid_rows = []
-        bid_running = 0.0
-        for level in range(1, levels_per_side + 1):
-            price = self._normalize_price(center_price - (level * tick))
-            row = bid_map.get(price)
-            qty = float(row[1]) if row else 0.0
-            bid_running += qty
+        for row in bid_rows_inside_out:
             bid_rows.append(
                 {
                     "kind": "bid",
-                    "price": price,
-                    "bid_qty": qty,
-                    "bid_cum": bid_running,
+                    "price": self._normalize_price(float(row[0])),
+                    "bid_qty": float(row[1]),
+                    "bid_cum": float(row[2]),
                     "ask_cum": 0.0,
                     "ask_qty": 0.0,
                 }
@@ -467,6 +459,75 @@ class OrderBookProcessor:
 
         return {
             "rows": ask_rows + [mid_row] + bid_rows,
+            "best_bid": best_bid,
+            "best_ask": best_ask,
+            "midpoint": midpoint,
+        }
+
+    def build_visible_ladder(
+        self,
+        raw_bids,
+        raw_asks,
+        *,
+        price_min: float,
+        price_max: float,
+        current_price=None,
+    ):
+        """
+        Build a visible price-aligned ladder for the composite chart/orderflow view.
+        Rows are populated levels only plus a center row when it falls inside the
+        visible range.
+        """
+        processed = self.process_orderbook(raw_bids, raw_asks, current_price)
+        if not processed:
+            return None
+
+        bids = processed["bids_processed"]
+        asks = processed["asks_processed"]
+        if not bids or not asks:
+            return None
+
+        best_bid = float(processed["best_bid"])
+        best_ask = float(processed["best_ask"])
+        midpoint = float(processed["midpoint"])
+        lower = min(price_min, price_max)
+        upper = max(price_min, price_max)
+
+        ask_rows = [
+            {
+                "kind": "ask",
+                "price": self._normalize_price(float(row[0])),
+                "size": float(row[1]),
+                "total": float(row[2]),
+            }
+            for row in asks
+            if lower <= float(row[0]) <= upper and float(row[1]) > 0
+        ]
+        bid_rows = [
+            {
+                "kind": "bid",
+                "price": self._normalize_price(float(row[0])),
+                "size": float(row[1]),
+                "total": float(row[2]),
+            }
+            for row in bids
+            if lower <= float(row[0]) <= upper and float(row[1]) > 0
+        ]
+
+        rows = sorted(ask_rows + bid_rows, key=lambda row: row["price"], reverse=True)
+        if lower <= midpoint <= upper:
+            rows.append(
+                {
+                    "kind": "mid",
+                    "price": midpoint,
+                    "size": 0.0,
+                    "total": 0.0,
+                }
+            )
+            rows.sort(key=lambda row: row["price"], reverse=True)
+
+        return {
+            "rows": rows,
             "best_bid": best_bid,
             "best_ask": best_ask,
             "midpoint": midpoint,

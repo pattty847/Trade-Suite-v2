@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow
 
 from sentinel.widgets.chart_widget import ChartDockWidget
+from sentinel.widgets.chart_orderflow_widget import ChartOrderflowDockWidget
 from sentinel.widgets.dom_widget import DomDockWidget
 from sentinel.widgets.orderbook_widget import OrderbookDockWidget
 
@@ -115,6 +116,33 @@ class WidgetRegistry:
         self.docks[instance_id] = dock
         return instance_id
 
+    def add_chart_orderflow(
+        self,
+        *,
+        instance_id: str | None = None,
+        exchange: str = "coinbase",
+        symbol: str = "BTC/USD",
+        timeframe: str = "1m",
+        tick_size: float = 0.01,
+        area: Qt.DockWidgetArea = Qt.DockWidgetArea.LeftDockWidgetArea,
+    ) -> str:
+        if instance_id is None:
+            instance_id = f"chart_orderflow_{uuid4().hex[:8]}"
+        if instance_id in self.docks:
+            return instance_id
+
+        dock = ChartOrderflowDockWidget(
+            instance_id=instance_id,
+            runtime=self.runtime,
+            exchange=exchange,
+            symbol=symbol,
+            timeframe=timeframe,
+            price_precision=tick_size,
+        )
+        self.window.addDockWidget(area, dock)
+        self.docks[instance_id] = dock
+        return instance_id
+
     def add_orderbook(
         self,
         *,
@@ -190,6 +218,15 @@ class WidgetRegistry:
                     timeframe=str(config.get("timeframe", "1m")),
                 )
                 continue
+            if widget_type == "chart_orderflow":
+                self.add_chart_orderflow(
+                    instance_id=instance_id,
+                    exchange=str(config.get("exchange", "coinbase")),
+                    symbol=str(config.get("symbol", "BTC/USD")),
+                    timeframe=str(config.get("timeframe", "1m")),
+                    tick_size=float(config.get("tick_size", 0.01)),
+                )
+                continue
             if widget_type == "orderbook":
                 self.add_orderbook(
                     instance_id=instance_id,
@@ -211,7 +248,10 @@ class WidgetRegistry:
                 instance_id=instance_id,
             )
 
-        if not any(isinstance(dock, ChartDockWidget) for dock in self.docks.values()):
+        if not any(
+            isinstance(dock, (ChartDockWidget, ChartOrderflowDockWidget))
+            for dock in self.docks.values()
+        ):
             LOGGER.warning(
                 "Widget definitions did not include a chart; injecting default chart widget."
             )

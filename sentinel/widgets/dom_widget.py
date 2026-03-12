@@ -101,7 +101,7 @@ class DomDockWidget(QDockWidget):
         root.addLayout(controls)
 
         self.table = QTableWidget((self.levels * 2) + 1, 5)
-        self.table.setHorizontalHeaderLabels(["Bid Qty", "Bid Cum", "Price", "Ask Cum", "Ask Qty"])
+        self.table.setHorizontalHeaderLabels(["Bid Cum", "Bid Qty", "Price", "Ask Qty", "Ask Cum"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
@@ -231,25 +231,25 @@ class DomDockWidget(QDockWidget):
             kind = row["kind"]
             has_bid_liquidity = row["bid_qty"] > _EPSILON
             has_ask_liquidity = row["ask_qty"] > _EPSILON
-            bid_qty = f"{row['bid_qty']:,.4f}" if has_bid_liquidity else ""
+            bid_qty = self._format_quantity(row["bid_qty"]) if has_bid_liquidity else ""
             bid_cum = (
-                f"{row['bid_cum']:,.4f}"
+                self._format_quantity(row["bid_cum"])
                 if has_bid_liquidity and self._show_cumulative
                 else ""
             )
             ask_cum = (
-                f"{row['ask_cum']:,.4f}"
+                self._format_quantity(row["ask_cum"])
                 if has_ask_liquidity and self._show_cumulative
                 else ""
             )
-            ask_qty = f"{row['ask_qty']:,.4f}" if has_ask_liquidity else ""
+            ask_qty = self._format_quantity(row["ask_qty"]) if has_ask_liquidity else ""
             price_val = f"{row['price']:.2f}" if kind != "mid" else f"{row['price']:.2f} MID"
 
-            self._set_cell(row_index, 0, bid_qty, kind=kind, role="bid_qty", magnitude=row["bid_qty"])
-            self._set_cell(row_index, 1, bid_cum, kind=kind, role="bid_cum", magnitude=row["bid_cum"])
+            self._set_cell(row_index, 0, bid_cum, kind=kind, role="bid_cum", magnitude=row["bid_cum"])
+            self._set_cell(row_index, 1, bid_qty, kind=kind, role="bid_qty", magnitude=row["bid_qty"])
             self._set_cell(row_index, 2, price_val, kind=kind, role="price", magnitude=0.0)
-            self._set_cell(row_index, 3, ask_cum, kind=kind, role="ask_cum", magnitude=row["ask_cum"])
-            self._set_cell(row_index, 4, ask_qty, kind=kind, role="ask_qty", magnitude=row["ask_qty"])
+            self._set_cell(row_index, 3, ask_qty, kind=kind, role="ask_qty", magnitude=row["ask_qty"])
+            self._set_cell(row_index, 4, ask_cum, kind=kind, role="ask_cum", magnitude=row["ask_cum"])
 
         spread = processed["best_ask"] - processed["best_bid"]
         self.spread_label.setText(f"Spread: {spread:.2f}")
@@ -277,14 +277,16 @@ class DomDockWidget(QDockWidget):
         item.setFont(_MID_FONT if kind == "mid" else _MONO_FONT)
         if role == "price":
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        elif role.startswith("ask"):
+            item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         else:
             item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
     def _cell_palette(self, *, kind: str, role: str, magnitude: float) -> tuple[QColor, QColor]:
         if kind == "mid":
             if role == "price":
-                return QColor(8, 12, 18), QColor(245, 247, 250, 255)
-            return QColor(228, 232, 238), QColor(255, 255, 255, 50)
+                return QColor(248, 250, 252), QColor(74, 84, 96, 220)
+            return QColor(238, 242, 247), QColor(74, 84, 96, 220)
         if kind == "ask":
             alpha = min(140, 24 + int(magnitude * 180))
             if role == "price":
@@ -298,15 +300,22 @@ class DomDockWidget(QDockWidget):
         return QColor(160, 168, 176), QColor(0, 0, 0, 0)
 
     def _apply_headers(self) -> None:
-        headers = ["Bid Qty", "Bid Cum", "Price", "Ask Cum", "Ask Qty"]
+        headers = ["Bid Cum", "Bid Qty", "Price", "Ask Qty", "Ask Cum"]
         self.table.setHorizontalHeaderLabels(headers)
-        self.table.setColumnHidden(1, not self._show_cumulative)
-        self.table.setColumnHidden(3, not self._show_cumulative)
+        self.table.setColumnHidden(0, not self._show_cumulative)
+        self.table.setColumnHidden(4, not self._show_cumulative)
         header = self.table.horizontalHeader()
         for col in range(self.table.columnCount()):
             if self.table.isColumnHidden(col):
                 continue
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+
+    def _format_quantity(self, value: float) -> str:
+        if value <= _EPSILON:
+            return ""
+        if value < 0.0001:
+            return "<0.0001"
+        return f"{value:,.4f}"
 
     def resizeEvent(self, event):  # noqa: N802
         self._apply_headers()

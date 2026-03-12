@@ -19,6 +19,7 @@ from qasync import asyncClose
 from sentinel.app.layout_manager import LayoutManager
 from sentinel.app.runtime import SentinelRuntime
 from sentinel.app.widget_registry import WidgetRegistry
+from sentinel.widgets.chart_orderflow_widget import ChartOrderflowDockWidget
 from sentinel.widgets.chart_widget import ChartDockWidget
 from sentinel.widgets.dom_widget import DomDockWidget
 from sentinel.widgets.orderbook_widget import OrderbookDockWidget
@@ -142,7 +143,7 @@ class SentinelMainWindow(QMainWindow):
         symbol = self._toolbar_asset.currentText()
         timeframe = self._toolbar_timeframe.currentText()
         for dock in self.widget_registry.docks.values():
-            if isinstance(dock, ChartDockWidget):
+            if isinstance(dock, (ChartDockWidget, ChartOrderflowDockWidget)):
                 dock.change_subscription("coinbase", symbol, timeframe)
 
     def _build_menus(self) -> None:
@@ -152,6 +153,10 @@ class SentinelMainWindow(QMainWindow):
         new_chart_action = QAction("New Chart", self)
         new_chart_action.triggered.connect(self._on_new_chart)
         file_menu.addAction(new_chart_action)
+
+        new_chart_orderflow_action = QAction("New Chart + Orderflow", self)
+        new_chart_orderflow_action.triggered.connect(self._on_new_chart_orderflow)
+        file_menu.addAction(new_chart_orderflow_action)
 
         new_orderbook_action = QAction("New Orderbook", self)
         new_orderbook_action.triggered.connect(self._on_new_orderbook)
@@ -191,11 +196,20 @@ class SentinelMainWindow(QMainWindow):
             return
 
         chart = next((dock for dock in docks if isinstance(dock, ChartDockWidget)), None)
+        chart_orderflow = next(
+            (dock for dock in docks if isinstance(dock, ChartOrderflowDockWidget)),
+            None,
+        )
         dom = next((dock for dock in docks if isinstance(dock, DomDockWidget)), None)
         depth = next((dock for dock in docks if isinstance(dock, OrderbookDockWidget)), None)
 
-        if chart is not None:
+        primary_chart = chart_orderflow or chart
+        if primary_chart is not None:
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, primary_chart)
+        if chart is not None and chart_orderflow is not None:
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, chart)
+            self.tabifyDockWidget(primary_chart, chart)
+            chart.hide()
         if dom is not None:
             self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dom)
         if depth is not None:
@@ -203,13 +217,17 @@ class SentinelMainWindow(QMainWindow):
             if dom is not None:
                 self.splitDockWidget(dom, depth, Qt.Orientation.Vertical)
                 self.resizeDocks([dom, depth], [560, 340], Qt.Orientation.Vertical)
-        if chart is not None and (dom is not None or depth is not None):
+        if primary_chart is not None and (dom is not None or depth is not None):
             right_anchor = dom if dom is not None else depth
-            self.resizeDocks([chart, right_anchor], [1280, 380], Qt.Orientation.Horizontal)
+            self.resizeDocks([primary_chart, right_anchor], [1280, 380], Qt.Orientation.Horizontal)
 
     def _ensure_chart_visible(self) -> None:
         chart = next(
-            (dock for dock in self.widget_registry.docks.values() if isinstance(dock, ChartDockWidget)),
+            (
+                dock
+                for dock in self.widget_registry.docks.values()
+                if isinstance(dock, (ChartDockWidget, ChartOrderflowDockWidget))
+            ),
             None,
         )
         if chart is None:
@@ -233,6 +251,17 @@ class SentinelMainWindow(QMainWindow):
             exchange="coinbase",
             symbol=symbol,
             timeframe=timeframe,
+            area=Qt.DockWidgetArea.LeftDockWidgetArea,
+        )
+
+    def _on_new_chart_orderflow(self) -> None:
+        symbol = self._toolbar_asset.currentText() if self._toolbar_asset is not None else "BTC/USD"
+        timeframe = self._toolbar_timeframe.currentText() if self._toolbar_timeframe is not None else "1m"
+        self.widget_registry.add_chart_orderflow(
+            exchange="coinbase",
+            symbol=symbol,
+            timeframe=timeframe,
+            tick_size=0.01,
             area=Qt.DockWidgetArea.LeftDockWidgetArea,
         )
 
