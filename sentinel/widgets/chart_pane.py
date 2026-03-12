@@ -10,14 +10,7 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPicture
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QHBoxLayout,
-    QLabel,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from sentinel.core.signals import Signals
 
@@ -151,8 +144,8 @@ class ChartPane(QWidget):
         self._dirty = False
         self._did_initial_fit = False
         
-        self.chart_mode = "candles"
-        self.show_bubbles = False
+        self._chart_mode = "candles"
+        self._show_bubbles = False
         self._trades_cache = deque(maxlen=1000)
 
         self.price_x_axis = pg.DateAxisItem(orientation="bottom")
@@ -235,38 +228,6 @@ class ChartPane(QWidget):
             self.price_plot.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_moved
         )
 
-        controls_container = QWidget(self)
-        controls_container.setStyleSheet("background: transparent;")
-        controls_layout = QHBoxLayout(controls_container)
-        controls_layout.setContentsMargins(8, 0, 8, 0)
-        controls_layout.setSpacing(12)
-        
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Candles", "Line", "Heikin Ashi"])
-        self.mode_combo.setCurrentText("Candles")
-        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
-        self.mode_combo.setStyleSheet(
-            "QComboBox { color: #d6dde6; background: #0f1722; border: 1px solid #1e2d3f; padding: 2px 8px; border-radius: 2px; font-size: 11px; } "
-            "QComboBox::drop-down { border: none; }"
-        )
-        
-        self.bubbles_check = QCheckBox("Bubbles")
-        self.bubbles_check.setChecked(False)
-        self.bubbles_check.stateChanged.connect(self._on_bubbles_changed)
-        self.bubbles_check.setStyleSheet(
-            "QCheckBox { color: #8fa4c2; font-size: 11px; } "
-            "QCheckBox::indicator { width: 12px; height: 12px; border: 1px solid #1e2d3f; border-radius: 2px; } "
-            "QCheckBox::indicator:checked { background-color: #26a69a; border-color: #26a69a; }"
-        )
-        
-        controls_layout.addWidget(self.mode_combo)
-        controls_layout.addWidget(self.bubbles_check)
-        controls_layout.addStretch()
-        
-        # Position controls beneath the OHLCV label
-        controls_container.move(8, 28)
-        controls_container.show()
-
         QTimer.singleShot(0, self._update_vol_geometry)
 
         interval_ms = max(int(1000 / max(fps, 1)), 16)
@@ -318,13 +279,22 @@ class ChartPane(QWidget):
         self._v_line.hide()
         self._h_line.hide()
 
-    def _on_mode_changed(self, mode_str: str) -> None:
-        self.chart_mode = mode_str.lower()
+    def set_chart_mode(self, mode: str) -> None:
+        normalized = (mode or "").strip().lower()
+        if normalized not in {"candles", "line", "heikin ashi"}:
+            normalized = "candles"
+        self._chart_mode = normalized
         self._dirty = True
 
-    def _on_bubbles_changed(self, state: int) -> None:
-        self.show_bubbles = (state == Qt.CheckState.Checked.value)
+    def chart_mode(self) -> str:
+        return self._chart_mode
+
+    def set_bubbles_enabled(self, enabled: bool) -> None:
+        self._show_bubbles = bool(enabled)
         self._dirty = True
+
+    def bubbles_enabled(self) -> bool:
+        return self._show_bubbles
 
     def set_runtime(self, runtime) -> None:
         self.runtime = runtime
@@ -405,7 +375,7 @@ class ChartPane(QWidget):
         if exchange != self.exchange or trade_data.get("symbol") != self.symbol:
             return
         self._trades_cache.append(trade_data)
-        if self.show_bubbles:
+        if self._show_bubbles:
             self._dirty = True
 
     def _replace_from_dataframe(self, data: pd.DataFrame) -> None:
@@ -481,15 +451,15 @@ class ChartPane(QWidget):
         self.ha_item.hide()
         self.line_item.hide()
 
-        if self.chart_mode == "candles":
+        if self._chart_mode == "candles":
             self.candle_item.show()
             self.candle_item.set_data(
                 x, self.opens, self.highs, self.lows, self.closes, body_width=candle_width * 0.72
             )
-        elif self.chart_mode == "line":
+        elif self._chart_mode == "line":
             self.line_item.show()
             self.line_item.setData(x, self.closes)
-        elif self.chart_mode == "heikin ashi":
+        elif self._chart_mode == "heikin ashi":
             self.ha_item.show()
             ha_opens, ha_highs, ha_lows, ha_closes = [], [], [], []
             for i in range(len(self.closes)):
@@ -508,7 +478,7 @@ class ChartPane(QWidget):
                 x, ha_opens, ha_highs, ha_lows, ha_closes, body_width=candle_width * 0.72
             )
             
-        if self.show_bubbles and self._trades_cache:
+        if self._show_bubbles and self._trades_cache:
             spots = []
             # Calculate dynamic sizing based on max amount in cache
             max_amt = max(

@@ -5,15 +5,7 @@ import pyqtgraph as pg
 import qtawesome as qta
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent
-from PySide6.QtWidgets import (
-    QComboBox,
-    QLabel,
-    QMainWindow,
-    QMessageBox,
-    QSizePolicy,
-    QToolBar,
-    QWidget,
-)
+from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QSizePolicy, QToolBar, QWidget
 from qasync import asyncClose
 
 from sentinel.app.layout_manager import LayoutManager
@@ -38,8 +30,6 @@ class SentinelMainWindow(QMainWindow):
 
         self.layout_manager = LayoutManager(app_version=app_version)
         self.widget_registry = WidgetRegistry(self)
-        self._toolbar_asset: QComboBox | None = None
-        self._toolbar_timeframe: QComboBox | None = None
 
         self._apply_theme()
         self._build_global_toolbar()
@@ -65,32 +55,6 @@ class SentinelMainWindow(QMainWindow):
         brand = QLabel("Sentinel")
         brand.setStyleSheet("font-weight:700; color:#8fb3ff; padding: 0 10px 0 4px; font-size:13px;")
         bar.addWidget(brand)
-
-        self._toolbar_asset = QComboBox()
-        self._toolbar_asset.addItems(["BTC/USD", "ETH/USD", "SOL/USD"])
-        self._toolbar_asset.setCurrentText("BTC/USD")
-        self._toolbar_asset.currentTextChanged.connect(self._on_selector_changed)
-        bar.addWidget(self._toolbar_asset)
-
-        self._toolbar_timeframe = QComboBox()
-        self._toolbar_timeframe.addItems(["1m", "5m", "15m", "1h", "4h", "1d"])
-        self._toolbar_timeframe.setCurrentText("1m")
-        self._toolbar_timeframe.currentTextChanged.connect(self._on_selector_changed)
-        bar.addWidget(self._toolbar_timeframe)
-
-        _ic = "#6a85a8"  # icon tint for combo labels
-        mode = QComboBox()
-        mode.addItems(["Candles", "Line", "Bars", "Heikin Ashi"])
-        mode.setItemIcon(0, qta.icon("mdi6.chart-box-outline", color=_ic))
-        mode.setItemIcon(1, qta.icon("mdi6.chart-line", color=_ic))
-        mode.setItemIcon(2, qta.icon("mdi6.chart-bar", color=_ic))
-        mode.setItemIcon(3, qta.icon("mdi6.chart-areaspline", color=_ic))
-        bar.addWidget(mode)
-
-        indicators = QComboBox()
-        indicators.addItems(["Indicators", "EMA", "VWAP", "RSI", "MACD"])
-        indicators.setItemIcon(0, qta.icon("mdi6.chart-bell-curve-cumulative", color=_ic))
-        bar.addWidget(indicators)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -135,16 +99,6 @@ class SentinelMainWindow(QMainWindow):
                 first = False
             group.addAction(act)
             bar.addAction(act)
-
-    def _on_selector_changed(self, _text: str) -> None:
-        """Propagate asset/timeframe combo changes to all open chart widgets."""
-        if self._toolbar_asset is None or self._toolbar_timeframe is None:
-            return
-        symbol = self._toolbar_asset.currentText()
-        timeframe = self._toolbar_timeframe.currentText()
-        for dock in self.widget_registry.docks.values():
-            if isinstance(dock, (ChartDockWidget, ChartOrderflowDockWidget)):
-                dock.change_subscription("coinbase", symbol, timeframe)
 
     def _build_menus(self) -> None:
         menu = self.menuBar()
@@ -245,39 +199,33 @@ class SentinelMainWindow(QMainWindow):
         )
 
     def _on_new_chart(self) -> None:
-        symbol = self._toolbar_asset.currentText() if self._toolbar_asset is not None else "BTC/USD"
-        timeframe = self._toolbar_timeframe.currentText() if self._toolbar_timeframe is not None else "1m"
         self.widget_registry.add_chart(
             exchange="coinbase",
-            symbol=symbol,
-            timeframe=timeframe,
+            symbol="BTC/USD",
+            timeframe="1m",
             area=Qt.DockWidgetArea.LeftDockWidgetArea,
         )
 
     def _on_new_chart_orderflow(self) -> None:
-        symbol = self._toolbar_asset.currentText() if self._toolbar_asset is not None else "BTC/USD"
-        timeframe = self._toolbar_timeframe.currentText() if self._toolbar_timeframe is not None else "1m"
         self.widget_registry.add_chart_orderflow(
             exchange="coinbase",
-            symbol=symbol,
-            timeframe=timeframe,
+            symbol="BTC/USD",
+            timeframe="1m",
             tick_size=0.01,
             area=Qt.DockWidgetArea.LeftDockWidgetArea,
         )
 
     def _on_new_orderbook(self) -> None:
-        symbol = self._toolbar_asset.currentText() if self._toolbar_asset is not None else "BTC/USD"
         self.widget_registry.add_orderbook(
             exchange="coinbase",
-            symbol=symbol,
+            symbol="BTC/USD",
             area=Qt.DockWidgetArea.RightDockWidgetArea,
         )
 
     def _on_new_dom(self) -> None:
-        symbol = self._toolbar_asset.currentText() if self._toolbar_asset is not None else "BTC/USD"
         self.widget_registry.add_dom(
             exchange="coinbase",
-            symbol=symbol,
+            symbol="BTC/USD",
             levels=16,
             area=Qt.DockWidgetArea.RightDockWidgetArea,
         )

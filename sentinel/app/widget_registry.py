@@ -98,6 +98,8 @@ class WidgetRegistry:
         exchange: str = "coinbase",
         symbol: str = "BTC/USD",
         timeframe: str = "1m",
+        chart_mode: str = "candles",
+        show_bubbles: bool = False,
         area: Qt.DockWidgetArea = Qt.DockWidgetArea.LeftDockWidgetArea,
     ) -> str:
         if instance_id is None:
@@ -111,6 +113,8 @@ class WidgetRegistry:
             exchange=exchange,
             symbol=symbol,
             timeframe=timeframe,
+            chart_mode=chart_mode,
+            show_bubbles=show_bubbles,
         )
         self.window.addDockWidget(area, dock)
         self.docks[instance_id] = dock
@@ -123,7 +127,10 @@ class WidgetRegistry:
         exchange: str = "coinbase",
         symbol: str = "BTC/USD",
         timeframe: str = "1m",
+        price_precision: float = 0.01,
         tick_size: float = 0.01,
+        chart_mode: str = "candles",
+        show_bubbles: bool = False,
         area: Qt.DockWidgetArea = Qt.DockWidgetArea.LeftDockWidgetArea,
     ) -> str:
         if instance_id is None:
@@ -137,7 +144,10 @@ class WidgetRegistry:
             exchange=exchange,
             symbol=symbol,
             timeframe=timeframe,
-            price_precision=tick_size,
+            price_precision=price_precision,
+            initial_tick_size=tick_size,
+            chart_mode=chart_mode,
+            show_bubbles=show_bubbles,
         )
         self.window.addDockWidget(area, dock)
         self.docks[instance_id] = dock
@@ -216,6 +226,8 @@ class WidgetRegistry:
                     exchange=str(config.get("exchange", "coinbase")),
                     symbol=str(config.get("symbol", "BTC/USD")),
                     timeframe=str(config.get("timeframe", "1m")),
+                    chart_mode=str(config.get("chart_mode", "candles")),
+                    show_bubbles=bool(config.get("show_bubbles", False)),
                 )
                 continue
             if widget_type == "chart_orderflow":
@@ -224,7 +236,10 @@ class WidgetRegistry:
                     exchange=str(config.get("exchange", "coinbase")),
                     symbol=str(config.get("symbol", "BTC/USD")),
                     timeframe=str(config.get("timeframe", "1m")),
+                    price_precision=float(config.get("price_precision", 0.01)),
                     tick_size=float(config.get("tick_size", 0.01)),
+                    chart_mode=str(config.get("chart_mode", "candles")),
+                    show_bubbles=bool(config.get("show_bubbles", False)),
                 )
                 continue
             if widget_type == "orderbook":

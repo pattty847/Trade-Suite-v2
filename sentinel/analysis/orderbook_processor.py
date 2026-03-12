@@ -354,40 +354,45 @@ class OrderBookProcessor:
         Returns:
             list: Sorted list of tick size presets
         """
-        presets = []
-        # Start with the base precision (smallest possible increment)
-        presets.append(self.price_precision)
-        
-        # If current price is invalid, estimate based on precision
+        minimum_tick = float(self.price_precision)
+        presets = {minimum_tick}
+
+        # If current price is invalid, estimate based on precision.
         if current_price is None or current_price <= 0:
-            # Estimate a reasonable price based on precision
-            # For BTC-like assets (small precision), assume higher price
             if self.price_precision < 0.01:
-                current_price = 10000  # Default high value like BTC
+                current_price = 10000
             else:
-                current_price = 1  # Default low value like smaller altcoins
-            logging.debug(f"No orderbook data for estimating presets, using estimated price: {current_price}")
-        
-        # Add multiples: 2x, 5x, 10x, 50x, 100x, 500x, 1000x
-        multipliers = [2, 5, 10, 50, 100, 500, 1000]
-        for mult in multipliers:
-            preset = self.price_precision * mult
-            # Only add if it makes sense for this asset
-            # (e.g., don't add a 1000x preset if that would be > 5% of the price)
-            if preset < current_price * 0.05:  # Cap at 5% of current price
-                presets.append(preset)
-        
-        # Add some "round number" presets based on asset price magnitude
-        magnitude = 10 ** math.floor(math.log10(current_price))  # Order of magnitude
-        round_numbers = [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50, 100]
-        
-        for num in round_numbers:
-            round_preset = num * magnitude
-            if round_preset >= self.price_precision * 2:  # Ensure larger than base
-                presets.append(round_preset)
-        
-        # Sort and remove duplicates
-        return sorted(list(set(presets)))
+                current_price = 1
+            logging.debug(
+                "No orderbook data for estimating presets, using estimated price: %s",
+                current_price,
+            )
+
+        # Build a canonical "nice ticks" ladder anchored to the instrument precision.
+        # This yields a stable sequence like:
+        # 0.01, 0.02, 0.025, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, ...
+        mantissas = [1.0, 2.0, 2.5, 5.0]
+        max_tick = max(float(current_price) * 0.05, minimum_tick * 4)
+        exponent = 0
+
+        while True:
+            scale = 10 ** exponent
+            added_any = False
+            for mantissa in mantissas:
+                preset = minimum_tick * mantissa * scale
+                if preset < (minimum_tick * 0.999999):
+                    continue
+                if preset > max_tick:
+                    continue
+                presets.add(round(preset, 10))
+                added_any = True
+            if not added_any and (minimum_tick * scale) > max_tick:
+                break
+            exponent += 1
+            if exponent > 16:
+                break
+
+        return sorted(presets)
 
     def build_dom_ladder(self, raw_bids, raw_asks, levels_per_side: int, current_price=None):
         """
