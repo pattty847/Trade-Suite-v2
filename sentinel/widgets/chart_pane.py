@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import bisect
 import logging
+import math
+from collections import deque
 from typing import Any
 
 import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPicture
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+)
 
 from sentinel.core.signals import Signals
 
@@ -141,6 +150,10 @@ class ChartPane(QWidget):
         self.volumes: list[float] = []
         self._dirty = False
         self._did_initial_fit = False
+        
+        self.chart_mode = "candles"
+        self.show_bubbles = False
+        self._trades_cache = deque(maxlen=1000)
 
         self.price_x_axis = pg.DateAxisItem(orientation="bottom")
         self.price_plot = pg.PlotWidget(axisItems={"bottom": self.price_x_axis})
@@ -179,7 +192,23 @@ class ChartPane(QWidget):
         self._current_candle_width: float = 60.0
 
         self.candle_item = CandlestickItem()
+        self.ha_item = CandlestickItem()
+        self.line_item = pg.PlotDataItem(pen=pg.mkPen(color="#2196f3", width=1.5))
+        
+        # Bubbles plot overlay
+        self.bubbles_item = pg.ScatterPlotItem(
+            size=10, 
+            pen=pg.mkPen(None), 
+            brush=pg.mkBrush(255, 255, 255, 120),
+            hoverable=True
+        )
+        self.bubbles_item.setZValue(10)
+        
         self.price_plot.addItem(self.candle_item)
+        self.price_plot.addItem(self.ha_item)
+        self.price_plot.addItem(self.line_item)
+        self.price_plot.addItem(self.bubbles_item)
+        
         self.volume_item: pg.BarGraphItem | None = None
         self.ema_item: pg.PlotDataItem | None = None
 
@@ -205,6 +234,38 @@ class ChartPane(QWidget):
         self._mouse_proxy = pg.SignalProxy(
             self.price_plot.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_moved
         )
+
+        controls_container = QWidget(self)
+        controls_container.setStyleSheet("background: transparent;")
+        controls_layout = QHBoxLayout(controls_container)
+        controls_layout.setContentsMargins(8, 0, 8, 0)
+        controls_layout.setSpacing(12)
+        
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Candles", "Line", "Heikin Ashi"])
+        self.mode_combo.setCurrentText("Candles")
+        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+        self.mode_combo.setStyleSheet(
+            "QComboBox { color: #d6dde6; background: #0f1722; border: 1px solid #1e2d3f; padding: 2px 8px; border-radius: 2px; font-size: 11px; } "
+            "QComboBox::drop-down { border: none; }"
+        )
+        
+        self.bubbles_check = QCheckBox("Bubbles")
+        self.bubbles_check.setChecked(False)
+        self.bubbles_check.stateChanged.connect(self._on_bubbles_changed)
+        self.bubbles_check.setStyleSheet(
+            "QCheckBox { color: #8fa4c2; font-size: 11px; } "
+            "QCheckBox::indicator { width: 12px; height: 12px; border: 1px solid #1e2d3f; border-radius: 2px; } "
+            "QCheckBox::indicator:checked { background-color: #26a69a; border-color: #26a69a; }"
+        )
+        
+        controls_layout.addWidget(self.mode_combo)
+        controls_layout.addWidget(self.bubbles_check)
+        controls_layout.addStretch()
+        
+        # Position controls beneath the OHLCV label
+        controls_container.move(8, 28)
+        controls_container.show()
 
         QTimer.singleShot(0, self._update_vol_geometry)
 
@@ -237,6 +298,11 @@ class ChartPane(QWidget):
         self._did_initial_fit = False
         self._dirty = False
         self.candle_item.set_data([], [], [], [], [], body_width=1.0)
+        self.ha_item.set_data([], [], [], [], [], body_width=1.0)
+        self.line_item.setData([], [])
+        self.bubbles_item.clear()
+        self._trades_cache.clear()
+        
         if self.volume_item is not None:
             self.vb_vol.removeItem(self.volume_item)
             self.volume_item = None
@@ -251,6 +317,14 @@ class ChartPane(QWidget):
         self._ohlcv_label.hide()
         self._v_line.hide()
         self._h_line.hide()
+
+    def _on_mode_changed(self, mode_str: str) -> None:
+        self.chart_mode = mode_str.lower()
+        self._dirty = True
+
+    def _on_bubbles_changed(self, state: int) -> None:
+        self.show_bubbles = (state == Qt.CheckState.Checked.value)
+        self._dirty = True
 
     def set_runtime(self, runtime) -> None:
         self.runtime = runtime
@@ -274,6 +348,7 @@ class ChartPane(QWidget):
         emitter = self.runtime.core.emitter
         emitter.register(Signals.NEW_CANDLES, self._on_new_candles)
         emitter.register(Signals.UPDATED_CANDLES, self._on_updated_candles)
+        emitter.register(Signals.NEW_TRADE, self._on_new_trade)
         self._handlers_registered = True
 
     def _unregister_handlers(self) -> None:
@@ -283,6 +358,7 @@ class ChartPane(QWidget):
         try:
             emitter.unregister(Signals.NEW_CANDLES, self._on_new_candles)
             emitter.unregister(Signals.UPDATED_CANDLES, self._on_updated_candles)
+            emitter.unregister(Signals.NEW_TRADE, self._on_new_trade)
         except Exception:
             pass
         self._handlers_registered = False
@@ -294,6 +370,11 @@ class ChartPane(QWidget):
             exchange=self.exchange,
             symbol=self.symbol,
             timeframe=self.timeframe,
+            widget_instance=self,
+        )
+        self.runtime.core.subscribe_to_trades(
+            exchange=self.exchange,
+            symbol=self.symbol,
             widget_instance=self,
         )
         self._subscribed = True
@@ -319,6 +400,13 @@ class ChartPane(QWidget):
         if candles is None or candles.empty:
             return
         self._merge_update(candles)
+
+    def _on_new_trade(self, exchange: str, trade_data: dict) -> None:
+        if exchange != self.exchange or trade_data.get("symbol") != self.symbol:
+            return
+        self._trades_cache.append(trade_data)
+        if self.show_bubbles:
+            self._dirty = True
 
     def _replace_from_dataframe(self, data: pd.DataFrame) -> None:
         if data is None or data.empty:
@@ -388,9 +476,76 @@ class ChartPane(QWidget):
         x = self.timestamps
         candle_width = self._infer_candle_width_seconds()
         self._current_candle_width = candle_width
-        self.candle_item.set_data(
-            x, self.opens, self.highs, self.lows, self.closes, body_width=candle_width * 0.72
-        )
+        
+        self.candle_item.hide()
+        self.ha_item.hide()
+        self.line_item.hide()
+
+        if self.chart_mode == "candles":
+            self.candle_item.show()
+            self.candle_item.set_data(
+                x, self.opens, self.highs, self.lows, self.closes, body_width=candle_width * 0.72
+            )
+        elif self.chart_mode == "line":
+            self.line_item.show()
+            self.line_item.setData(x, self.closes)
+        elif self.chart_mode == "heikin ashi":
+            self.ha_item.show()
+            ha_opens, ha_highs, ha_lows, ha_closes = [], [], [], []
+            for i in range(len(self.closes)):
+                ha_c = (self.opens[i] + self.highs[i] + self.lows[i] + self.closes[i]) / 4.0
+                if i == 0:
+                    ha_o = (self.opens[i] + self.closes[i]) / 2.0
+                else:
+                    ha_o = (ha_opens[-1] + ha_closes[-1]) / 2.0
+                ha_h = max(self.highs[i], ha_o, ha_c)
+                ha_l = min(self.lows[i], ha_o, ha_c)
+                ha_opens.append(ha_o)
+                ha_highs.append(ha_h)
+                ha_lows.append(ha_l)
+                ha_closes.append(ha_c)
+            self.ha_item.set_data(
+                x, ha_opens, ha_highs, ha_lows, ha_closes, body_width=candle_width * 0.72
+            )
+            
+        if self.show_bubbles and self._trades_cache:
+            spots = []
+            # Calculate dynamic sizing based on max amount in cache
+            max_amt = max(
+                (float(t.get("amount", 0.0)) for t in self._trades_cache if t.get("amount") is not None),
+                default=0.01,
+            )
+            for trade in self._trades_cache:
+                amt = float(trade.get("amount", 0.0) or 0.0)
+                price = float(trade.get("price", 0.0) or 0.0)
+                ts = float(trade.get("timestamp", 0) or 0) / 1000.0  # Assumes ms timestamps
+                
+                # Scale radius non-linearly for extreme outliers, bounded between 8px and 45px
+                ratio = math.sqrt(amt / max_amt) if max_amt > 0 else 0
+                size = 8 + (37 * ratio)
+                
+                side = trade.get("side", "")
+                if side == "buy":
+                    brush = pg.mkBrush(38, 166, 154, 180) # Buy Green
+                    pen = pg.mkPen(26, 115, 106, 200)
+                else:
+                    brush = pg.mkBrush(239, 83, 80, 180)  # Sell Red
+                    pen = pg.mkPen(182, 60, 58, 200)
+                    
+                spots.append({
+                    "pos": (ts, price),
+                    "size": size,
+                    "brush": brush,
+                    "pen": pen,
+                    "data": trade
+                })
+            
+            self.bubbles_item.show()
+            self.bubbles_item.setData(spots)
+        else:
+            self.bubbles_item.hide()
+            self.bubbles_item.clear()
+            
         self._update_price_line()
 
         if self.volume_item is not None:
