@@ -44,8 +44,8 @@ _ASK_FG = QColor(230, 92, 104)
 _BID_FG = QColor(53, 190, 130)
 _PRICE_FG = QColor(214, 220, 228)
 _TARGET_ROW_HEIGHT_PX = 18.0
-_MIN_ROW_HEIGHT_PX = 16.0
-_MAX_ROW_HEIGHT_PX = 22.0
+_MIN_ROW_HEIGHT_PX = 14.0
+_MAX_ROW_HEIGHT_PX = 28.0
 _MIN_AUTO_TICK_CANVAS_HEIGHT = 96
 _TICK_SWITCH_IMPROVEMENT_PX = 2.0
 
@@ -610,6 +610,8 @@ class OrderflowLadderPane(QWidget):
         chosen_tick = candidate_tick if candidate_tick is not None else current_tick
         chosen_row_px = ((chosen_tick * canvas_height) / span) if span > 0 else None
         ideal_tick = (span / max(int(canvas_height / _TARGET_ROW_HEIGHT_PX), 12)) if span > 0 else None
+        current_penalty = round(_row_height_penalty(current_row_px), 2) if current_row_px is not None else None
+        candidate_penalty = round(_row_height_penalty(chosen_row_px), 2) if chosen_row_px is not None else None
         return {
             "tick_mode": self._tick_mode,
             "tick": current_tick,
@@ -622,6 +624,8 @@ class OrderflowLadderPane(QWidget):
             "target_row_px": _TARGET_ROW_HEIGHT_PX,
             "current_row_px": None if current_row_px is None else round(current_row_px, 4),
             "candidate_row_px": None if chosen_row_px is None else round(chosen_row_px, 4),
+            "current_penalty": current_penalty,
+            "candidate_penalty": candidate_penalty,
             "ideal_tick": None if ideal_tick is None else round(ideal_tick, 6),
             "last_price": None if self._last_price is None else round(float(self._last_price), 6),
             "rows": len(self.canvas._rows),
@@ -821,6 +825,25 @@ def _format_size(value: float) -> str:
     return f"{value:,.4f}"
 
 
+def _row_height_penalty(row_px: float) -> float:
+    """Continuous quality penalty for a given row pixel height.
+
+    Returns 0.0 at the target, grows linearly inside the comfort band,
+    and adds a steep surcharge outside it.  The function is *continuous*
+    at both band edges (no step-discontinuity that would trigger
+    oscillation) and *asymmetric*: rows that are too **small** are
+    penalised much more harshly than rows that are too **tall**, because
+    cramped rows cause text overlap while roomy rows just waste space.
+    """
+    if row_px < _MIN_ROW_HEIGHT_PX:
+        edge = _TARGET_ROW_HEIGHT_PX - _MIN_ROW_HEIGHT_PX          # 4.0
+        return edge + (_MIN_ROW_HEIGHT_PX - row_px) * 10.0         # steep
+    if row_px > _MAX_ROW_HEIGHT_PX:
+        edge = _MAX_ROW_HEIGHT_PX - _TARGET_ROW_HEIGHT_PX          # 10.0
+        return edge + (row_px - _MAX_ROW_HEIGHT_PX) * 0.5          # gentle
+    return abs(row_px - _TARGET_ROW_HEIGHT_PX)
+
+
 def choose_auto_tick_size(
     *,
     price_min: float,
@@ -833,53 +856,31 @@ def choose_auto_tick_size(
 ) -> float:
     span = max(abs(float(price_max) - float(price_min)), minimum_tick)
     height = max(int(ladder_height_px), 1)
-    target_rows = max(12, int(height / _TARGET_ROW_HEIGHT_PX))
-    ideal_tick = max(span / max(target_rows, 1), minimum_tick)
 
     normalized_presets = sorted({max(float(p), minimum_tick) for p in presets if float(p) > 0})
     if not normalized_presets:
         normalized_presets = [minimum_tick]
 
     current = max(float(current_tick), minimum_tick)
-    preset_scores = []
+
+    # Score every preset by penalty (lower is better).
+    scored: list[tuple[float, float]] = []
     for preset in normalized_presets:
         row_px = (height * preset) / span
-        distance = abs(row_px - _TARGET_ROW_HEIGHT_PX)
-        outside_band = 0.0
-        if row_px < _MIN_ROW_HEIGHT_PX:
-            outside_band = _MIN_ROW_HEIGHT_PX - row_px
-        elif row_px > _MAX_ROW_HEIGHT_PX:
-            outside_band = row_px - _MAX_ROW_HEIGHT_PX
-        preset_scores.append((outside_band, distance, abs(preset - ideal_tick), preset, row_px))
-
-    preset_scores.sort(key=lambda item: (item[0], item[1], item[2]))
-    best_preset = preset_scores[0][3]
+        scored.append((_row_height_penalty(row_px), preset))
+    scored.sort()
+    best_penalty, best_preset = scored[0]
 
     if force:
         return best_preset
 
-    current_row_height = (height * current) / span
-    current_outside = 0.0
-    if current_row_height < _MIN_ROW_HEIGHT_PX:
-        current_outside = _MIN_ROW_HEIGHT_PX - current_row_height
-    elif current_row_height > _MAX_ROW_HEIGHT_PX:
-        current_outside = current_row_height - _MAX_ROW_HEIGHT_PX
-    current_distance = abs(current_row_height - _TARGET_ROW_HEIGHT_PX)
-    best_row_height = (height * best_preset) / span
-    best_outside = 0.0
-    if best_row_height < _MIN_ROW_HEIGHT_PX:
-        best_outside = _MIN_ROW_HEIGHT_PX - best_row_height
-    elif best_row_height > _MAX_ROW_HEIGHT_PX:
-        best_outside = best_row_height - _MAX_ROW_HEIGHT_PX
-    best_distance = abs(best_row_height - _TARGET_ROW_HEIGHT_PX)
-
     if math.isclose(best_preset, current, rel_tol=0.0, abs_tol=1e-12):
         return current
 
-    # Only switch when the candidate is materially better than the current preset.
-    if best_outside < current_outside:
+    current_row_px = (height * current) / span
+    current_penalty = _row_height_penalty(current_row_px)
+
+    # Unified hysteresis: only switch when the improvement is material.
+    if (current_penalty - best_penalty) >= _TICK_SWITCH_IMPROVEMENT_PX:
         return best_preset
-    if math.isclose(best_outside, current_outside, rel_tol=0.0, abs_tol=1e-12):
-        if (current_distance - best_distance) >= _TICK_SWITCH_IMPROVEMENT_PX:
-            return best_preset
     return current

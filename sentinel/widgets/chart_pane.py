@@ -183,6 +183,7 @@ class ChartPane(QWidget):
         self._price_line: pg.InfiniteLine | None = None
         self._price_line_up: bool | None = None
         self._current_candle_width: float = 60.0
+        self._last_price_line_value: float | None = None
 
         self.candle_item = CandlestickItem()
         self.ha_item = CandlestickItem()
@@ -274,6 +275,7 @@ class ChartPane(QWidget):
             self.price_plot.removeItem(self._price_line)
             self._price_line = None
             self._price_line_up = None
+            self._last_price_line_value = None
         self._price_pill.hide()
         self._ohlcv_label.hide()
         self._v_line.hide()
@@ -597,10 +599,23 @@ class ChartPane(QWidget):
                     "fill": pg.mkBrush(hex_color),
                 }
             self._price_line = pg.InfiniteLine(**price_line_kwargs)
+            self._price_line.setZValue(30)
             self.price_plot.addItem(self._price_line, ignoreBounds=True)
             self._price_line_up = is_up
 
         self._price_line.setPos(price)
+        if self._last_price_line_value is None or not math.isclose(
+            self._last_price_line_value,
+            float(price),
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            # Bubble updates can leave the graphics scene partially stale until another
+            # viewport change invalidates the region. Force a scene refresh when the
+            # close line moves so dashed segments do not ghost.
+            self.price_plot.viewport().update()
+            self.price_plot.scene().update()
+            self._last_price_line_value = float(price)
         self._update_price_pill(price=price, hex_color=hex_color)
         self.last_price_changed.emit(float(price))
 

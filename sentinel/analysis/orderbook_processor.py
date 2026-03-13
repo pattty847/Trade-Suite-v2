@@ -371,7 +371,7 @@ class OrderBookProcessor:
         # Build a canonical "nice ticks" ladder anchored to the instrument precision.
         # This yields a stable sequence like:
         # 0.01, 0.02, 0.025, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, ...
-        mantissas = [1.0, 2.0, 2.5, 5.0]
+        mantissas = [1.0, 1.5, 2.0, 2.5, 4.0, 5.0, 7.5]
         max_tick = max(float(current_price) * 0.05, minimum_tick * 4)
         exponent = 0
 
