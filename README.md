@@ -95,6 +95,10 @@ uv run python -m pytest
 
 Contributor and agent operating guidance lives in `AGENTS.md`.
 
+## Tiny Daily Note
+
+- 2026-03-15: README touch-up + project heartbeat check ✅
+
 ## License
 
 MIT. See `LICENSE`.
