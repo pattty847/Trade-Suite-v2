@@ -1,6 +1,6 @@
-# Sentinel
+# Trade Suite v2 (Sentinel Python)
 
-Sentinel is a desktop trading workstation built with `PySide6`, `PyQtGraph`, and `qasync`.
+Trade Suite v2 (codename: Sentinel Python) is a desktop trading workstation built with `PySide6`, `PyQtGraph`, and `qasync`.
 
 Current focus:
 - live charting
@@ -98,6 +98,7 @@ Contributor and agent operating guidance lives in `AGENTS.md`.
 ## Tiny Daily Note
 
 - 2026-03-15: README touch-up + project heartbeat check ✅
+- 2026-03-19: Clarified repository naming (Trade Suite v2 vs Sentinel codename) for cleaner public onboarding ✅
 
 ## License
 
