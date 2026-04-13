@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
+
+import yfinance as yf
 
 from sentinel.market.models import (
     AssetClass,
@@ -33,15 +35,15 @@ class YFinanceEquityProvider(EquityProvider):
 
     async def resolve_symbol(self, symbol: str) -> EquityInstrument | None:
         ticker = await self._ticker(symbol)
-        info = await asyncio.to_thread(lambda: ticker.fast_info or {})
-        if not info:
+        fast_info = await asyncio.to_thread(lambda: ticker.fast_info)
+        if fast_info is None:
             return EquityInstrument(symbol=symbol, provider_symbol=symbol)
         return EquityInstrument(
             symbol=symbol,
             provider_symbol=symbol,
-            exchange=info.get("exchange"),
-            currency=info.get("currency"),
-            timezone=info.get("timezone"),
+            exchange=_fast_info_attr(fast_info, "exchange"),
+            currency=_fast_info_attr(fast_info, "currency"),
+            timezone=_fast_info_attr(fast_info, "timezone"),
             asset_class=AssetClass.EQUITY,
         )
 
@@ -64,22 +66,23 @@ class YFinanceEquityProvider(EquityProvider):
 
     async def get_quote_snapshot(self, symbol: str) -> QuoteSnapshot | None:
         ticker = await self._ticker(symbol)
-        info = await asyncio.to_thread(lambda: ticker.fast_info or {})
-        if not info:
+        fast_info = await asyncio.to_thread(lambda: ticker.fast_info)
+        if fast_info is None:
             return None
+        slow_info = await asyncio.to_thread(lambda: ticker.info or {})
         return QuoteSnapshot(
             symbol=symbol,
-            timestamp=datetime.utcnow(),
-            last=_as_float(info.get("lastPrice")),
-            bid=_as_float(info.get("bid")),
-            ask=_as_float(info.get("ask")),
-            open=_as_float(info.get("open")),
-            high=_as_float(info.get("dayHigh")),
-            low=_as_float(info.get("dayLow")),
-            previous_close=_as_float(info.get("previousClose")),
-            volume=_as_float(info.get("lastVolume")),
-            currency=info.get("currency"),
-            market_state=info.get("marketState"),
+            timestamp=datetime.now(timezone.utc),
+            last=_as_float(_fast_info_attr(fast_info, "last_price")),
+            bid=_as_float(slow_info.get("bid")),
+            ask=_as_float(slow_info.get("ask")),
+            open=_as_float(_fast_info_attr(fast_info, "open")),
+            high=_as_float(_fast_info_attr(fast_info, "day_high")),
+            low=_as_float(_fast_info_attr(fast_info, "day_low")),
+            previous_close=_as_float(_fast_info_attr(fast_info, "previous_close")),
+            volume=_as_float(_fast_info_attr(fast_info, "last_volume")),
+            currency=_fast_info_attr(fast_info, "currency"),
+            market_state=slow_info.get("marketState"),
         )
 
     async def get_historical_bars(self, query: HistoricalBarsQuery) -> BarSeries:
@@ -132,7 +135,7 @@ class YFinanceEquityProvider(EquityProvider):
                     headline=article.get("title", ""),
                     publisher=article.get("publisher"),
                     url=article.get("link"),
-                    published_at=datetime.utcfromtimestamp(article["providerPublishTime"])
+                    published_at=datetime.fromtimestamp(article["providerPublishTime"], tz=timezone.utc)
                     if article.get("providerPublishTime")
                     else None,
                     summary=article.get("summary"),
@@ -141,9 +144,7 @@ class YFinanceEquityProvider(EquityProvider):
         return items
 
     async def _ticker(self, symbol: str):
-        import yfinance as yf
-
-        return await asyncio.to_thread(yf.Ticker, symbol)
+        return yf.Ticker(symbol)
 
 
 def _as_float(value) -> float | None:
@@ -151,3 +152,13 @@ def _as_float(value) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _fast_info_attr(fast_info: object, name: str):
+    value = getattr(fast_info, name, None)
+    if value is None and hasattr(fast_info, "__getitem__"):
+        try:
+            return fast_info[name]
+        except Exception:
+            return None
+    return value

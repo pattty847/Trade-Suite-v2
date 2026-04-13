@@ -21,13 +21,18 @@ class EquityChartViewModel(QObject):
         self._service = service
         self._payload_builder = CandleChartPayloadBuilder()
         self._last_request_id = 0
+        self._active_task: asyncio.Task | None = None
 
     def request_symbol(self, symbol: str, timeframe: Timeframe, *, days: int = 30) -> None:
+        if self._active_task and not self._active_task.done():
+            self._active_task.cancel()
         self._last_request_id += 1
         request_id = self._last_request_id
         self.loading_changed.emit(True)
         self.error_changed.emit("")
-        asyncio.create_task(self._load(request_id=request_id, symbol=symbol, timeframe=timeframe, days=days))
+        self._active_task = asyncio.create_task(
+            self._load(request_id=request_id, symbol=symbol, timeframe=timeframe, days=days)
+        )
 
     async def _load(self, *, request_id: int, symbol: str, timeframe: Timeframe, days: int) -> None:
         try:
@@ -47,6 +52,8 @@ class EquityChartViewModel(QObject):
 
             self.empty_changed.emit(len(payload.x) == 0)
             self.payload_ready.emit(payload)
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
             if request_id == self._last_request_id:
                 self.error_changed.emit(str(exc))

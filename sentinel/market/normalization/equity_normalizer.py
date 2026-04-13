@@ -50,18 +50,33 @@ class EquityNormalizer:
 
         df = df.dropna(subset=["open", "high", "low", "close"])
 
+        indices = df.index.to_list()
+        opens = df["open"].to_numpy()
+        highs = df["high"].to_numpy()
+        lows = df["low"].to_numpy()
+        closes = (
+            df["adj_close"].to_numpy()
+            if adjusted and "adj_close" in df.columns
+            else df["close"].to_numpy()
+        )
+        volumes = df["volume"].to_numpy() if "volume" in df.columns else None
+
         bars: list[Bar] = []
-        for index, row in df.iterrows():
-            ts = self._as_datetime(index)
-            close_value = row["adj_close"] if adjusted and "adj_close" in row and pd.notna(row["adj_close"]) else row["close"]
+        for row_index, (idx, open_price, high_price, low_price, close_price) in enumerate(
+            zip(indices, opens, highs, lows, closes)
+        ):
+            ts = self._as_datetime(idx)
+            volume = None
+            if volumes is not None and pd.notna(volumes[row_index]):
+                volume = float(volumes[row_index])
             bars.append(
                 Bar(
                     ts=ts,
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=float(close_value),
-                    volume=float(row["volume"]) if "volume" in row and pd.notna(row["volume"]) else None,
+                    open=float(open_price),
+                    high=float(high_price),
+                    low=float(low_price),
+                    close=float(close_price),
+                    volume=volume,
                 )
             )
 
