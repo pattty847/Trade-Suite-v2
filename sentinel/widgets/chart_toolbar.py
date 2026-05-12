@@ -2,12 +2,31 @@ from __future__ import annotations
 
 import qtawesome as qta
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QWidget,
+)
+
+from sentinel.app.theme import Colors
 
 
 DEFAULT_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD"]
 DEFAULT_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"]
 DEFAULT_MODES = ["Candles", "Line", "Heikin Ashi"]
+
+
+def _group_separator() -> QFrame:
+    """Slim vertical divider used between toolbar groups."""
+    sep = QFrame()
+    sep.setObjectName("group-separator")
+    sep.setFrameShape(QFrame.Shape.VLine)
+    sep.setFrameShadow(QFrame.Shadow.Plain)
+    return sep
 
 
 class ChartToolbar(QWidget):
@@ -37,12 +56,13 @@ class ChartToolbar(QWidget):
         self.setObjectName("chart-toolbar")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(6)
 
         self.symbol_combo = QComboBox()
         self.symbol_combo.setEditable(True)
         self.symbol_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.symbol_combo.setToolTip("Symbol  (press Return to apply a custom value)")
         self.symbol_combo.addItems(DEFAULT_SYMBOLS)
         self._set_combo_value(self.symbol_combo, symbol)
         self.symbol_combo.currentTextChanged.connect(self.symbol_changed.emit)
@@ -52,13 +72,15 @@ class ChartToolbar(QWidget):
         layout.addWidget(self.symbol_combo)
 
         self.timeframe_combo = QComboBox()
+        self.timeframe_combo.setToolTip("Timeframe")
         self.timeframe_combo.addItems(DEFAULT_TIMEFRAMES)
         self._set_combo_value(self.timeframe_combo, timeframe)
         self.timeframe_combo.currentTextChanged.connect(self.timeframe_changed.emit)
         layout.addWidget(self.timeframe_combo)
 
         self.mode_combo = QComboBox()
-        _ic = "#6a85a8"
+        self.mode_combo.setToolTip("Chart mode")
+        _ic = Colors.TEXT_FAINT
         self.mode_combo.addItems(DEFAULT_MODES)
         self.mode_combo.setItemIcon(0, qta.icon("mdi6.chart-box-outline", color=_ic))
         self.mode_combo.setItemIcon(1, qta.icon("mdi6.chart-line", color=_ic))
@@ -67,27 +89,34 @@ class ChartToolbar(QWidget):
         self.mode_combo.currentTextChanged.connect(self.mode_changed.emit)
         layout.addWidget(self.mode_combo)
 
+        layout.addWidget(_group_separator())
+
         self.bubbles_check = QCheckBox("Bubbles")
+        self.bubbles_check.setToolTip("Render trade bubbles on the price pane")
         self.bubbles_check.setChecked(bubbles_enabled)
         self.bubbles_check.toggled.connect(self.bubbles_changed.emit)
         layout.addWidget(self.bubbles_check)
 
         self.ema_check = QCheckBox("EMA")
+        self.ema_check.setToolTip("EMA-20 overlay on the price pane")
         self.ema_check.setChecked(ema_enabled)
         self.ema_check.toggled.connect(self.ema_changed.emit)
         layout.addWidget(self.ema_check)
 
         self.cvd_check = QCheckBox("CVD")
+        self.cvd_check.setToolTip("Cumulative volume delta sub-pane")
         self.cvd_check.setChecked(cvd_enabled)
         self.cvd_check.toggled.connect(self.cvd_changed.emit)
         layout.addWidget(self.cvd_check)
 
         self.vpvr_check = QCheckBox("VPVR")
+        self.vpvr_check.setToolTip("Volume profile (visible range) overlay")
         self.vpvr_check.setChecked(vpvr_enabled)
         self.vpvr_check.toggled.connect(self.vpvr_changed.emit)
         layout.addWidget(self.vpvr_check)
 
         self.ob_check = QCheckBox("OB")
+        self.ob_check.setToolTip("Orderbook ladder (chart+orderflow only)")
         self.ob_check.setChecked(ob_enabled)
         self.ob_check.toggled.connect(self.ob_changed.emit)
         layout.addWidget(self.ob_check)
@@ -97,7 +126,7 @@ class ChartToolbar(QWidget):
         layout.addWidget(spacer)
 
         self.context_label = QLabel("")
-        self.context_label.setStyleSheet("color: #6a85a8; font-size: 11px;")
+        self.context_label.setProperty("role", "context")
         layout.addWidget(self.context_label)
         self._update_context_label()
 
@@ -155,7 +184,7 @@ class ChartToolbar(QWidget):
         self.ob_check.setChecked(enabled)
 
     def _update_context_label(self) -> None:
-        self.context_label.setText(f"{self.symbol()} · {self.timeframe()}")
+        self.context_label.setText(f"{self.symbol().upper()} · {self.timeframe()}")
 
     @staticmethod
     def _set_combo_value(combo: QComboBox, value: str) -> None:

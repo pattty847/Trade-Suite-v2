@@ -23,7 +23,22 @@ _DEFAULT_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "BTC/USDT", "ETH/USDT"]
 _DEFAULT_EXCHANGES = ["coinbase", "binance", "kraken"]
 
 from sentinel.analysis.orderbook_processor import OrderBookProcessor
+from sentinel.app.theme import Colors
 from sentinel.core.signals import Signals
+
+
+def _step_button(text: str, tooltip: str) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setProperty("role", "step")
+    btn.setToolTip(tooltip)
+    btn.setFixedWidth(24)
+    return btn
+
+
+def _section_header(text: str) -> QLabel:
+    label = QLabel(text.upper())
+    label.setObjectName("section-header")
+    return label
 
 
 LOGGER = logging.getLogger(__name__)
@@ -56,7 +71,7 @@ class DomDockWidget(QDockWidget):
         price_precision: float = 0.01,
         fps: int = 15,
     ) -> None:
-        super().__init__(f"DOM - {exchange.upper()} {symbol}")
+        super().__init__(f"DOM · {exchange.upper()}  {symbol}")
         self.instance_id = instance_id
         self.exchange = exchange
         self.symbol = symbol
@@ -80,17 +95,21 @@ class DomDockWidget(QDockWidget):
 
         body = QWidget()
         root = QVBoxLayout(body)
-        root.setContentsMargins(6, 6, 6, 6)
+        root.setContentsMargins(8, 6, 8, 6)
         root.setSpacing(4)
+
+        root.addWidget(_section_header("Market"))
 
         # Symbol / exchange selector row
         sym_row = QHBoxLayout()
         sym_row.setSpacing(6)
         self.exchange_combo = QComboBox()
+        self.exchange_combo.setToolTip("Exchange")
         self.exchange_combo.addItems(_DEFAULT_EXCHANGES)
         self._set_combo(self.exchange_combo, exchange)
         self.exchange_combo.setFixedHeight(24)
         self.symbol_combo = QComboBox()
+        self.symbol_combo.setToolTip("Symbol")
         self.symbol_combo.addItems(_DEFAULT_SYMBOLS)
         self._set_combo(self.symbol_combo, symbol)
         self.symbol_combo.setFixedHeight(24)
@@ -101,26 +120,32 @@ class DomDockWidget(QDockWidget):
         self.exchange_combo.currentTextChanged.connect(self._on_combo_changed)
         self.symbol_combo.currentTextChanged.connect(self._on_combo_changed)
 
+        root.addWidget(_section_header("Aggregation"))
+
         controls = QHBoxLayout()
-        controls.addWidget(QLabel("Tick"))
+        controls.setSpacing(6)
+        tick_lbl = QLabel("Tick")
+        tick_lbl.setProperty("role", "caption")
+        controls.addWidget(tick_lbl)
         self.tick_label = QLabel(f"{self.processor.tick_size:.8g}")
         self.tick_label.setFont(_LABEL_FONT)
+        self.tick_label.setProperty("role", "value")
         controls.addWidget(self.tick_label)
-        dec_btn = QPushButton("-")
-        inc_btn = QPushButton("+")
-        dec_btn.setFixedWidth(26)
-        inc_btn.setFixedWidth(26)
+        dec_btn = _step_button("−", "Smaller tick")
+        inc_btn = _step_button("+", "Larger tick")
         dec_btn.clicked.connect(self._decrease_tick)
         inc_btn.clicked.connect(self._increase_tick)
         controls.addWidget(dec_btn)
         controls.addWidget(inc_btn)
         self.cumulative_checkbox = QCheckBox("Cumulative")
+        self.cumulative_checkbox.setToolTip("Show running totals alongside each level")
         self.cumulative_checkbox.setChecked(True)
         self.cumulative_checkbox.toggled.connect(self._on_toggle_cumulative)
         controls.addWidget(self.cumulative_checkbox)
         controls.addStretch(1)
-        self.spread_label = QLabel("Spread: -")
+        self.spread_label = QLabel("Spread —")
         self.spread_label.setFont(_LABEL_FONT)
+        self.spread_label.setProperty("role", "caption")
         controls.addWidget(self.spread_label)
         root.addLayout(controls)
 
@@ -159,8 +184,8 @@ class DomDockWidget(QDockWidget):
         self.last_orderbook = None
         self._dirty = False
         self._cell_cache.clear()
-        self.spread_label.setText("Spread: -")
-        self.setWindowTitle(f"DOM - {exchange.upper()} {symbol}")
+        self.spread_label.setText("Spread —")
+        self.setWindowTitle(f"DOM · {exchange.upper()}  {symbol}")
         self._subscribe()
 
     def export_definition(self) -> dict[str, Any]:
@@ -304,7 +329,7 @@ class DomDockWidget(QDockWidget):
             self._set_cell(row_index, 4, ask_cum, kind=kind, role="ask_cum", magnitude=row["ask_cum"])
 
         spread = processed["best_ask"] - processed["best_bid"]
-        self.spread_label.setText(f"Spread: {spread:.2f}")
+        self.spread_label.setText(f"Spread {spread:.2f}")
 
         # Clear any extra rows if the ladder size changes in the future.
         for row_index in range(len(rows), self.table.rowCount()):

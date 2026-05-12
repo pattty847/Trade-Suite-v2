@@ -28,7 +28,7 @@ class ChartDockWidget(QDockWidget):
         show_cvd: bool = False,
         show_vpvr: bool = False,
     ) -> None:
-        super().__init__(f"Chart - {exchange.upper()} {symbol} ({timeframe})")
+        super().__init__(f"Chart · {exchange.upper()}  {symbol}  ({timeframe})")
         self.instance_id = instance_id
         self.setObjectName(f"dock:{instance_id}")
         self.setFeatures(
@@ -134,7 +134,7 @@ class ChartDockWidget(QDockWidget):
         self.chart_pane.change_subscription(exchange, symbol, timeframe)
         self.toolbar.set_symbol(symbol)
         self.toolbar.set_timeframe(timeframe)
-        self.setWindowTitle(f"Chart - {exchange.upper()} {symbol} ({timeframe})")
+        self.setWindowTitle(f"Chart · {exchange.upper()}  {symbol}  ({timeframe})")
 
     def set_runtime(self, runtime) -> None:
         self.chart_pane.set_runtime(runtime)

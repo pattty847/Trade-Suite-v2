@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from sentinel.analysis.orderbook_processor import OrderBookProcessor
+from sentinel.app.theme import Colors
 from sentinel.core.signals import Signals
 from sentinel.widgets.chart_pane import ChartPane
 from sentinel.widgets.chart_toolbar import ChartToolbar
@@ -37,7 +38,7 @@ _HEADER_FONT.setBold(True)
 _MID_FONT = QFont(_MONO_FONT)
 _MID_FONT.setBold(True)
 
-_GRID_PEN = QPen(QColor("#162231"))
+_GRID_PEN = QPen(QColor(Colors.BORDER_FAINT))
 _MID_BG = QColor(74, 84, 96, 220)
 _MID_FG = QColor(248, 250, 252)
 _ASK_FG = QColor(230, 92, 104)
@@ -74,7 +75,7 @@ class LadderCanvas(QWidget):
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#060a11"))
+        painter.fillRect(self.rect(), QColor(Colors.BG_CANVAS))
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
 
         width = self.width()
@@ -96,7 +97,7 @@ class LadderCanvas(QWidget):
 
         if self._price_range and self._last_price is not None:
             y = self._price_to_y(self._last_price, height)
-            painter.setPen(QPen(QColor("#d6dde6"), 1))
+            painter.setPen(QPen(QColor(Colors.TEXT_PRIMARY), 1))
             painter.drawLine(0, int(y), width, int(y))
 
         if not self._rows:
@@ -330,40 +331,56 @@ class OrderflowLadderPane(QWidget):
         controls = QWidget()
         controls_layout = QHBoxLayout(controls)
         controls_layout.setContentsMargins(8, 6, 8, 6)
-        controls_layout.addWidget(QLabel("Tick"))
+        controls_layout.setSpacing(6)
+        tick_lbl = QLabel("Tick")
+        tick_lbl.setProperty("role", "caption")
+        controls_layout.addWidget(tick_lbl)
         self.tick_label = QLabel(f"{self.processor.tick_size:.8g}")
         self.tick_label.setFont(_HEADER_FONT)
+        self.tick_label.setProperty("role", "value")
         controls_layout.addWidget(self.tick_label)
         self.mode_button = QPushButton("Auto")
+        self.mode_button.setProperty("role", "mode")
+        self.mode_button.setToolTip("Auto-pick tick size based on visible price span")
         self.mode_button.setCheckable(True)
         self.mode_button.setChecked(True)
         self.mode_button.clicked.connect(self._toggle_tick_mode)
         controls_layout.addWidget(self.mode_button)
-        self.dec_btn = QPushButton("-")
+        self.dec_btn = QPushButton("−")
+        self.dec_btn.setProperty("role", "step")
+        self.dec_btn.setToolTip("Smaller tick")
+        self.dec_btn.setFixedWidth(24)
         self.inc_btn = QPushButton("+")
-        self.dec_btn.setFixedWidth(26)
-        self.inc_btn.setFixedWidth(26)
+        self.inc_btn.setProperty("role", "step")
+        self.inc_btn.setToolTip("Larger tick")
+        self.inc_btn.setFixedWidth(24)
         self.dec_btn.clicked.connect(self._decrease_tick)
         self.inc_btn.clicked.connect(self._increase_tick)
         controls_layout.addWidget(self.dec_btn)
         controls_layout.addWidget(self.inc_btn)
         self.debug_btn = QPushButton("Debug")
-        self.debug_btn.setFixedWidth(52)
+        self.debug_btn.setToolTip("Log a ladder debug snapshot")
+        self.debug_btn.setFixedWidth(56)
         self.debug_btn.clicked.connect(self._log_debug_snapshot)
         controls_layout.addWidget(self.debug_btn)
         controls_layout.addStretch(1)
-        self.spread_label = QLabel("Spread: -")
+        self.spread_label = QLabel("Spread —")
         self.spread_label.setFont(_HEADER_FONT)
+        self.spread_label.setProperty("role", "caption")
         controls_layout.addWidget(self.spread_label)
         root.addWidget(controls)
 
         header = QWidget()
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(8, 0, 8, 0)
-        for text, stretch, align in (("Price", 38, Qt.AlignCenter), ("Size", 26, Qt.AlignRight), ("Total", 36, Qt.AlignRight)):
+        header_layout.setContentsMargins(8, 2, 8, 2)
+        for text, stretch, align in (
+            ("PRICE", 38, Qt.AlignCenter),
+            ("SIZE",  26, Qt.AlignRight),
+            ("TOTAL", 36, Qt.AlignRight),
+        ):
             label = QLabel(text)
             label.setFont(_HEADER_FONT)
-            label.setStyleSheet("color: #8fa4c2;")
+            label.setStyleSheet(f"color: {Colors.TEXT_DIM};")
             label.setAlignment(Qt.AlignVCenter | align)
             label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             header_layout.addWidget(label, stretch)
@@ -371,7 +388,7 @@ class OrderflowLadderPane(QWidget):
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("color: #162231;")
+        line.setStyleSheet(f"color: {Colors.BORDER_FAINT};")
         root.addWidget(line)
 
         self.canvas = LadderCanvas(chart_pane=chart_pane)
@@ -498,7 +515,7 @@ class OrderflowLadderPane(QWidget):
             self.canvas.set_rows([])
             return
 
-        self.spread_label.setText(f"Spread: {ladder['best_ask'] - ladder['best_bid']:.2f}")
+        self.spread_label.setText(f"Spread {ladder['best_ask'] - ladder['best_bid']:.2f}")
         self.canvas.set_rows(self._build_visible_tick_rows(ladder))
 
     def _build_visible_tick_rows(self, ladder: dict[str, Any]) -> list[dict[str, float | str]]:
@@ -638,10 +655,10 @@ _STATS_FONT = QFont()
 _STATS_FONT.setStyleHint(QFont.StyleHint.Monospace)
 _STATS_FONT.setPointSize(9)
 
-_STATS_LABEL_CSS = "color: #6a85a8; font-size: 10px;"
-_STATS_BUY_CSS = "color: #26a69a; font-size: 11px; font-weight: bold;"
-_STATS_SELL_CSS = "color: #ef5350; font-size: 11px; font-weight: bold;"
-_STATS_NEUT_CSS = "color: #b0c4d8; font-size: 11px;"
+_STATS_LABEL_CSS = f"color: {Colors.TEXT_FAINT}; font-size: 10px;"
+_STATS_BUY_CSS = f"color: {Colors.UP}; font-size: 11px; font-weight: bold;"
+_STATS_SELL_CSS = f"color: {Colors.DOWN}; font-size: 11px; font-weight: bold;"
+_STATS_NEUT_CSS = f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
 
 
 class DeltaStatsPanel(QWidget):
@@ -651,7 +668,7 @@ class DeltaStatsPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("delta-stats-panel")
         self.setFixedHeight(74)
-        self.setStyleSheet("QWidget#delta-stats-panel { background: #070d14; border-top: 1px solid #162231; }")
+        # Background and border come from the global QSS via objectName.
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 4, 8, 4)
@@ -700,7 +717,7 @@ class DeltaStatsPanel(QWidget):
         # Row 3: buy% / sell% ratio bar (drawn as a QLabel with CSS gradient)
         self._ratio_bar = QLabel()
         self._ratio_bar.setFixedHeight(6)
-        self._ratio_bar.setStyleSheet("background: #1a2535; border-radius: 2px;")
+        self._ratio_bar.setStyleSheet(f"background: {Colors.BORDER_SUB}; border-radius: 2px;")
         outer.addWidget(self._ratio_bar)
 
     def update_stats(self, stats: dict) -> None:
@@ -734,15 +751,19 @@ class DeltaStatsPanel(QWidget):
             self._sell_val.setText(f"{total_sell:.4g}")
             buy_pct = (total_buy / total) * 100
             # Gradient: green portion for buy, red for sell
+            stop = buy_pct / 100.0
             self._ratio_bar.setStyleSheet(
                 f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-                f"stop:0 #26a69a, stop:{buy_pct / 100:.3f} #26a69a, "
-                f"stop:{buy_pct / 100:.3f} #ef5350, stop:1 #ef5350); border-radius: 2px;"
+                f"stop:0 {Colors.UP}, stop:{stop:.3f} {Colors.UP}, "
+                f"stop:{stop:.3f} {Colors.DOWN}, stop:1 {Colors.DOWN}); "
+                f"border-radius: 2px;"
             )
         else:
             self._buy_val.setText("—")
             self._sell_val.setText("—")
-            self._ratio_bar.setStyleSheet("background: #1a2535; border-radius: 2px;")
+            self._ratio_bar.setStyleSheet(
+                f"background: {Colors.BORDER_SUB}; border-radius: 2px;"
+            )
 
 
 class ChartOrderflowDockWidget(QDockWidget):
@@ -767,7 +788,7 @@ class ChartOrderflowDockWidget(QDockWidget):
         show_vpvr: bool = False,
     ) -> None:
         _title_prefix = "Chart+Orderflow" if show_ob else "Chart"
-        super().__init__(f"{_title_prefix} - {exchange.upper()} {symbol} ({timeframe})")
+        super().__init__(f"{_title_prefix} · {exchange.upper()}  {symbol}  ({timeframe})")
         self.instance_id = instance_id
         self.exchange = exchange
         self.symbol = symbol
@@ -920,7 +941,9 @@ class ChartOrderflowDockWidget(QDockWidget):
     def _update_title(self) -> None:
         """Reflect current OB state in the dock title."""
         prefix = "Chart+Orderflow" if self._show_ob else "Chart"
-        self.setWindowTitle(f"{prefix} - {self.exchange.upper()} {self.symbol} ({self.timeframe})")
+        self.setWindowTitle(
+            f"{prefix} · {self.exchange.upper()}  {self.symbol}  ({self.timeframe})"
+        )
 
     def _on_symbol_changed(self, symbol: str) -> None:
         self.change_subscription(self.exchange, symbol, self.timeframe)

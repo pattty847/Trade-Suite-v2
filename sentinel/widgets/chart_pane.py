@@ -13,25 +13,26 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPicture
 from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
 from sentinel.analysis.cvd_processor import CandleCVDProcessor
+from sentinel.app.theme import Colors, pg_label_css, qcolor
 from sentinel.core.signals import Signals
 
 
 LOGGER = logging.getLogger(__name__)
 
-_AXIS_PEN = pg.mkPen(color="#1e2d3f", width=1)
-_TICK_PEN = pg.mkPen(color="#546d8a")
+_AXIS_PEN = pg.mkPen(color=Colors.AXIS_PEN, width=1)
+_TICK_PEN = pg.mkPen(color=Colors.TICK_PEN)
 _TICK_FONT = QFont("Menlo, Consolas, monospace")
 _TICK_FONT.setStyleHint(QFont.StyleHint.Monospace)
 _TICK_FONT.setPointSize(8)
-_LABEL_CSS = {"color": "#3f5a76", "font-size": "10pt"}
+_LABEL_CSS = pg_label_css()
 _VOL_FRACTION = 0.18
-_CVD_ZERO_PEN = pg.mkPen(color="#2a4060", width=1, style=Qt.PenStyle.DashLine)
-_CROSSHAIR_PEN = pg.mkPen(color="#2a4060", width=1, style=Qt.PenStyle.DashLine)
+_CVD_ZERO_PEN = pg.mkPen(color=Colors.BORDER_PLOT, width=1, style=Qt.PenStyle.DashLine)
+_CROSSHAIR_PEN = pg.mkPen(color=Colors.BORDER_PLOT, width=1, style=Qt.PenStyle.DashLine)
 
-_UP_COLOR = QColor(38, 166, 154)
-_DN_COLOR = QColor(239, 83, 80)
-_UP_HEX = "#26a69a"
-_DN_HEX = "#ef5350"
+_UP_COLOR = qcolor(Colors.UP)
+_DN_COLOR = qcolor(Colors.DOWN)
+_UP_HEX = Colors.UP
+_DN_HEX = Colors.DOWN
 
 def _fmt_price(value: float) -> str:
     """Format a price with adaptive decimal places based on magnitude."""
@@ -75,7 +76,7 @@ def _style_pg_plot(plot: pg.PlotWidget) -> None:
         ax.setTextPen(_TICK_PEN)
         ax.setTickFont(_TICK_FONT)
         ax.setStyle(tickLength=-5)
-    plot.getViewBox().setBorder(pg.mkPen("#1a2535", width=1))
+    plot.getViewBox().setBorder(pg.mkPen(Colors.BORDER_SUB, width=1))
 
 
 class CandlestickItem(pg.GraphicsObject):
@@ -264,8 +265,8 @@ class ChartPane(QWidget):
 
         self.price_x_axis = pg.DateAxisItem(orientation="bottom")
         self.price_plot = pg.PlotWidget(axisItems={"bottom": self.price_x_axis})
-        self.price_plot.setBackground("#060a11")
-        self.price_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.price_plot.setBackground(Colors.BG_CANVAS)
+        self.price_plot.showGrid(x=True, y=True, alpha=Colors.GRID_ALPHA)
         self.price_plot.setMouseEnabled(y=True, x=True)
         _style_pg_plot(self.price_plot)
         self.price_plot.getViewBox().enableAutoRange(x=False, y=False)
@@ -336,8 +337,8 @@ class ChartPane(QWidget):
 
         self.cvd_x_axis = pg.DateAxisItem(orientation="bottom")
         self.cvd_plot = pg.PlotWidget(axisItems={"bottom": self.cvd_x_axis})
-        self.cvd_plot.setBackground("#060a11")
-        self.cvd_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.cvd_plot.setBackground(Colors.BG_CANVAS)
+        self.cvd_plot.showGrid(x=True, y=True, alpha=Colors.GRID_ALPHA)
         self.cvd_plot.setMouseEnabled(y=False, x=True)
         _style_pg_plot(self.cvd_plot)
         self.cvd_plot.setXLink(self.price_plot)
@@ -373,7 +374,9 @@ class ChartPane(QWidget):
         mono.setPointSize(9)
         self._ohlcv_label = QLabel("", self)
         self._ohlcv_label.setFont(mono)
-        self._ohlcv_label.setStyleSheet("color: #5a7a9a; background: transparent; padding: 2px 8px;")
+        self._ohlcv_label.setStyleSheet(
+            f"color: {Colors.TEXT_DIM}; background: transparent; padding: 2px 8px;"
+        )
         self._ohlcv_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._ohlcv_label.move(8, 4)
         self._ohlcv_label.hide()
@@ -1080,10 +1083,8 @@ class ChartPane(QWidget):
             return
         self._price_pill.setText(_fmt_price(price))
         self._price_pill.setStyleSheet(
-            "color: #ffffff; "
-            f"background: {hex_color}; "
-            "padding: 2px 6px; "
-            "border: 1px solid #0b1017;"
+            f"color: #ffffff; background: {hex_color}; "
+            f"padding: 2px 6px; border: 1px solid {Colors.BG_CANVAS};"
         )
         self._price_pill.adjustSize()
         self._reposition_price_pill()

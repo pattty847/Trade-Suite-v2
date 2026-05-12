@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from sentinel.app.theme import Colors
 from sentinel.market.cache.memory_cache import InMemoryCacheStore
 from sentinel.market.providers.yfinance_provider import YFinanceEquityProvider
 from sentinel.market.query import Timeframe
@@ -108,7 +109,7 @@ class EquityChartDockWidget(QDockWidget):
         days: str = "30d",
         chart_mode: str = "candles",
     ) -> None:
-        super().__init__(f"Equity — {symbol} ({timeframe})")
+        super().__init__(f"Equity · {symbol}  ({timeframe})")
         self.instance_id = instance_id
         self.setObjectName(f"dock:{instance_id}")
         self.setFeatures(
@@ -152,11 +153,9 @@ class EquityChartDockWidget(QDockWidget):
         toolbar = self._build_toolbar(symbol=symbol, timeframe=timeframe, days=days, mode=chart_mode)
 
         # --- Loading overlay (absolute-positioned label over chart_pane) ---
-        self._loading_label = QLabel("Loading…", self.chart_pane)
+        self._loading_label = QLabel("LOADING…", self.chart_pane)
         self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._loading_label.setStyleSheet(
-            "color: #8fb3ff; background: rgba(6,10,17,180); font-size: 13px;"
-        )
+        self._loading_label.setObjectName("loading-overlay")
         self._loading_label.hide()
         self._loading_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -185,7 +184,7 @@ class EquityChartDockWidget(QDockWidget):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(8)
 
-        _ic = "#6a85a8"
+        _ic = Colors.TEXT_FAINT
 
         icon_label = QLabel()
         icon_label.setPixmap(qta.icon("mdi6.finance", color=_ic).pixmap(16, 16))
@@ -227,12 +226,12 @@ class EquityChartDockWidget(QDockWidget):
         layout.addWidget(spacer)
 
         self._error_label = QLabel("")
-        self._error_label.setStyleSheet("color: #ef5350; font-size: 11px; padding: 0 4px;")
+        self._error_label.setObjectName("error-overlay")
         self._error_label.hide()
         layout.addWidget(self._error_label)
 
         self._context_label = QLabel(f"{symbol.upper()} · {timeframe}")
-        self._context_label.setStyleSheet("color: #6a85a8; font-size: 11px;")
+        self._context_label.setProperty("role", "context")
         layout.addWidget(self._context_label)
 
         return bar
@@ -290,7 +289,7 @@ class EquityChartDockWidget(QDockWidget):
             volumes=list(payload.volumes),
             body_fraction=0.6,
         )
-        self.setWindowTitle(f"Equity — {self._symbol} ({self._timeframe_str})")
+        self.setWindowTitle(f"Equity · {self._symbol}  ({self._timeframe_str})")
         self._context_label.setText(f"{self._symbol} · {self._timeframe_str}")
 
     def _on_loading_changed(self, loading: bool) -> None:

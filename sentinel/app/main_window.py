@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 
 import pyqtgraph as pg
 import qtawesome as qta
@@ -10,6 +9,7 @@ from qasync import asyncClose
 
 from sentinel.app.layout_manager import LayoutManager
 from sentinel.app.runtime import SentinelRuntime
+from sentinel.app.theme import Colors, load_qss
 from sentinel.app.widget_registry import WidgetRegistry
 from sentinel.widgets.chart_orderflow_widget import ChartOrderflowDockWidget
 from sentinel.widgets.chart_widget import ChartDockWidget
@@ -20,13 +20,25 @@ from sentinel.widgets.orderbook_widget import OrderbookDockWidget
 LOGGER = logging.getLogger(__name__)
 
 
+_DOT_GLYPH = "•  "   # bullet + two non-breaking spaces
+
+
+def _set_status_state(label: QLabel, state: str, text: str) -> None:
+    """Update a status dot's [state] property so QSS reapplies the right color."""
+    label.setText(f"{_DOT_GLYPH}{text}")
+    label.setProperty("state", state)
+    label.style().unpolish(label)
+    label.style().polish(label)
+
+
 class SentinelMainWindow(QMainWindow):
     def __init__(self, app_version: str, runtime: SentinelRuntime | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("Sentinel")
+        self.setWindowTitle(f"Sentinel · v{app_version}")
         self.resize(1600, 900)
         self.setDockNestingEnabled(True)
         self.runtime = runtime
+        self._app_version = app_version
 
         self.layout_manager = LayoutManager(app_version=app_version)
         self.widget_registry = WidgetRegistry(self)
@@ -40,10 +52,13 @@ class SentinelMainWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         # Set pyqtgraph defaults before any plots are created.
-        pg.setConfigOptions(foreground="#8fa4c2", background="#060a11", antialias=True)
+        pg.setConfigOptions(
+            foreground=Colors.TEXT_MUTED,
+            background=Colors.BG_CANVAS,
+            antialias=True,
+        )
 
-        with open(Path(__file__).parent / "theme.qss") as f:
-            self.setStyleSheet(f.read())
+        self.setStyleSheet(load_qss())
 
     def _build_global_toolbar(self) -> None:
         bar = QToolBar("Global")
@@ -52,22 +67,33 @@ class SentinelMainWindow(QMainWindow):
         bar.setIconSize(QSize(16, 16))
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, bar)
 
-        brand = QLabel("Sentinel")
-        brand.setStyleSheet("font-weight:700; color:#8fb3ff; padding: 0 10px 0 4px; font-size:13px;")
+        brand = QLabel("SENTINEL")
+        brand.setObjectName("brand")
         bar.addWidget(brand)
+
+        version = QLabel(f"v{self._app_version}")
+        version.setObjectName("brand-version")
+        bar.addWidget(version)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         bar.addWidget(spacer)
 
-        _btn = "#7a99be"
-        save_act = QAction(qta.icon("mdi6.content-save-outline", color=_btn), "Save Layout", self)
+        save_act = QAction(
+            qta.icon("mdi6.content-save-outline", color=Colors.TEXT_DIM),
+            "Save Layout",
+            self,
+        )
         save_act.setToolTip("Save layout  (Ctrl+S)")
         save_act.setShortcut(QKeySequence.StandardKey.Save)
         save_act.triggered.connect(self._save_layout)
         bar.addAction(save_act)
 
-        reset_act = QAction(qta.icon("mdi6.restore", color=_btn), "Reset Layout", self)
+        reset_act = QAction(
+            qta.icon("mdi6.restore", color=Colors.TEXT_DIM),
+            "Reset Layout",
+            self,
+        )
         reset_act.setToolTip("Reset to default layout")
         reset_act.triggered.connect(self._reset_layout)
         bar.addAction(reset_act)
@@ -81,22 +107,32 @@ class SentinelMainWindow(QMainWindow):
         bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, bar)
 
-        _ic = "#6a85a8"
-        _tools = [
+        # Drawing tools are visual placeholders for now — the cursor entry is
+        # active by default and the others are reserved for future wiring.
+        tools = [
             ("Cursor",    "mdi6.cursor-default-outline", "Cursor"),
             ("Crosshair", "mdi6.crosshairs",             "Crosshair"),
-            ("Trend",     "mdi6.trending-up",            "Trend line"),
-            ("Ray",       "mdi6.ray-start-arrow",        "Ray"),
-            ("HLine",     "mdi6.minus",                  "Horizontal line"),
-            ("Fib",       "mdi6.sine-wave",               "Fibonacci"),
-            ("Text",      "mdi6.format-text",            "Text annotation"),
+            None,  # separator
+            ("Trend",     "mdi6.trending-up",            "Trend line  (coming soon)"),
+            ("Ray",       "mdi6.ray-start-arrow",        "Ray  (coming soon)"),
+            ("HLine",     "mdi6.minus",                  "Horizontal line  (coming soon)"),
+            ("Fib",       "mdi6.sine-wave",              "Fibonacci  (coming soon)"),
+            ("Text",      "mdi6.format-text",            "Text annotation  (coming soon)"),
         ]
 
         group = QActionGroup(self)
         group.setExclusive(True)
         first = True
-        for name, icon_id, tooltip in _tools:
-            act = QAction(qta.icon(icon_id, color=_ic, color_active="#b8d0f0"), name, self)
+        for entry in tools:
+            if entry is None:
+                bar.addSeparator()
+                continue
+            name, icon_id, tooltip = entry
+            act = QAction(
+                qta.icon(icon_id, color=Colors.TEXT_FAINT, color_active=Colors.ACCENT),
+                name,
+                self,
+            )
             act.setToolTip(tooltip)
             act.setCheckable(True)
             if first:
@@ -107,7 +143,7 @@ class SentinelMainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         menu = self.menuBar()
-        _ic = "#7a99be"
+        _ic = Colors.TEXT_DIM
 
         # ── File menu ────────────────────────────────────────────────
         file_menu = menu.addMenu("File")
@@ -278,16 +314,18 @@ class SentinelMainWindow(QMainWindow):
         exchanges = getattr(self.runtime, "exchanges", []) if self.runtime else []
         if exchanges:
             ex_label = QLabel("  ".join(e.upper() for e in exchanges))
-            ex_label.setStyleSheet("color: #3f5a76; padding: 0 10px; font-size: 11px;")
+            ex_label.setObjectName("status-meta")
+            ex_label.setToolTip("Connected exchanges")
             sb.addPermanentWidget(ex_label)
 
-        self._conn_dot = QLabel("●  Connecting")
-        self._conn_dot.setStyleSheet("color: #ef5350; padding: 0 10px; font-size: 11px;")
+        self._conn_dot = QLabel()
+        self._conn_dot.setObjectName("status-dot")
+        _set_status_state(self._conn_dot, "warn", "Connecting")
         sb.addPermanentWidget(self._conn_dot)
 
         if self.runtime is None:
-            sb.showMessage("Shell only (no runtime)")
-            self._conn_dot.setText("●  No runtime")
+            sb.showMessage("Shell only — no runtime attached")
+            _set_status_state(self._conn_dot, "idle", "No runtime")
             return
 
         self.widget_registry.attach_runtime(self.runtime)
@@ -296,15 +334,13 @@ class SentinelMainWindow(QMainWindow):
         self.runtime.stopped.connect(self._on_runtime_stopped)
         self.runtime.status_changed.connect(sb.showMessage)
         self.runtime.runtime_error.connect(self._show_runtime_error)
-        sb.showMessage("Initializing runtime...")
+        sb.showMessage("Initializing runtime…")
 
     def _on_runtime_started(self) -> None:
-        self._conn_dot.setText("●  Connected")
-        self._conn_dot.setStyleSheet("color: #26a69a; padding: 0 10px; font-size: 11px;")
+        _set_status_state(self._conn_dot, "ok", "Live")
 
     def _on_runtime_stopped(self) -> None:
-        self._conn_dot.setText("●  Disconnected")
-        self._conn_dot.setStyleSheet("color: #ef5350; padding: 0 10px; font-size: 11px;")
+        _set_status_state(self._conn_dot, "err", "Disconnected")
 
     def _show_runtime_error(self, message: str) -> None:
         QMessageBox.warning(self, "Runtime Error", message)

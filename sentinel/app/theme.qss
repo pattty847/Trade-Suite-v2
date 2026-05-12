@@ -1,91 +1,125 @@
+/* Sentinel — dark trading-terminal stylesheet.
+ *
+ * Tokens (`@TOKEN@`) are substituted at load time from `theme.py::Colors`.
+ * Add new colors there, not inline here. Class hooks used from Python:
+ *
+ *   QLabel#brand               — top-bar wordmark
+ *   QLabel#brand-version       — top-bar version pill
+ *   QLabel#section-header      — small uppercase divider label
+ *   QLabel#status-dot          — connection indicator (with [state="…"])
+ *   QLabel#status-meta         — status-bar permanent labels (exchanges, etc.)
+ *   QWidget#chart-toolbar      — chart dock toolbar strip
+ *   QFrame#group-separator     — vertical separator inside toolbars
+ *   QPushButton[role="step"]   — compact +/- step buttons
+ *   QPushButton[role="mode"]   — auto/manual segmented toggle
+ *   QLabel#loading-overlay     — centered "Loading…" overlay
+ *   QLabel#error-overlay       — inline error pill
+ *   QWidget#delta-stats-panel  — chart+orderflow CVD stats strip
+ */
+
 /* ── Base ──────────────────────────────────────────────────────── */
-QMainWindow { background: #0b0f14; color: #d4dae3; }
-QMainWindow::separator { background: #1a2535; width: 2px; height: 2px; }
-QMainWindow::separator:hover { background: #3a5878; }
+QMainWindow { background: @BG_APP@; color: @TEXT_PRIMARY@; }
+QMainWindow::separator { background: @BG_PANEL@; width: 2px; height: 2px; }
+QMainWindow::separator:hover { background: @BORDER_HOVER@; }
 
 /* pyqtgraph PlotWidget lives in a QGraphicsView — strip its frame */
-QGraphicsView { border: none; background: #060a11; }
+QGraphicsView { border: none; background: @BG_CANVAS@; }
 
-/* ── Menu bar ───────────────────────────────────────────────────── */
+QWidget { color: @TEXT_PRIMARY@; }
+QWidget:disabled { color: @TEXT_GHOST@; }
+
+/* ── Menu bar ──────────────────────────────────────────────────── */
 QMenuBar {
-    background: #0d131b;
-    color: #cdd3de;
-    border-bottom: 1px solid #1a2535;
+    background: @BG_PANEL@;
+    color: @TEXT_SECONDARY@;
+    border-bottom: 1px solid @BORDER_SUB@;
     font-size: 12px;
+    padding: 1px 2px;
 }
 QMenuBar::item { padding: 5px 9px; background: transparent; }
-QMenuBar::item:selected { background: #172131; }
+QMenuBar::item:selected { background: @BG_HOVER@; }
+QMenuBar::item:pressed { background: @BG_ACTIVE@; color: @ACCENT@; }
 
 QMenu {
-    background: #0f1620;
-    color: #d4dae3;
-    border: 1px solid #273142;
+    background: @BG_PANEL_2@;
+    color: @TEXT_PRIMARY@;
+    border: 1px solid @BORDER@;
     padding: 4px;
 }
-QMenu::item { padding: 5px 20px; border: 1px solid transparent; }
-QMenu::item:selected { background: #1a2638; border: 1px solid #2a3a52; }
-QMenu::separator { height: 1px; background: #1a2535; margin: 3px 6px; }
+QMenu::item { padding: 5px 22px 5px 14px; border: 1px solid transparent; }
+QMenu::item:selected { background: @BG_SELECT@; border: 1px solid @BORDER@; color: @TEXT_PRIMARY@; }
+QMenu::item:disabled { color: @TEXT_GHOST@; }
+QMenu::separator { height: 1px; background: @BORDER_SUB@; margin: 4px 6px; }
+QMenu::icon { padding-left: 6px; }
 
-/* ── Toolbars ───────────────────────────────────────────────────── */
+/* ── Toolbars ──────────────────────────────────────────────────── */
 QToolBar {
-    background: #0d131b;
+    background: @BG_PANEL@;
     border: none;
-    border-bottom: 1px solid #1a2535;
-    spacing: 3px;
-    padding: 2px 4px;
+    border-bottom: 1px solid @BORDER_SUB@;
+    spacing: 2px;
+    padding: 3px 6px;
 }
 QToolBar#toolbar\:drawing {
     border-bottom: none;
-    border-right: 1px solid #1a2535;
-    padding: 4px 2px;
+    border-right: 1px solid @BORDER_SUB@;
+    padding: 5px 3px;
+    spacing: 1px;
 }
 QToolBar::separator {
-    background: #1a2535;
+    background: @BORDER_SUB@;
     width: 1px;
-    margin: 3px 2px;
+    margin: 4px 4px;
+}
+QToolBar#toolbar\:drawing::separator {
+    height: 1px;
+    width: 18px;
+    margin: 4px 4px;
 }
 
 /* ── Tool buttons (toolbar actions render as these) ─────────────── */
 QToolButton {
     background: transparent;
-    color: #9db8d6;
+    color: @TEXT_MUTED@;
     border: 1px solid transparent;
+    border-radius: 2px;
     padding: 4px 8px;
     font-size: 12px;
 }
 QToolButton:hover {
-    background: #172131;
-    border: 1px solid #2a3e5a;
-    color: #d4dae3;
+    background: @BG_HOVER@;
+    border: 1px solid @BORDER@;
+    color: @TEXT_PRIMARY@;
 }
 QToolButton:checked, QToolButton:pressed {
-    background: #152338;
-    border: 1px solid #3d6090;
-    color: #8fb3ff;
+    background: @BG_ACTIVE@;
+    border: 1px solid @BORDER_FOCUS@;
+    color: @ACCENT@;
+}
+QToolButton:disabled {
+    color: @TEXT_GHOST@;
 }
 
-/* ── Dock widgets ───────────────────────────────────────────────── */
-QSplitter::handle {
-    background: #1a2535;
-}
-QSplitter::handle:vertical {
-    height: 2px;
-}
-QSplitter::handle:hover {
-    background: #2a4060;
-}
+/* ── Splitter handles ──────────────────────────────────────────── */
+QSplitter::handle { background: @BG_PANEL@; }
+QSplitter::handle:vertical { height: 2px; }
+QSplitter::handle:horizontal { width: 2px; }
+QSplitter::handle:hover { background: @BORDER_HOVER@; }
 
+/* ── Dock widgets ──────────────────────────────────────────────── */
 QDockWidget {
-    color: #7a99be;
+    color: @TEXT_DIM@;
     font-size: 11px;
 }
 QDockWidget::title {
-    background: #0e1520;
-    color: #7a99be;
-    padding: 4px 8px;
+    background: @BG_PANEL@;
+    color: @TEXT_DIM@;
+    padding: 4px 10px 4px 12px;
     min-height: 22px;
-    border-bottom: 1px solid #1a2535;
+    border-bottom: 1px solid @BORDER_SUB@;
+    border-left: 2px solid @BORDER_SUB@;
     text-align: left;
+    font-weight: 600;
 }
 QDockWidget::close-button, QDockWidget::float-button {
     background: transparent;
@@ -100,227 +134,338 @@ QDockWidget::close-button:hover {
     border: 1px solid #5a2a2a;
 }
 QDockWidget::float-button:hover {
-    background: #1e2e45;
-    border: 1px solid #2a3e5a;
+    background: @BG_HOVER@;
+    border: 1px solid @BORDER@;
 }
 
-/* ── Status bar ─────────────────────────────────────────────────── */
+/* ── Status bar ────────────────────────────────────────────────── */
 QStatusBar {
-    background: #0d131b;
-    color: #6a85a8;
-    border-top: 1px solid #1a2535;
+    background: @BG_PANEL@;
+    color: @TEXT_FAINT@;
+    border-top: 1px solid @BORDER_SUB@;
     font-size: 11px;
+    min-height: 22px;
 }
 QStatusBar::item { border: none; }
+QStatusBar QLabel { color: @TEXT_FAINT@; }
+QLabel#status-meta {
+    color: @TEXT_FAINT@;
+    padding: 0 10px;
+    font-size: 11px;
+    border-left: 1px solid @BORDER_SUB@;
+}
 
-/* ── Push buttons ───────────────────────────────────────────────── */
+/* Connection / health dot — set via property: state = "ok"|"warn"|"err"|"idle" */
+QLabel#status-dot {
+    padding: 0 10px 0 10px;
+    font-size: 11px;
+    border-left: 1px solid @BORDER_SUB@;
+}
+QLabel#status-dot[state="ok"]   { color: @UP@;   }
+QLabel#status-dot[state="warn"] { color: @WARN@; }
+QLabel#status-dot[state="err"]  { color: @DOWN@; }
+QLabel#status-dot[state="idle"] { color: @TEXT_FAINT@; }
+
+/* Brand wordmark in the global top toolbar */
+QLabel#brand {
+    color: @ACCENT@;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 0 8px 0 6px;
+}
+QLabel#brand-version {
+    color: @TEXT_GHOST@;
+    font-size: 10px;
+    padding: 0 10px 0 0;
+}
+
+/* Section header — small uppercase divider used inside panels */
+QLabel#section-header {
+    color: @TEXT_GHOST@;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 6px 2px 6px;
+}
+
+/* Group separator (vertical line) for toolbar/control rows */
+QFrame#group-separator {
+    background: @BORDER_SUB@;
+    max-width: 1px;
+    min-width: 1px;
+    margin: 4px 4px;
+}
+
+/* ── Push buttons ──────────────────────────────────────────────── */
 QPushButton {
-    background: #111924;
-    color: #b8c8d8;
-    border: 1px solid #253446;
+    background: @BG_ELEV@;
+    color: @TEXT_SECONDARY@;
+    border: 1px solid @BORDER@;
+    border-radius: 2px;
     padding: 3px 10px;
     min-width: 20px;
     font-size: 12px;
 }
 QPushButton:hover {
-    background: #182337;
-    border: 1px solid #3a5878;
-    color: #d4dae3;
+    background: @BG_HOVER@;
+    border: 1px solid @BORDER_HOVER@;
+    color: @TEXT_PRIMARY@;
 }
 QPushButton:pressed {
-    background: #0c1520;
-    border: 1px solid #2a4a6a;
+    background: @BG_PRESSED@;
+    border: 1px solid @BORDER_FOCUS@;
+}
+QPushButton:checked {
+    background: @BG_ACTIVE@;
+    border: 1px solid @BORDER_FOCUS@;
+    color: @ACCENT@;
+}
+QPushButton:disabled {
+    background: @BG_APP@;
+    color: @TEXT_GHOST@;
+    border: 1px solid @BG_PANEL@;
 }
 QPushButton:flat { border: none; background: transparent; }
 
-/* ── Combo boxes ────────────────────────────────────────────────── */
+/* Compact +/- step buttons used by ladder / DOM controls */
+QPushButton[role="step"] {
+    min-width: 22px;
+    max-width: 26px;
+    padding: 2px 0;
+    font-weight: 700;
+    color: @TEXT_DIM@;
+}
+QPushButton[role="step"]:hover { color: @ACCENT@; }
+
+/* Mode toggle (Auto / Manual) */
+QPushButton[role="mode"] {
+    min-width: 56px;
+    padding: 2px 8px;
+    font-size: 11px;
+}
+
+/* ── Combo boxes ───────────────────────────────────────────────── */
 QComboBox {
-    background: #111924;
-    color: #d0d8e4;
-    border: 1px solid #253446;
+    background: @BG_ELEV@;
+    color: @TEXT_PRIMARY@;
+    border: 1px solid @BORDER@;
+    border-radius: 2px;
     padding: 3px 8px;
     min-width: 80px;
     font-size: 12px;
 }
-QComboBox:hover { border: 1px solid #3a5878; }
-QComboBox::drop-down { border: none; width: 16px; }
+QComboBox:hover { border: 1px solid @BORDER_HOVER@; }
+QComboBox:focus { border: 1px solid @BORDER_FOCUS@; }
+QComboBox:disabled { color: @TEXT_GHOST@; }
+QComboBox::drop-down { border: none; width: 14px; }
 QComboBox QAbstractItemView {
-    background: #0f1620;
-    color: #d4dae3;
-    border: 1px solid #273142;
-    selection-background-color: #1a2638;
+    background: @BG_PANEL_2@;
+    color: @TEXT_PRIMARY@;
+    border: 1px solid @BORDER@;
+    selection-background-color: @BG_SELECT@;
+    selection-color: @TEXT_PRIMARY@;
     outline: none;
+    padding: 2px;
 }
 
-/* ── Labels ─────────────────────────────────────────────────────── */
-QLabel { color: #b8c8d8; font-size: 12px; }
+/* ── Labels ────────────────────────────────────────────────────── */
+QLabel { color: @TEXT_SECONDARY@; font-size: 12px; }
+QLabel[role="caption"]    { color: @TEXT_FAINT@; font-size: 11px; }
+QLabel[role="value"]      { color: @TEXT_PRIMARY@; font-size: 12px; }
+QLabel[role="up"]         { color: @UP@; font-weight: 600; }
+QLabel[role="down"]       { color: @DOWN@; font-weight: 600; }
 
-/* ── Check boxes ────────────────────────────────────────────────── */
-QCheckBox { color: #b8c8d8; spacing: 6px; font-size: 12px; }
+/* Loading / error overlays used by the equity chart and similar surfaces.
+ * `loading-overlay` covers its host widget so the chart underneath is dimmed
+ * and the centered label is the focal point. */
+QLabel#loading-overlay {
+    color: @ACCENT@;
+    background: rgba(6, 10, 17, 200);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+}
+QLabel#error-overlay {
+    color: @DOWN@;
+    background: rgba(64, 12, 18, 100);
+    border: 1px solid @DOWN@;
+    border-radius: 2px;
+    padding: 2px 8px;
+    font-size: 11px;
+}
+
+/* ── Check boxes ───────────────────────────────────────────────── */
+QCheckBox { color: @TEXT_SECONDARY@; spacing: 6px; font-size: 12px; }
 QCheckBox::indicator {
-    width: 13px;
-    height: 13px;
-    background: #111924;
-    border: 1px solid #253446;
+    width: 12px;
+    height: 12px;
+    background: @BG_ELEV@;
+    border: 1px solid @BORDER@;
+    border-radius: 2px;
 }
-QCheckBox::indicator:hover { border: 1px solid #3a5878; }
+QCheckBox::indicator:hover { border: 1px solid @BORDER_HOVER@; }
 QCheckBox::indicator:checked {
-    background: #1a3d6a;
-    border: 1px solid #2d6aaa;
+    background: @ACCENT_DEEP@;
+    border: 1px solid @ACCENT_LINE@;
 }
 
-/* ── Sliders ────────────────────────────────────────────────────── */
+/* ── Sliders ───────────────────────────────────────────────────── */
 QSlider::groove:horizontal {
     height: 3px;
-    background: #1a2535;
+    background: @BORDER_SUB@;
     border-radius: 1px;
 }
 QSlider::handle:horizontal {
-    background: #3a5a8a;
-    border: 1px solid #2d4e7a;
+    background: @BORDER_FOCUS@;
+    border: 1px solid @ACCENT_LINE@;
     width: 10px;
     height: 10px;
     border-radius: 5px;
     margin: -4px 0;
 }
-QSlider::handle:horizontal:hover { background: #4a70aa; }
-QSlider::sub-page:horizontal { background: #1e3a5f; border-radius: 1px; }
+QSlider::handle:horizontal:hover { background: @ACCENT@; }
+QSlider::sub-page:horizontal { background: @ACCENT_DEEP@; border-radius: 1px; }
 
-/* ── Tables ─────────────────────────────────────────────────────── */
+/* ── Tables ────────────────────────────────────────────────────── */
 QTableWidget {
-    background: #0b0f14;
-    alternate-background-color: #0e1520;
-    gridline-color: #131d2c;
+    background: @BG_APP@;
+    alternate-background-color: @BG_PANEL@;
+    gridline-color: @BORDER_GRID@;
     border: none;
     outline: none;
-    selection-background-color: #1a2638;
+    selection-background-color: @BG_SELECT@;
     font-size: 12px;
 }
 QTableWidget::item { padding: 1px 4px; border: none; }
-QTableWidget::item:selected { background: #1a2638; }
+QTableWidget::item:selected { background: @BG_SELECT@; }
 
-QHeaderView { background: #0d131b; border: none; }
+QHeaderView { background: @BG_PANEL@; border: none; }
 QHeaderView::section {
-    background: #0d131b;
-    color: #6a85a8;
+    background: @BG_PANEL@;
+    color: @TEXT_FAINT@;
     border: none;
-    border-right: 1px solid #1a2535;
-    border-bottom: 1px solid #1a2535;
-    padding: 3px 6px;
-    font-size: 11px;
-    font-weight: 600;
+    border-right: 1px solid @BORDER_SUB@;
+    border-bottom: 1px solid @BORDER_SUB@;
+    padding: 4px 6px;
+    font-size: 10px;
+    font-weight: 700;
 }
 QHeaderView::section:last { border-right: none; }
 
-/* ── Scrollbars ─────────────────────────────────────────────────── */
+/* ── Scrollbars ────────────────────────────────────────────────── */
 QScrollBar:vertical {
-    background: #0b0f14;
-    width: 5px;
+    background: @BG_APP@;
+    width: 6px;
     margin: 0;
     border: none;
 }
 QScrollBar::handle:vertical {
-    background: #243044;
+    background: @BORDER@;
     min-height: 24px;
     border-radius: 2px;
 }
-QScrollBar::handle:vertical:hover { background: #3a5070; }
+QScrollBar::handle:vertical:hover { background: @BORDER_HOVER@; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
 
 QScrollBar:horizontal {
-    background: #0b0f14;
-    height: 5px;
+    background: @BG_APP@;
+    height: 6px;
     margin: 0;
     border: none;
 }
 QScrollBar::handle:horizontal {
-    background: #243044;
+    background: @BORDER@;
     min-width: 24px;
     border-radius: 2px;
 }
-QScrollBar::handle:horizontal:hover { background: #3a5070; }
+QScrollBar::handle:horizontal:hover { background: @BORDER_HOVER@; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
 
-/* ── Splitter handles ───────────────────────────────────────────── */
-QSplitter::handle { background: #151f2e; }
-QSplitter::handle:vertical { height: 3px; }
-QSplitter::handle:horizontal { width: 3px; }
-QSplitter::handle:hover { background: #2a4060; }
-
-/* ── Chart inline toolbar ────────────────────────────────────────── */
+/* ── Chart inline toolbar ──────────────────────────────────────── */
 QWidget#chart-toolbar {
-    background: #0d131b;
-    border-bottom: 1px solid #192536;
+    background: @BG_PANEL@;
+    border-bottom: 1px solid @BORDER_STRIP@;
     min-height: 34px;
     max-height: 38px;
 }
 
-/* Combos inside the chart toolbar: tighter than the global style */
 QWidget#chart-toolbar QComboBox {
-    min-width: 58px;
+    min-width: 64px;
     padding: 2px 6px;
     font-size: 11px;
 }
 
-/* Checkboxes inside chart toolbar rendered as compact text toggles */
 QWidget#chart-toolbar QCheckBox {
-    color: #546d8a;
+    color: @TEXT_FAINT@;
     spacing: 4px;
     font-size: 11px;
-    padding: 1px 5px;
+    padding: 1px 6px;
     border: 1px solid transparent;
-    border-radius: 3px;
+    border-radius: 2px;
 }
 QWidget#chart-toolbar QCheckBox:hover {
-    color: #8fa4c2;
-    border: 1px solid #253446;
-    background: #111924;
+    color: @TEXT_MUTED@;
+    border: 1px solid @BORDER@;
+    background: @BG_ELEV@;
 }
 QWidget#chart-toolbar QCheckBox:checked {
-    color: #8fb3ff;
-    background: #0f1e36;
-    border: 1px solid #2d4e7a;
+    color: @ACCENT@;
+    background: @BG_ACTIVE@;
+    border: 1px solid @ACCENT_LINE@;
 }
 QWidget#chart-toolbar QCheckBox::indicator {
     width: 0px;
     height: 0px;
 }
 
-/* Context / info labels inside the chart toolbar */
 QWidget#chart-toolbar QLabel {
-    color: #3f5a76;
+    color: @TEXT_GHOST@;
     font-size: 11px;
 }
+QWidget#chart-toolbar QLabel[role="context"] {
+    color: @TEXT_DIM@;
+    font-size: 11px;
+    padding: 0 4px;
+}
 
-/* ── Input fields ────────────────────────────────────────────────── */
+/* ── Input fields ──────────────────────────────────────────────── */
 QLineEdit {
-    background: #111924;
-    color: #d0d8e4;
-    border: 1px solid #253446;
+    background: @BG_ELEV@;
+    color: @TEXT_PRIMARY@;
+    border: 1px solid @BORDER@;
     border-radius: 2px;
     padding: 3px 6px;
     font-size: 12px;
+    selection-background-color: @BG_SELECT@;
 }
-QLineEdit:focus { border: 1px solid #3a5878; }
-QLineEdit:hover { border: 1px solid #2a4060; }
+QLineEdit:focus { border: 1px solid @BORDER_FOCUS@; }
+QLineEdit:hover { border: 1px solid @BORDER_HOVER@; }
+QLineEdit:disabled { color: @TEXT_GHOST@; }
 
-/* ── Spin / numeric inputs ───────────────────────────────────────── */
+/* ── Spin / numeric inputs ─────────────────────────────────────── */
 QSpinBox, QDoubleSpinBox {
-    background: #111924;
-    color: #d0d8e4;
-    border: 1px solid #253446;
+    background: @BG_ELEV@;
+    color: @TEXT_PRIMARY@;
+    border: 1px solid @BORDER@;
+    border-radius: 2px;
     padding: 2px 4px;
     font-size: 12px;
 }
-QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #3a5878; }
+QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid @BORDER_FOCUS@; }
 
-/* ── Tooltips ────────────────────────────────────────────────────── */
+/* ── Tooltips ──────────────────────────────────────────────────── */
 QToolTip {
-    background: #0f1620;
-    color: #b8c8d8;
-    border: 1px solid #273142;
+    background: @BG_PANEL_2@;
+    color: @TEXT_SECONDARY@;
+    border: 1px solid @BORDER@;
     padding: 4px 8px;
     font-size: 11px;
 }
+
+/* ── Delta stats strip (chart+orderflow) ───────────────────────── */
+QWidget#delta-stats-panel {
+    background: @BG_PANEL@;
+    border-top: 1px solid @BORDER_FAINT@;
+}
+QWidget#delta-stats-panel QLabel { color: @TEXT_SECONDARY@; }
