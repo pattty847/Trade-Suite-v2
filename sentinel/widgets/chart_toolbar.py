@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from sentinel.app.theme import Colors
+from sentinel.app.theme import Colors, Spacing
 
 
 DEFAULT_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD"]
@@ -56,8 +56,8 @@ class ChartToolbar(QWidget):
         self.setObjectName("chart-toolbar")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(6)
+        layout.setContentsMargins(Spacing.XL, Spacing.S + 1, Spacing.XL, Spacing.S + 1)
+        layout.setSpacing(Spacing.M)
 
         self.symbol_combo = QComboBox()
         self.symbol_combo.setEditable(True)

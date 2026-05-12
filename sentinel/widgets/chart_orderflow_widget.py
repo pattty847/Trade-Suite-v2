@@ -8,7 +8,6 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QDockWidget,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -371,8 +370,9 @@ class OrderflowLadderPane(QWidget):
         root.addWidget(controls)
 
         header = QWidget()
+        header.setObjectName("ladder-header")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(8, 2, 8, 2)
+        header_layout.setContentsMargins(8, 4, 8, 4)
         for text, stretch, align in (
             ("PRICE", 38, Qt.AlignCenter),
             ("SIZE",  26, Qt.AlignRight),
@@ -380,16 +380,11 @@ class OrderflowLadderPane(QWidget):
         ):
             label = QLabel(text)
             label.setFont(_HEADER_FONT)
-            label.setStyleSheet(f"color: {Colors.TEXT_DIM};")
+            label.setProperty("role", "caption")
             label.setAlignment(Qt.AlignVCenter | align)
             label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             header_layout.addWidget(label, stretch)
         root.addWidget(header)
-
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet(f"color: {Colors.BORDER_FAINT};")
-        root.addWidget(line)
 
         self.canvas = LadderCanvas(chart_pane=chart_pane)
         root.addWidget(self.canvas, 1)

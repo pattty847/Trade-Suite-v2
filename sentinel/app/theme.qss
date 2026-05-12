@@ -14,6 +14,10 @@
  *   QPushButton[role="mode"]   — auto/manual segmented toggle
  *   QLabel#loading-overlay     — centered "Loading…" overlay
  *   QLabel#error-overlay       — inline error pill
+ *   QWidget#empty-state        — placeholder when a dock has no data
+ *   QLabel#live-badge          — feed-freshness indicator (state property)
+ *   QLabel#price-pill          — chart price pill (direction property)
+ *   QLabel#ohlcv-label         — chart crosshair OHLCV (direction property)
  *   QWidget#delta-stats-panel  — chart+orderflow CVD stats strip
  */
 
@@ -274,6 +278,53 @@ QLabel[role="value"]      { color: @TEXT_PRIMARY@; font-size: 12px; }
 QLabel[role="up"]         { color: @UP@; font-weight: 600; }
 QLabel[role="down"]       { color: @DOWN@; font-weight: 600; }
 
+/* Empty state — centered placeholder used when a dock has no data yet. */
+QWidget#empty-state { background: transparent; }
+QLabel#empty-state-label {
+    color: @TEXT_FAINT@;
+    font-weight: 700;
+    font-size: 11px;
+}
+QLabel#empty-state-hint {
+    color: @TEXT_GHOST@;
+    font-size: 10px;
+}
+
+/* Live-data freshness badge. */
+QLabel#live-badge {
+    background: rgba(6, 10, 17, 220);
+    border: 1px solid @BORDER@;
+    border-radius: 2px;
+    padding: 1px 8px 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    color: @TEXT_FAINT@;
+}
+QLabel#live-badge[state="ok"]   { color: @UP@;        border-color: @UP@;   }
+QLabel#live-badge[state="warn"] { color: @WARN@;      border-color: @WARN@; }
+QLabel#live-badge[state="err"]  { color: @DOWN@;      border-color: @DOWN@; }
+QLabel#live-badge[state="idle"] { color: @TEXT_GHOST@; }
+
+/* Chart-pane price pill (right edge of price line, OB-mode only). */
+QLabel#price-pill {
+    color: #ffffff;
+    padding: 2px 6px;
+    border: 1px solid @BG_CANVAS@;
+    font-weight: 600;
+}
+QLabel#price-pill[direction="up"]   { background: @UP@;   }
+QLabel#price-pill[direction="down"] { background: @DOWN@; }
+
+/* Chart-pane crosshair hover label (O/H/L/C summary). */
+QLabel#ohlcv-label {
+    background: transparent;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: @TEXT_DIM@;
+}
+QLabel#ohlcv-label[direction="up"]   { color: @UP@;   }
+QLabel#ohlcv-label[direction="down"] { color: @DOWN@; }
+
 /* Loading / error overlays used by the equity chart and similar surfaces.
  * `loading-overlay` covers its host widget so the chart underneath is dimmed
  * and the centered label is the focal point. */
@@ -461,6 +512,13 @@ QToolTip {
     border: 1px solid @BORDER@;
     padding: 4px 8px;
     font-size: 11px;
+}
+
+/* ── Ladder header (chart+orderflow) ───────────────────────────── */
+QWidget#ladder-header {
+    background: @BG_PANEL@;
+    border-top: 1px solid @BORDER_FAINT@;
+    border-bottom: 1px solid @BORDER_FAINT@;
 }
 
 /* ── Delta stats strip (chart+orderflow) ───────────────────────── */

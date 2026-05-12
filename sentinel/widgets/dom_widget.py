@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -23,7 +24,8 @@ _DEFAULT_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "BTC/USDT", "ETH/USDT"]
 _DEFAULT_EXCHANGES = ["coinbase", "binance", "kraken"]
 
 from sentinel.analysis.orderbook_processor import OrderBookProcessor
-from sentinel.app.theme import Colors
+from sentinel.app.theme import Colors, Spacing
+from sentinel.app.widgets import EmptyState
 from sentinel.core.signals import Signals
 
 
@@ -95,14 +97,14 @@ class DomDockWidget(QDockWidget):
 
         body = QWidget()
         root = QVBoxLayout(body)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(4)
+        root.setContentsMargins(Spacing.L, Spacing.M, Spacing.L, Spacing.M)
+        root.setSpacing(Spacing.S)
 
         root.addWidget(_section_header("Market"))
 
         # Symbol / exchange selector row
         sym_row = QHBoxLayout()
-        sym_row.setSpacing(6)
+        sym_row.setSpacing(Spacing.M)
         self.exchange_combo = QComboBox()
         self.exchange_combo.setToolTip("Exchange")
         self.exchange_combo.addItems(_DEFAULT_EXCHANGES)
@@ -123,7 +125,7 @@ class DomDockWidget(QDockWidget):
         root.addWidget(_section_header("Aggregation"))
 
         controls = QHBoxLayout()
-        controls.setSpacing(6)
+        controls.setSpacing(Spacing.M)
         tick_lbl = QLabel("Tick")
         tick_lbl.setProperty("role", "caption")
         controls.addWidget(tick_lbl)
@@ -160,7 +162,16 @@ class DomDockWidget(QDockWidget):
         self.table.setFont(_MONO_FONT)
         self.table.verticalHeader().setDefaultSectionSize(22)
         self.table.setShowGrid(False)
-        root.addWidget(self.table, 1)
+
+        self._empty_state = EmptyState(
+            "WAITING FOR ORDERBOOK",
+            f"{exchange.upper()}  {symbol}",
+        )
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._empty_state)
+        self._stack.addWidget(self.table)
+        self._stack.setCurrentWidget(self._empty_state)
+        root.addWidget(self._stack, 1)
 
         self.setWidget(body)
         self.setMinimumWidth(300)
@@ -186,6 +197,8 @@ class DomDockWidget(QDockWidget):
         self._cell_cache.clear()
         self.spread_label.setText("Spread —")
         self.setWindowTitle(f"DOM · {exchange.upper()}  {symbol}")
+        self._empty_state.set_hint(f"{exchange.upper()}  {symbol}")
+        self._stack.setCurrentWidget(self._empty_state)
         self._subscribe()
 
     def export_definition(self) -> dict[str, Any]:
@@ -302,6 +315,9 @@ class DomDockWidget(QDockWidget):
         )
         if not processed:
             return
+
+        if self._stack.currentWidget() is not self.table:
+            self._stack.setCurrentWidget(self.table)
 
         rows = processed["rows"]
         for row_index, row in enumerate(rows):

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -22,7 +23,8 @@ _DEFAULT_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "BTC/USDT", "ETH/USDT"]
 _DEFAULT_EXCHANGES = ["coinbase", "binance", "kraken"]
 
 from sentinel.analysis.orderbook_processor import OrderBookProcessor
-from sentinel.app.theme import Colors, pg_label_css
+from sentinel.app.theme import Colors, Spacing, pg_label_css
+from sentinel.app.widgets import EmptyState
 from sentinel.core.signals import Signals
 
 
@@ -100,14 +102,14 @@ class OrderbookDockWidget(QDockWidget):
 
         body = QWidget()
         root = QVBoxLayout(body)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(4)
+        root.setContentsMargins(Spacing.L, Spacing.M, Spacing.L, Spacing.M)
+        root.setSpacing(Spacing.S)
 
         root.addWidget(_section_header("Market"))
 
         # Symbol / exchange selector
         sym_row = QHBoxLayout()
-        sym_row.setSpacing(6)
+        sym_row.setSpacing(Spacing.M)
         self.exchange_combo = QComboBox()
         self.exchange_combo.setToolTip("Exchange")
         self.exchange_combo.addItems(_DEFAULT_EXCHANGES)
@@ -128,7 +130,7 @@ class OrderbookDockWidget(QDockWidget):
         root.addWidget(_section_header("View"))
 
         top_row = QHBoxLayout()
-        top_row.setSpacing(6)
+        top_row.setSpacing(Spacing.M)
         self.agg_checkbox = QCheckBox("Aggregate")
         self.agg_checkbox.setToolTip("Aggregate levels onto the current tick size")
         self.agg_checkbox.setChecked(self.processor.aggregation_enabled)
@@ -163,7 +165,7 @@ class OrderbookDockWidget(QDockWidget):
         root.addLayout(top_row)
 
         stats_row = QHBoxLayout()
-        stats_row.setSpacing(12)
+        stats_row.setSpacing(Spacing.XL)
         self.ratio_label = QLabel("Bid/Ask 1.00")
         self.best_bid_label = QLabel("Bid —")
         self.best_ask_label = QLabel("Ask —")
@@ -184,7 +186,16 @@ class OrderbookDockWidget(QDockWidget):
         self.plot.showGrid(x=True, y=True, alpha=Colors.GRID_ALPHA)
         self.plot.addLegend(offset=(10, 10))
         _style_pg_plot(self.plot)
-        root.addWidget(self.plot, 1)
+
+        self._empty_state = EmptyState(
+            "WAITING FOR ORDERBOOK",
+            f"{exchange.upper()}  {symbol}",
+        )
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._empty_state)
+        self._stack.addWidget(self.plot)
+        self._stack.setCurrentWidget(self._empty_state)
+        root.addWidget(self._stack, 1)
 
         self.bids_line = self.plot.plot([], [], pen=pg.mkPen((40, 210, 120), width=2), name="Bids")
         self.asks_line = self.plot.plot([], [], pen=pg.mkPen((220, 80, 90), width=2), name="Asks")
@@ -229,6 +240,8 @@ class OrderbookDockWidget(QDockWidget):
         self.spread_label.setText("Spread —")
         self.ratio_label.setText("Bid/Ask 1.00")
         self.setWindowTitle(f"Orderbook · {exchange.upper()}  {symbol}")
+        self._empty_state.set_hint(f"{exchange.upper()}  {symbol}")
+        self._stack.setCurrentWidget(self._empty_state)
         self._subscribe()
 
     def _on_combo_changed(self, _value: str) -> None:
@@ -342,6 +355,9 @@ class OrderbookDockWidget(QDockWidget):
         processed = self.processor.process_orderbook(raw_bids, raw_asks, current_price)
         if not processed:
             return
+
+        if self._stack.currentWidget() is not self.plot:
+            self._stack.setCurrentWidget(self.plot)
 
         bids = processed["bids_processed"]
         asks = processed["asks_processed"]

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
 from sentinel.analysis.cvd_processor import CandleCVDProcessor
 from sentinel.app.theme import Colors, pg_label_css, qcolor
+from sentinel.app.widgets import EmptyState, LiveBadge
 from sentinel.core.signals import Signals
 
 
@@ -67,6 +68,15 @@ _VPVR_VAL_BRUSH = QBrush(QColor(80, 130, 200, 55))    # volume-at-level colour
 _VPVR_VAL_PEN = QPen(QColor(80, 130, 200, 80))
 _VPVR_POC_BRUSH = QBrush(QColor(255, 186, 0, 120))    # point-of-control highlight
 _VPVR_POC_PEN = QPen(QColor(255, 186, 0, 200))
+
+
+def _set_direction(label: QLabel, direction: str) -> None:
+    """Apply a `direction` dynamic property and re-polish so QSS reapplies."""
+    if label.property("direction") == direction:
+        return
+    label.setProperty("direction", direction)
+    label.style().unpolish(label)
+    label.style().polish(label)
 
 
 def _style_pg_plot(plot: pg.PlotWidget) -> None:
@@ -373,18 +383,31 @@ class ChartPane(QWidget):
         mono.setStyleHint(QFont.StyleHint.Monospace)
         mono.setPointSize(9)
         self._ohlcv_label = QLabel("", self)
+        self._ohlcv_label.setObjectName("ohlcv-label")
         self._ohlcv_label.setFont(mono)
-        self._ohlcv_label.setStyleSheet(
-            f"color: {Colors.TEXT_DIM}; background: transparent; padding: 2px 8px;"
-        )
         self._ohlcv_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._ohlcv_label.move(8, 4)
         self._ohlcv_label.hide()
 
         self._price_pill = QLabel("", self)
+        self._price_pill.setObjectName("price-pill")
         self._price_pill.setFont(mono)
         self._price_pill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._price_pill.hide()
+
+        # Empty state covers the price plot until the first candle arrives.
+        self._empty_state = EmptyState(
+            "WAITING FOR MARKET FEED",
+            f"{self.exchange.upper()}  {self.symbol}  ·  {self.timeframe}",
+            parent=self,
+        )
+        self._empty_state.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._empty_state.show()
+
+        # Bottom-left feed freshness badge.
+        self._live_badge = LiveBadge(parent=self)
+        self._live_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._live_badge.hide()
 
         self._mouse_proxy = pg.SignalProxy(
             self.price_plot.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_moved
@@ -409,6 +432,9 @@ class ChartPane(QWidget):
         self.timeframe = timeframe
         self._cvd_processor.set_timeframe(timeframe)
         self.clear_data()
+        self._empty_state.set_hint(
+            f"{exchange.upper()}  {symbol}  ·  {timeframe}"
+        )
         self._subscribe()
         LOGGER.debug("Chart pane resubscribed: %s/%s/%s", exchange, symbol, timeframe)
 
@@ -454,6 +480,12 @@ class ChartPane(QWidget):
         self._ohlcv_label.hide()
         self._v_line.hide()
         self._h_line.hide()
+        self._empty_state.set_hint(
+            f"{self.exchange.upper()}  {self.symbol}  ·  {self.timeframe}"
+        )
+        self._empty_state.show()
+        self._empty_state.raise_()
+        self._live_badge.hide()
 
     def load_from_arrays(
         self,
@@ -592,6 +624,12 @@ class ChartPane(QWidget):
         self._update_price_line()
         self._fit_initial_view()
         self._did_initial_fit = True
+
+        # Equity bypasses the dirty/render loop so dismiss the empty
+        # state here. Live badge stays hidden since equity is request-
+        # based, not streaming.
+        if self._empty_state.isVisible():
+            self._empty_state.hide()
 
     def set_chart_mode(self, mode: str) -> None:
         normalized = (mode or "").strip().lower()
@@ -747,6 +785,7 @@ class ChartPane(QWidget):
         if exchange != self.exchange or symbol != self.symbol or timeframe != self.timeframe:
             return
         self._replace_from_dataframe(candles)
+        self._live_badge.mark_update()
 
     def _on_updated_candles(self, exchange: str, symbol: str, timeframe: str, candles: pd.DataFrame):
         if exchange != self.exchange or symbol != self.symbol or timeframe != self.timeframe:
@@ -754,12 +793,14 @@ class ChartPane(QWidget):
         if candles is None or candles.empty:
             return
         self._merge_update(candles)
+        self._live_badge.mark_update()
 
     def _on_new_trade(self, exchange: str, trade_data: dict) -> None:
         if exchange != self.exchange or trade_data.get("symbol") != self.symbol:
             return
         self._trades_cache.append(trade_data)
         self._cvd_processor.add_trade(trade_data)
+        self._live_badge.mark_update()
         if self._show_bubbles or self._show_cvd:
             self._dirty = True
 
@@ -827,6 +868,12 @@ class ChartPane(QWidget):
         if not self._dirty or not self.timestamps:
             return
         self._dirty = False
+
+        if self._empty_state.isVisible():
+            self._empty_state.hide()
+        if not self._live_badge.isVisible():
+            self._reposition_live_badge()
+            self._live_badge.show()
 
         x = self.timestamps
         candle_width = self._infer_candle_width_seconds()
@@ -1082,13 +1129,22 @@ class ChartPane(QWidget):
             self._price_pill.hide()
             return
         self._price_pill.setText(_fmt_price(price))
-        self._price_pill.setStyleSheet(
-            f"color: #ffffff; background: {hex_color}; "
-            f"padding: 2px 6px; border: 1px solid {Colors.BG_CANVAS};"
-        )
+        direction = "up" if hex_color == _UP_HEX else "down"
+        _set_direction(self._price_pill, direction)
         self._price_pill.adjustSize()
         self._reposition_price_pill()
         self._price_pill.show()
+
+    def _reposition_live_badge(self) -> None:
+        self._live_badge.adjustSize()
+        margin = 8
+        x = margin
+        y = self.height() - self._live_badge.height() - margin
+        self._live_badge.move(max(margin, x), max(margin, y))
+
+    def _resize_empty_state(self) -> None:
+        if self._empty_state.isVisible():
+            self._empty_state.resize(self.size())
 
     def _reposition_price_pill(self) -> None:
         if self._price_pill.isHidden():
@@ -1152,7 +1208,7 @@ class ChartPane(QWidget):
             f"O {_fmt_price(o)}  H {_fmt_price(h)}  L {_fmt_price(l)}  C {_fmt_price(c)}  "
             f"{sign}{_fmt_price(delta)} ({pct:+.2f}%)  Vol: {_fmt_vol(v)}"
         )
-        self._ohlcv_label.setStyleSheet(f"color: {color}; background: transparent; padding: 2px 8px;")
+        _set_direction(self._ohlcv_label, "up" if c >= o else "down")
         self._ohlcv_label.adjustSize()
         self._ohlcv_label.show()
 
@@ -1189,6 +1245,7 @@ class ChartPane(QWidget):
 
     def shutdown(self) -> None:
         self._render_timer.stop()
+        self._live_badge.shutdown()
         self._unsubscribe()
         self._unregister_handlers()
 
@@ -1199,6 +1256,8 @@ class ChartPane(QWidget):
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         self._reposition_price_pill()
+        self._reposition_live_badge()
+        self._resize_empty_state()
 
 
 def _timeframe_to_seconds(value: str) -> int:
