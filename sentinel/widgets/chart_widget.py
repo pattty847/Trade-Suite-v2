@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QDockWidget, QVBoxLayout, QWidget
 
 from sentinel.widgets.chart_toolbar import ChartToolbar
@@ -9,6 +10,8 @@ from sentinel.widgets.chart_pane import ChartPane
 
 
 class ChartDockWidget(QDockWidget):
+    closed = Signal()
+
     def __init__(
         self,
         *,
@@ -22,6 +25,8 @@ class ChartDockWidget(QDockWidget):
         show_ema: bool = False,
         chart_mode: str = "candles",
         show_bubbles: bool = False,
+        show_cvd: bool = False,
+        show_vpvr: bool = False,
     ) -> None:
         super().__init__(f"Chart - {exchange.upper()} {symbol} ({timeframe})")
         self.instance_id = instance_id
@@ -43,6 +48,8 @@ class ChartDockWidget(QDockWidget):
         )
         self.chart_pane.set_chart_mode(chart_mode)
         self.chart_pane.set_bubbles_enabled(show_bubbles)
+        self.chart_pane.set_cvd_enabled(show_cvd)
+        self.chart_pane.set_vpvr_enabled(show_vpvr)
 
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -54,11 +61,17 @@ class ChartDockWidget(QDockWidget):
             timeframe=timeframe,
             mode=chart_mode,
             bubbles_enabled=show_bubbles,
+            ema_enabled=show_ema,
+            cvd_enabled=show_cvd,
+            vpvr_enabled=show_vpvr,
         )
         self.toolbar.symbol_changed.connect(self._on_symbol_changed)
         self.toolbar.timeframe_changed.connect(self._on_timeframe_changed)
         self.toolbar.mode_changed.connect(self._on_mode_changed)
         self.toolbar.bubbles_changed.connect(self._on_bubbles_changed)
+        self.toolbar.ema_changed.connect(self._on_ema_changed)
+        self.toolbar.cvd_changed.connect(self._on_cvd_changed)
+        self.toolbar.vpvr_changed.connect(self._on_vpvr_changed)
 
         layout.addWidget(self.toolbar)
         layout.addWidget(self.chart_pane, 1)
@@ -92,6 +105,14 @@ class ChartDockWidget(QDockWidget):
     def show_bubbles(self) -> bool:
         return self.chart_pane.bubbles_enabled()
 
+    @property
+    def show_cvd(self) -> bool:
+        return self.chart_pane.cvd_enabled()
+
+    @property
+    def show_vpvr(self) -> bool:
+        return self.chart_pane.vpvr_enabled()
+
     def export_definition(self) -> dict[str, Any]:
         return {
             "instance_id": self.instance_id,
@@ -104,6 +125,8 @@ class ChartDockWidget(QDockWidget):
                 "show_ema": self.show_ema,
                 "chart_mode": self.chart_mode,
                 "show_bubbles": self.show_bubbles,
+                "show_cvd": self.show_cvd,
+                "show_vpvr": self.show_vpvr,
             },
         }
 
@@ -128,6 +151,16 @@ class ChartDockWidget(QDockWidget):
     def _on_bubbles_changed(self, enabled: bool) -> None:
         self.chart_pane.set_bubbles_enabled(enabled)
 
+    def _on_ema_changed(self, enabled: bool) -> None:
+        self.chart_pane.set_ema_enabled(enabled)
+
+    def _on_cvd_changed(self, enabled: bool) -> None:
+        self.chart_pane.set_cvd_enabled(enabled)
+
+    def _on_vpvr_changed(self, enabled: bool) -> None:
+        self.chart_pane.set_vpvr_enabled(enabled)
+
     def closeEvent(self, event):  # noqa: N802
+        self.closed.emit()
         self.chart_pane.shutdown()
         super().closeEvent(event)

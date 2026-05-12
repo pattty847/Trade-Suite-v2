@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow
 from sentinel.widgets.chart_widget import ChartDockWidget
 from sentinel.widgets.chart_orderflow_widget import ChartOrderflowDockWidget
 from sentinel.widgets.dom_widget import DomDockWidget
+from sentinel.widgets.equity_chart_widget import EquityChartDockWidget
 from sentinel.widgets.orderbook_widget import OrderbookDockWidget
 
 
@@ -47,10 +48,15 @@ class WidgetRegistry:
 
     def clear(self) -> None:
         for dock in list(self.docks.values()):
+            # Disconnect our closed handler first to avoid re-entrant remove() calls.
+            try:
+                dock.closed.disconnect()
+            except Exception as exc:
+                LOGGER.debug("clear: disconnect closed signal failed: %s", exc)
             try:
                 dock.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                LOGGER.debug("clear: dock.close() failed: %s", exc)
             self.window.removeDockWidget(dock)
             dock.deleteLater()
         self.docks.clear()
@@ -100,6 +106,9 @@ class WidgetRegistry:
         timeframe: str = "1m",
         chart_mode: str = "candles",
         show_bubbles: bool = False,
+        show_ema: bool = False,
+        show_cvd: bool = False,
+        show_vpvr: bool = False,
         area: Qt.DockWidgetArea = Qt.DockWidgetArea.LeftDockWidgetArea,
     ) -> str:
         if instance_id is None:
@@ -115,7 +124,11 @@ class WidgetRegistry:
             timeframe=timeframe,
             chart_mode=chart_mode,
             show_bubbles=show_bubbles,
+            show_ema=show_ema,
+            show_cvd=show_cvd,
+            show_vpvr=show_vpvr,
         )
+        dock.closed.connect(lambda: self.remove(instance_id))
         self.window.addDockWidget(area, dock)
         self.docks[instance_id] = dock
         return instance_id
@@ -131,6 +144,10 @@ class WidgetRegistry:
         tick_size: float = 0.01,
         chart_mode: str = "candles",
         show_bubbles: bool = False,
+        show_ema: bool = False,
+        show_ob: bool = True,
+        show_cvd: bool = False,
+        show_vpvr: bool = False,
         area: Qt.DockWidgetArea = Qt.DockWidgetArea.LeftDockWidgetArea,
     ) -> str:
         if instance_id is None:
@@ -148,7 +165,12 @@ class WidgetRegistry:
             initial_tick_size=tick_size,
             chart_mode=chart_mode,
             show_bubbles=show_bubbles,
+            show_ema=show_ema,
+            show_ob=show_ob,
+            show_cvd=show_cvd,
+            show_vpvr=show_vpvr,
         )
+        dock.closed.connect(lambda: self.remove(instance_id))
         self.window.addDockWidget(area, dock)
         self.docks[instance_id] = dock
         return instance_id
@@ -172,6 +194,7 @@ class WidgetRegistry:
             exchange=exchange,
             symbol=symbol,
         )
+        dock.closed.connect(lambda: self.remove(instance_id))
         self.window.addDockWidget(area, dock)
         self.docks[instance_id] = dock
         return instance_id
@@ -197,6 +220,34 @@ class WidgetRegistry:
             symbol=symbol,
             levels=levels,
         )
+        dock.closed.connect(lambda: self.remove(instance_id))
+        self.window.addDockWidget(area, dock)
+        self.docks[instance_id] = dock
+        return instance_id
+
+    def add_equity_chart(
+        self,
+        *,
+        instance_id: str | None = None,
+        symbol: str = "AAPL",
+        timeframe: str = "1d",
+        days: str = "30d",
+        chart_mode: str = "candles",
+        area: Qt.DockWidgetArea = Qt.DockWidgetArea.LeftDockWidgetArea,
+    ) -> str:
+        if instance_id is None:
+            instance_id = f"equity_{uuid4().hex[:8]}"
+        if instance_id in self.docks:
+            return instance_id
+
+        dock = EquityChartDockWidget(
+            instance_id=instance_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            days=days,
+            chart_mode=chart_mode,
+        )
+        dock.closed.connect(lambda: self.remove(instance_id))
         self.window.addDockWidget(area, dock)
         self.docks[instance_id] = dock
         return instance_id
@@ -228,6 +279,9 @@ class WidgetRegistry:
                     timeframe=str(config.get("timeframe", "1m")),
                     chart_mode=str(config.get("chart_mode", "candles")),
                     show_bubbles=bool(config.get("show_bubbles", False)),
+                    show_ema=bool(config.get("show_ema", False)),
+                    show_cvd=bool(config.get("show_cvd", False)),
+                    show_vpvr=bool(config.get("show_vpvr", False)),
                 )
                 continue
             if widget_type == "chart_orderflow":
@@ -240,6 +294,10 @@ class WidgetRegistry:
                     tick_size=float(config.get("tick_size", 0.01)),
                     chart_mode=str(config.get("chart_mode", "candles")),
                     show_bubbles=bool(config.get("show_bubbles", False)),
+                    show_ema=bool(config.get("show_ema", False)),
+                    show_ob=bool(config.get("show_ob", True)),
+                    show_cvd=bool(config.get("show_cvd", False)),
+                    show_vpvr=bool(config.get("show_vpvr", False)),
                 )
                 continue
             if widget_type == "orderbook":
@@ -255,6 +313,15 @@ class WidgetRegistry:
                     exchange=str(config.get("exchange", "coinbase")),
                     symbol=str(config.get("symbol", "BTC/USD")),
                     levels=int(config.get("levels", 16)),
+                )
+                continue
+            if widget_type == "equity_chart":
+                self.add_equity_chart(
+                    instance_id=instance_id,
+                    symbol=str(config.get("symbol", "AAPL")),
+                    timeframe=str(config.get("timeframe", "1d")),
+                    days=str(config.get("days", "30d")),
+                    chart_mode=str(config.get("chart_mode", "candles")),
                 )
                 continue
 

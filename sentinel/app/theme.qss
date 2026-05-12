@@ -65,27 +65,41 @@ QToolButton:checked, QToolButton:pressed {
 }
 
 /* ── Dock widgets ───────────────────────────────────────────────── */
+QSplitter::handle {
+    background: #1a2535;
+}
+QSplitter::handle:vertical {
+    height: 2px;
+}
+QSplitter::handle:hover {
+    background: #2a4060;
+}
+
 QDockWidget {
     color: #7a99be;
     font-size: 11px;
-    titlebar-close-icon: none;
-    titlebar-normal-icon: none;
 }
 QDockWidget::title {
     background: #0e1520;
     color: #7a99be;
-    padding: 3px 8px;
+    padding: 4px 8px;
+    min-height: 22px;
     border-bottom: 1px solid #1a2535;
     text-align: left;
 }
 QDockWidget::close-button, QDockWidget::float-button {
     background: transparent;
     border: 1px solid transparent;
-    padding: 1px;
-    icon-size: 10px;
+    padding: 2px;
+    icon-size: 12px;
     subcontrol-position: top right;
+    subcontrol-origin: margin;
 }
-QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+QDockWidget::close-button:hover {
+    background: #3a1a1a;
+    border: 1px solid #5a2a2a;
+}
+QDockWidget::float-button:hover {
     background: #1e2e45;
     border: 1px solid #2a3e5a;
 }
@@ -234,3 +248,79 @@ QSplitter::handle { background: #151f2e; }
 QSplitter::handle:vertical { height: 3px; }
 QSplitter::handle:horizontal { width: 3px; }
 QSplitter::handle:hover { background: #2a4060; }
+
+/* ── Chart inline toolbar ────────────────────────────────────────── */
+QWidget#chart-toolbar {
+    background: #0d131b;
+    border-bottom: 1px solid #192536;
+    min-height: 34px;
+    max-height: 38px;
+}
+
+/* Combos inside the chart toolbar: tighter than the global style */
+QWidget#chart-toolbar QComboBox {
+    min-width: 58px;
+    padding: 2px 6px;
+    font-size: 11px;
+}
+
+/* Checkboxes inside chart toolbar rendered as compact text toggles */
+QWidget#chart-toolbar QCheckBox {
+    color: #546d8a;
+    spacing: 4px;
+    font-size: 11px;
+    padding: 1px 5px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+}
+QWidget#chart-toolbar QCheckBox:hover {
+    color: #8fa4c2;
+    border: 1px solid #253446;
+    background: #111924;
+}
+QWidget#chart-toolbar QCheckBox:checked {
+    color: #8fb3ff;
+    background: #0f1e36;
+    border: 1px solid #2d4e7a;
+}
+QWidget#chart-toolbar QCheckBox::indicator {
+    width: 0px;
+    height: 0px;
+}
+
+/* Context / info labels inside the chart toolbar */
+QWidget#chart-toolbar QLabel {
+    color: #3f5a76;
+    font-size: 11px;
+}
+
+/* ── Input fields ────────────────────────────────────────────────── */
+QLineEdit {
+    background: #111924;
+    color: #d0d8e4;
+    border: 1px solid #253446;
+    border-radius: 2px;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+QLineEdit:focus { border: 1px solid #3a5878; }
+QLineEdit:hover { border: 1px solid #2a4060; }
+
+/* ── Spin / numeric inputs ───────────────────────────────────────── */
+QSpinBox, QDoubleSpinBox {
+    background: #111924;
+    color: #d0d8e4;
+    border: 1px solid #253446;
+    padding: 2px 4px;
+    font-size: 12px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #3a5878; }
+
+/* ── Tooltips ────────────────────────────────────────────────────── */
+QToolTip {
+    background: #0f1620;
+    color: #b8c8d8;
+    border: 1px solid #273142;
+    padding: 4px 8px;
+    font-size: 11px;
+}

@@ -15,6 +15,10 @@ class ChartToolbar(QWidget):
     timeframe_changed = Signal(str)
     mode_changed = Signal(str)
     bubbles_changed = Signal(bool)
+    ema_changed = Signal(bool)
+    cvd_changed = Signal(bool)
+    vpvr_changed = Signal(bool)
+    ob_changed = Signal(bool)
 
     def __init__(
         self,
@@ -23,6 +27,10 @@ class ChartToolbar(QWidget):
         timeframe: str,
         mode: str,
         bubbles_enabled: bool,
+        ema_enabled: bool = False,
+        cvd_enabled: bool = False,
+        vpvr_enabled: bool = False,
+        ob_enabled: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -33,9 +41,14 @@ class ChartToolbar(QWidget):
         layout.setSpacing(8)
 
         self.symbol_combo = QComboBox()
+        self.symbol_combo.setEditable(True)
+        self.symbol_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.symbol_combo.addItems(DEFAULT_SYMBOLS)
         self._set_combo_value(self.symbol_combo, symbol)
         self.symbol_combo.currentTextChanged.connect(self.symbol_changed.emit)
+        self.symbol_combo.lineEdit().returnPressed.connect(
+            lambda: self.symbol_changed.emit(self.symbol_combo.currentText().strip().upper())
+        )
         layout.addWidget(self.symbol_combo)
 
         self.timeframe_combo = QComboBox()
@@ -58,6 +71,26 @@ class ChartToolbar(QWidget):
         self.bubbles_check.setChecked(bubbles_enabled)
         self.bubbles_check.toggled.connect(self.bubbles_changed.emit)
         layout.addWidget(self.bubbles_check)
+
+        self.ema_check = QCheckBox("EMA")
+        self.ema_check.setChecked(ema_enabled)
+        self.ema_check.toggled.connect(self.ema_changed.emit)
+        layout.addWidget(self.ema_check)
+
+        self.cvd_check = QCheckBox("CVD")
+        self.cvd_check.setChecked(cvd_enabled)
+        self.cvd_check.toggled.connect(self.cvd_changed.emit)
+        layout.addWidget(self.cvd_check)
+
+        self.vpvr_check = QCheckBox("VPVR")
+        self.vpvr_check.setChecked(vpvr_enabled)
+        self.vpvr_check.toggled.connect(self.vpvr_changed.emit)
+        layout.addWidget(self.vpvr_check)
+
+        self.ob_check = QCheckBox("OB")
+        self.ob_check.setChecked(ob_enabled)
+        self.ob_check.toggled.connect(self.ob_changed.emit)
+        layout.addWidget(self.ob_check)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -83,6 +116,12 @@ class ChartToolbar(QWidget):
     def bubbles_enabled(self) -> bool:
         return self.bubbles_check.isChecked()
 
+    def ema_enabled(self) -> bool:
+        return self.ema_check.isChecked()
+
+    def set_ema_enabled(self, enabled: bool) -> None:
+        self.ema_check.setChecked(enabled)
+
     def set_symbol(self, value: str) -> None:
         self._set_combo_value(self.symbol_combo, value)
         self._update_context_label()
@@ -96,6 +135,24 @@ class ChartToolbar(QWidget):
 
     def set_bubbles_enabled(self, enabled: bool) -> None:
         self.bubbles_check.setChecked(enabled)
+
+    def cvd_enabled(self) -> bool:
+        return self.cvd_check.isChecked()
+
+    def set_cvd_enabled(self, enabled: bool) -> None:
+        self.cvd_check.setChecked(enabled)
+
+    def vpvr_enabled(self) -> bool:
+        return self.vpvr_check.isChecked()
+
+    def set_vpvr_enabled(self, enabled: bool) -> None:
+        self.vpvr_check.setChecked(enabled)
+
+    def ob_enabled(self) -> bool:
+        return self.ob_check.isChecked()
+
+    def set_ob_enabled(self, enabled: bool) -> None:
+        self.ob_check.setChecked(enabled)
 
     def _update_context_label(self) -> None:
         self.context_label.setText(f"{self.symbol()} · {self.timeframe()}")

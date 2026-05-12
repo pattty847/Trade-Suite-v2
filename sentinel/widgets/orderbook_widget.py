@@ -4,10 +4,11 @@ import logging
 from typing import Any
 
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDockWidget,
     QHBoxLayout,
     QLabel,
@@ -16,6 +17,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+_DEFAULT_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "BTC/USDT", "ETH/USDT"]
+_DEFAULT_EXCHANGES = ["coinbase", "binance", "kraken"]
 
 from sentinel.analysis.orderbook_processor import OrderBookProcessor
 from sentinel.core.signals import Signals
@@ -46,6 +50,8 @@ def _style_pg_plot(plot: pg.PlotWidget) -> None:
 
 
 class OrderbookDockWidget(QDockWidget):
+    closed = Signal()
+
     def __init__(
         self,
         *,
@@ -80,6 +86,25 @@ class OrderbookDockWidget(QDockWidget):
         body = QWidget()
         root = QVBoxLayout(body)
         root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(4)
+
+        # Symbol / exchange selector
+        sym_row = QHBoxLayout()
+        sym_row.setSpacing(6)
+        self.exchange_combo = QComboBox()
+        self.exchange_combo.addItems(_DEFAULT_EXCHANGES)
+        self._set_combo(self.exchange_combo, exchange)
+        self.exchange_combo.setFixedHeight(24)
+        self.symbol_combo = QComboBox()
+        self.symbol_combo.addItems(_DEFAULT_SYMBOLS)
+        self._set_combo(self.symbol_combo, symbol)
+        self.symbol_combo.setFixedHeight(24)
+        sym_row.addWidget(self.exchange_combo)
+        sym_row.addWidget(self.symbol_combo, 1)
+        root.addLayout(sym_row)
+
+        self.exchange_combo.currentTextChanged.connect(self._on_combo_changed)
+        self.symbol_combo.currentTextChanged.connect(self._on_combo_changed)
 
         top_row = QHBoxLayout()
         self.agg_checkbox = QCheckBox("Aggregate")
@@ -156,6 +181,40 @@ class OrderbookDockWidget(QDockWidget):
             },
         }
 
+    def change_subscription(self, exchange: str, symbol: str) -> None:
+        """Switch to a different exchange/symbol without recreating the widget."""
+        if exchange == self.exchange and symbol == self.symbol:
+            return
+        self._unsubscribe()
+        self.exchange = exchange
+        self.symbol = symbol
+        self.last_orderbook = None
+        self._dirty = False
+        self._bids_bars = None
+        self._asks_bars = None
+        self.bids_line.setData([], [])
+        self.asks_line.setData([], [])
+        self.best_bid_label.setText("Bid: -")
+        self.best_ask_label.setText("Ask: -")
+        self.spread_label.setText("Spread: -")
+        self.ratio_label.setText("Bid/Ask: 1.00")
+        self.setWindowTitle(f"Orderbook - {exchange.upper()} {symbol}")
+        self._subscribe()
+
+    def _on_combo_changed(self, _value: str) -> None:
+        self.change_subscription(
+            self.exchange_combo.currentText(),
+            self.symbol_combo.currentText(),
+        )
+
+    @staticmethod
+    def _set_combo(combo: QComboBox, value: str) -> None:
+        idx = combo.findText(value)
+        if idx < 0:
+            combo.addItem(value)
+            idx = combo.findText(value)
+        combo.setCurrentIndex(idx)
+
     def set_runtime(self, runtime) -> None:
         self.runtime = runtime
         if runtime is None or runtime.core is None:
@@ -176,8 +235,8 @@ class OrderbookDockWidget(QDockWidget):
         emitter = self.runtime.core.emitter
         try:
             emitter.unregister(Signals.ORDER_BOOK_UPDATE, self._on_order_book_update)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("Orderbook unregister handler failed: %s", exc)
         self._handlers_registered = False
 
     def _subscribe(self) -> None:
@@ -314,6 +373,7 @@ class OrderbookDockWidget(QDockWidget):
             self._asks_bars = None
 
     def closeEvent(self, event):  # noqa: N802
+        self.closed.emit()
         self._render_timer.stop()
         self._unsubscribe()
         self._unregister_handlers()

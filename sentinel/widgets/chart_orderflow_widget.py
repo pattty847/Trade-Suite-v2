@@ -4,7 +4,7 @@ import logging
 import math
 from typing import Any
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -634,7 +634,120 @@ class OrderflowLadderPane(QWidget):
         }
 
 
+_STATS_FONT = QFont()
+_STATS_FONT.setStyleHint(QFont.StyleHint.Monospace)
+_STATS_FONT.setPointSize(9)
+
+_STATS_LABEL_CSS = "color: #6a85a8; font-size: 10px;"
+_STATS_BUY_CSS = "color: #26a69a; font-size: 11px; font-weight: bold;"
+_STATS_SELL_CSS = "color: #ef5350; font-size: 11px; font-weight: bold;"
+_STATS_NEUT_CSS = "color: #b0c4d8; font-size: 11px;"
+
+
+class DeltaStatsPanel(QWidget):
+    """Compact CVD / delta stats strip shown below the OB ladder when CVD is active."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("delta-stats-panel")
+        self.setFixedHeight(74)
+        self.setStyleSheet("QWidget#delta-stats-panel { background: #070d14; border-top: 1px solid #162231; }")
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 4, 8, 4)
+        outer.setSpacing(2)
+
+        # Row 1: bar delta + session CVD
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        self._bar_lbl = QLabel("Bar Δ")
+        self._bar_lbl.setStyleSheet(_STATS_LABEL_CSS)
+        self._bar_val = QLabel("—")
+        self._bar_val.setStyleSheet(_STATS_NEUT_CSS)
+        self._bar_val.setFont(_STATS_FONT)
+        self._session_lbl = QLabel("Session CVD")
+        self._session_lbl.setStyleSheet(_STATS_LABEL_CSS)
+        self._session_val = QLabel("—")
+        self._session_val.setStyleSheet(_STATS_NEUT_CSS)
+        self._session_val.setFont(_STATS_FONT)
+        row1.addWidget(self._bar_lbl)
+        row1.addWidget(self._bar_val)
+        row1.addStretch(1)
+        row1.addWidget(self._session_lbl)
+        row1.addWidget(self._session_val)
+        outer.addLayout(row1)
+
+        # Row 2: buy vol + sell vol + ratio bar
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        self._buy_lbl = QLabel("Buy")
+        self._buy_lbl.setStyleSheet(_STATS_LABEL_CSS)
+        self._buy_val = QLabel("—")
+        self._buy_val.setStyleSheet(_STATS_BUY_CSS)
+        self._buy_val.setFont(_STATS_FONT)
+        self._sell_lbl = QLabel("Sell")
+        self._sell_lbl.setStyleSheet(_STATS_LABEL_CSS)
+        self._sell_val = QLabel("—")
+        self._sell_val.setStyleSheet(_STATS_SELL_CSS)
+        self._sell_val.setFont(_STATS_FONT)
+        row2.addWidget(self._buy_lbl)
+        row2.addWidget(self._buy_val)
+        row2.addStretch(1)
+        row2.addWidget(self._sell_lbl)
+        row2.addWidget(self._sell_val)
+        outer.addLayout(row2)
+
+        # Row 3: buy% / sell% ratio bar (drawn as a QLabel with CSS gradient)
+        self._ratio_bar = QLabel()
+        self._ratio_bar.setFixedHeight(6)
+        self._ratio_bar.setStyleSheet("background: #1a2535; border-radius: 2px;")
+        outer.addWidget(self._ratio_bar)
+
+    def update_stats(self, stats: dict) -> None:
+        session_cvd = stats.get("session_cvd")
+        bar_delta = stats.get("bar_delta")
+        total_buy = stats.get("total_buy") or 0.0
+        total_sell = stats.get("total_sell") or 0.0
+
+        # Bar delta
+        if bar_delta is None:
+            self._bar_val.setText("—")
+            self._bar_val.setStyleSheet(_STATS_NEUT_CSS)
+        else:
+            sign = "+" if bar_delta >= 0 else ""
+            self._bar_val.setText(f"{sign}{bar_delta:.4g}")
+            self._bar_val.setStyleSheet(_STATS_BUY_CSS if bar_delta >= 0 else _STATS_SELL_CSS)
+
+        # Session CVD
+        if session_cvd is None:
+            self._session_val.setText("—")
+            self._session_val.setStyleSheet(_STATS_NEUT_CSS)
+        else:
+            sign = "+" if session_cvd >= 0 else ""
+            self._session_val.setText(f"{sign}{session_cvd:.4g}")
+            self._session_val.setStyleSheet(_STATS_BUY_CSS if session_cvd >= 0 else _STATS_SELL_CSS)
+
+        # Buy / sell volumes
+        total = total_buy + total_sell
+        if total > 0:
+            self._buy_val.setText(f"{total_buy:.4g}")
+            self._sell_val.setText(f"{total_sell:.4g}")
+            buy_pct = (total_buy / total) * 100
+            # Gradient: green portion for buy, red for sell
+            self._ratio_bar.setStyleSheet(
+                f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+                f"stop:0 #26a69a, stop:{buy_pct / 100:.3f} #26a69a, "
+                f"stop:{buy_pct / 100:.3f} #ef5350, stop:1 #ef5350); border-radius: 2px;"
+            )
+        else:
+            self._buy_val.setText("—")
+            self._sell_val.setText("—")
+            self._ratio_bar.setStyleSheet("background: #1a2535; border-radius: 2px;")
+
+
 class ChartOrderflowDockWidget(QDockWidget):
+    closed = Signal()
+
     def __init__(
         self,
         *,
@@ -648,8 +761,13 @@ class ChartOrderflowDockWidget(QDockWidget):
         fps: int = 15,
         chart_mode: str = "candles",
         show_bubbles: bool = False,
+        show_ema: bool = False,
+        show_ob: bool = True,
+        show_cvd: bool = False,
+        show_vpvr: bool = False,
     ) -> None:
-        super().__init__(f"Chart+Orderflow - {exchange.upper()} {symbol} ({timeframe})")
+        _title_prefix = "Chart+Orderflow" if show_ob else "Chart"
+        super().__init__(f"{_title_prefix} - {exchange.upper()} {symbol} ({timeframe})")
         self.instance_id = instance_id
         self.exchange = exchange
         self.symbol = symbol
@@ -657,6 +775,7 @@ class ChartOrderflowDockWidget(QDockWidget):
         self.runtime = None
         self._handlers_registered = False
         self._subscribed = False
+        self._show_ob = bool(show_ob)
 
         self.setObjectName(f"dock:{instance_id}")
         self.setFeatures(
@@ -664,17 +783,22 @@ class ChartOrderflowDockWidget(QDockWidget):
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
 
-        splitter = QSplitter(Qt.Horizontal)
+        # The horizontal splitter holds chart_pane (left) and ladder_pane (right).
+        self._h_splitter = QSplitter(Qt.Horizontal)
         self.chart_pane = ChartPane(
             runtime=runtime,
             exchange=exchange,
             symbol=symbol,
             timeframe=timeframe,
             fps=fps,
-            show_price_axis=False,
+            # Price axis visible only when OB ladder is hidden.
+            show_price_axis=not show_ob,
         )
         self.chart_pane.set_chart_mode(chart_mode)
         self.chart_pane.set_bubbles_enabled(show_bubbles)
+        self.chart_pane.set_ema_enabled(show_ema)
+        self.chart_pane.set_cvd_enabled(show_cvd)
+        self.chart_pane.set_vpvr_enabled(show_vpvr)
         self.ladder_pane = OrderflowLadderPane(
             chart_pane=self.chart_pane,
             exchange=exchange,
@@ -683,10 +807,35 @@ class ChartOrderflowDockWidget(QDockWidget):
             initial_tick_size=initial_tick_size,
             fps=fps,
         )
-        splitter.addWidget(self.chart_pane)
-        splitter.addWidget(self.ladder_pane)
-        splitter.setChildrenCollapsible(False)
-        splitter.setSizes([1120, 320])
+        # Right-side container: ladder on top, delta stats strip on bottom.
+        self._right_container = QWidget()
+        _right_layout = QVBoxLayout(self._right_container)
+        _right_layout.setContentsMargins(0, 0, 0, 0)
+        _right_layout.setSpacing(0)
+        _right_layout.addWidget(self.ladder_pane, 1)
+        self.delta_stats = DeltaStatsPanel()
+        self.delta_stats.hide()  # shown only when CVD is active
+        _right_layout.addWidget(self.delta_stats)
+
+        self._h_splitter.addWidget(self.chart_pane)
+        self._h_splitter.addWidget(self._right_container)
+        self._h_splitter.setChildrenCollapsible(False)
+        self._h_splitter.setSizes([1120, 320])
+
+        # Apply initial OB visibility.
+        if not show_ob:
+            self._right_container.hide()
+
+        # Show stats panel if both OB and CVD are on.
+        if show_ob and show_cvd:
+            self.delta_stats.show()
+
+        # Timer to refresh delta stats when CVD is active.
+        self._stats_timer = QTimer(self)
+        self._stats_timer.setInterval(500)
+        self._stats_timer.timeout.connect(self._refresh_delta_stats)
+        if show_ob and show_cvd:
+            self._stats_timer.start()
 
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -698,14 +847,22 @@ class ChartOrderflowDockWidget(QDockWidget):
             timeframe=timeframe,
             mode=chart_mode,
             bubbles_enabled=show_bubbles,
+            ema_enabled=show_ema,
+            cvd_enabled=show_cvd,
+            vpvr_enabled=show_vpvr,
+            ob_enabled=show_ob,
         )
         self.toolbar.symbol_changed.connect(self._on_symbol_changed)
         self.toolbar.timeframe_changed.connect(self._on_timeframe_changed)
         self.toolbar.mode_changed.connect(self._on_mode_changed)
         self.toolbar.bubbles_changed.connect(self._on_bubbles_changed)
+        self.toolbar.ema_changed.connect(self._on_ema_changed)
+        self.toolbar.cvd_changed.connect(self._on_cvd_changed)
+        self.toolbar.vpvr_changed.connect(self._on_vpvr_changed)
+        self.toolbar.ob_changed.connect(self._on_ob_changed)
 
         layout.addWidget(self.toolbar)
-        layout.addWidget(splitter, 1)
+        layout.addWidget(self._h_splitter, 1)
         self.setWidget(body)
 
         self.chart_pane.visible_price_range_changed.connect(self.ladder_pane.set_visible_price_range)
@@ -725,6 +882,10 @@ class ChartOrderflowDockWidget(QDockWidget):
                 "tick_size": self.ladder_pane.tick_size,
                 "chart_mode": self.chart_pane.chart_mode(),
                 "show_bubbles": self.chart_pane.bubbles_enabled(),
+                "show_ema": self.chart_pane.ema_enabled(),
+                "show_ob": self.toolbar.ob_enabled(),
+                "show_cvd": self.chart_pane.cvd_enabled(),
+                "show_vpvr": self.chart_pane.vpvr_enabled(),
             },
         }
 
@@ -734,11 +895,12 @@ class ChartOrderflowDockWidget(QDockWidget):
         if runtime is None or runtime.core is None:
             return
         self._register_handlers()
-        self._subscribe()
-        if self.chart_pane.current_last_price() is not None:
-            self.ladder_pane.set_last_price(self.chart_pane.current_last_price())
-        price_min, price_max = self.chart_pane.visible_price_range()
-        self.ladder_pane.set_visible_price_range(price_min, price_max)
+        if self._show_ob:
+            self._subscribe()
+            if self.chart_pane.current_last_price() is not None:
+                self.ladder_pane.set_last_price(self.chart_pane.current_last_price())
+            price_min, price_max = self.chart_pane.visible_price_range()
+            self.ladder_pane.set_visible_price_range(price_min, price_max)
 
     def change_subscription(self, exchange: str, symbol: str, timeframe: str) -> None:
         if exchange == self.exchange and symbol == self.symbol and timeframe == self.timeframe:
@@ -751,8 +913,14 @@ class ChartOrderflowDockWidget(QDockWidget):
         self.ladder_pane.set_market(exchange, symbol)
         self.toolbar.set_symbol(symbol)
         self.toolbar.set_timeframe(timeframe)
-        self.setWindowTitle(f"Chart+Orderflow - {exchange.upper()} {symbol} ({timeframe})")
-        self._subscribe()
+        self._update_title()
+        if self._show_ob:
+            self._subscribe()
+
+    def _update_title(self) -> None:
+        """Reflect current OB state in the dock title."""
+        prefix = "Chart+Orderflow" if self._show_ob else "Chart"
+        self.setWindowTitle(f"{prefix} - {self.exchange.upper()} {self.symbol} ({self.timeframe})")
 
     def _on_symbol_changed(self, symbol: str) -> None:
         self.change_subscription(self.exchange, symbol, self.timeframe)
@@ -766,6 +934,49 @@ class ChartOrderflowDockWidget(QDockWidget):
     def _on_bubbles_changed(self, enabled: bool) -> None:
         self.chart_pane.set_bubbles_enabled(enabled)
 
+    def _on_ema_changed(self, enabled: bool) -> None:
+        self.chart_pane.set_ema_enabled(enabled)
+
+    def _on_cvd_changed(self, enabled: bool) -> None:
+        self.chart_pane.set_cvd_enabled(enabled)
+        self._update_stats_visibility()
+
+    def _on_vpvr_changed(self, enabled: bool) -> None:
+        self.chart_pane.set_vpvr_enabled(enabled)
+
+    def _on_ob_changed(self, enabled: bool) -> None:
+        self._show_ob = enabled
+        if enabled:
+            self._right_container.show()
+            self.chart_pane.set_price_axis_visible(False)
+            # Subscribe to the orderbook feed if we haven't already.
+            if not self._subscribed:
+                self._subscribe()
+            # Seed the ladder with current chart state immediately.
+            if self.chart_pane.current_last_price() is not None:
+                self.ladder_pane.set_last_price(self.chart_pane.current_last_price())
+            price_min, price_max = self.chart_pane.visible_price_range()
+            self.ladder_pane.set_visible_price_range(price_min, price_max)
+        else:
+            self._right_container.hide()
+            self.chart_pane.set_price_axis_visible(True)
+        self._update_stats_visibility()
+        self._update_title()
+
+    def _update_stats_visibility(self) -> None:
+        """Show delta stats panel only when both OB and CVD are enabled."""
+        show = self._show_ob and self.chart_pane.cvd_enabled()
+        if show:
+            self.delta_stats.show()
+            if not self._stats_timer.isActive():
+                self._stats_timer.start()
+        else:
+            self.delta_stats.hide()
+            self._stats_timer.stop()
+
+    def _refresh_delta_stats(self) -> None:
+        self.delta_stats.update_stats(self.chart_pane.cvd_stats())
+
     def _register_handlers(self) -> None:
         if self._handlers_registered or self.runtime is None or self.runtime.core is None:
             return
@@ -777,8 +988,8 @@ class ChartOrderflowDockWidget(QDockWidget):
             return
         try:
             self.runtime.core.emitter.unregister(Signals.ORDER_BOOK_UPDATE, self._on_order_book_update)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("Chart+Orderflow unregister handler failed: %s", exc)
         self._handlers_registered = False
 
     def _subscribe(self) -> None:
@@ -810,6 +1021,8 @@ class ChartOrderflowDockWidget(QDockWidget):
         self.ladder_pane.set_orderbook(orderbook)
 
     def closeEvent(self, event):  # noqa: N802
+        self.closed.emit()
+        self._stats_timer.stop()
         self.ladder_pane.shutdown()
         self._unsubscribe()
         self._unregister_handlers()

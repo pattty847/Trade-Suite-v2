@@ -1,11 +1,17 @@
 [
   {
     "instance_id": "chart_coinbase_btcusd_1m",
-    "widget_type": "chart",
+    "widget_type": "chart_orderflow",
     "config": {
       "exchange": "coinbase",
       "symbol": "BTC/USD",
-      "timeframe": "1m"
+      "timeframe": "1m",
+      "price_precision": 0.01,
+      "tick_size": 0.01,
+      "chart_mode": "candles",
+      "show_bubbles": false,
+      "show_ob": true,
+      "show_cvd": false
     }
   },
   {

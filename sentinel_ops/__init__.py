@@ -1,1 +1,0 @@
-# This file makes 'sentinel' a Python package. 

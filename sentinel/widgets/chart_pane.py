@@ -10,8 +10,9 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPicture
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
+from sentinel.analysis.cvd_processor import CandleCVDProcessor
 from sentinel.core.signals import Signals
 
 
@@ -24,12 +25,47 @@ _TICK_FONT.setStyleHint(QFont.StyleHint.Monospace)
 _TICK_FONT.setPointSize(8)
 _LABEL_CSS = {"color": "#3f5a76", "font-size": "10pt"}
 _VOL_FRACTION = 0.18
+_CVD_ZERO_PEN = pg.mkPen(color="#2a4060", width=1, style=Qt.PenStyle.DashLine)
 _CROSSHAIR_PEN = pg.mkPen(color="#2a4060", width=1, style=Qt.PenStyle.DashLine)
 
 _UP_COLOR = QColor(38, 166, 154)
 _DN_COLOR = QColor(239, 83, 80)
 _UP_HEX = "#26a69a"
 _DN_HEX = "#ef5350"
+
+def _fmt_price(value: float) -> str:
+    """Format a price with adaptive decimal places based on magnitude."""
+    if value == 0:
+        return "0"
+    abs_v = abs(value)
+    if abs_v >= 10_000:
+        return f"{value:,.0f}"
+    if abs_v >= 1_000:
+        return f"{value:,.1f}"
+    if abs_v >= 10:
+        return f"{value:.2f}"
+    if abs_v >= 0.1:
+        return f"{value:.4f}"
+    return f"{value:.6f}"
+
+
+def _fmt_vol(value: float) -> str:
+    """Format a volume with K/M suffix."""
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.2f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}K"
+    if value >= 10:
+        return f"{value:.2f}"
+    return f"{value:.4f}"
+
+
+_VPVR_N_BINS = 60                                      # price buckets across visible Y range
+_VPVR_WIDTH_FRAC = 0.22                                # fraction of visible X span for max bar
+_VPVR_VAL_BRUSH = QBrush(QColor(80, 130, 200, 55))    # volume-at-level colour
+_VPVR_VAL_PEN = QPen(QColor(80, 130, 200, 80))
+_VPVR_POC_BRUSH = QBrush(QColor(255, 186, 0, 120))    # point-of-control highlight
+_VPVR_POC_PEN = QPen(QColor(255, 186, 0, 200))
 
 
 def _style_pg_plot(plot: pg.PlotWidget) -> None:
@@ -68,7 +104,7 @@ class CandlestickItem(pg.GraphicsObject):
         self._h = highs
         self._l = lows
         self._c = closes
-        self._body_width = max(float(body_width), 1.0)
+        self._body_width = max(float(body_width), 1e-3)
         self._generate_picture()
         self.update()
 
@@ -108,6 +144,78 @@ class CandlestickItem(pg.GraphicsObject):
         return self._picture.boundingRect()
 
 
+class VpvrItem(pg.GraphicsObject):
+    """Horizontal volume-profile (VPVR) overlay drawn in data-space coordinates.
+
+    Each bin is a translucent horizontal bar anchored to the right edge of the
+    visible X range and extending leftward proportionally to its volume share.
+    The bin with the highest volume (Point of Control) is highlighted in amber.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # List of (price_center, volume, is_poc) tuples.
+        self._bins: list[tuple[float, float, bool]] = []
+        self._x_right: float = 0.0      # right edge anchor (rightmost visible timestamp)
+        self._max_bar_w: float = 1.0    # width of the full bar in data coords
+        self._bin_h: float = 1.0        # height of each bin in price units
+        self._picture = QPicture()
+
+    def set_profile(
+        self,
+        bins: list[tuple[float, float]],   # (price_center, volume) pairs
+        x_right: float,                     # timestamp of the rightmost visible bar
+        max_bar_width: float,               # data-coord width for the maximum bar
+        bin_height: float,                  # price height of each bin
+    ) -> None:
+        self._x_right = x_right
+        self._max_bar_w = max(max_bar_width, 1e-9)
+        self._bin_h = max(bin_height, 1e-9)
+        if not bins:
+            self._bins = []
+        else:
+            max_vol = max(v for _, v in bins)
+            if max_vol <= 0:
+                self._bins = []
+            else:
+                poc_price = max(bins, key=lambda b: b[1])[0]
+                self._bins = [(p, v / max_vol, p == poc_price) for p, v in bins]
+        self._generate_picture()
+        self.update()
+
+    def _generate_picture(self) -> None:
+        self._picture = QPicture()
+        if not self._bins:
+            return
+        painter = QPainter(self._picture)
+        half_h = self._bin_h * 0.5
+        for price, norm_vol, is_poc in self._bins:
+            bar_w = norm_vol * self._max_bar_w
+            if bar_w < 1e-12:
+                continue
+            rect = QRectF(self._x_right - bar_w, price - half_h, bar_w, self._bin_h)
+            if is_poc:
+                painter.setPen(_VPVR_POC_PEN)
+                painter.setBrush(_VPVR_POC_BRUSH)
+            else:
+                painter.setPen(_VPVR_VAL_PEN)
+                painter.setBrush(_VPVR_VAL_BRUSH)
+            painter.drawRect(rect)
+        painter.end()
+
+    def paint(self, painter, *args) -> None:
+        painter.drawPicture(0, 0, self._picture)
+
+    def boundingRect(self) -> QRectF:
+        # Return a rect that covers the drawn area — pyqtgraph uses this for
+        # scene culling.  We deliberately inflate it a bit so partial redraws
+        # do not clip the bars.
+        br = self._picture.boundingRect()
+        if br.isNull():
+            return QRectF()
+        return br.adjusted(-1, -1, 1, 1)
+
+
 class ChartPane(QWidget):
     visible_price_range_changed = Signal(float, float)
     last_price_changed = Signal(float)
@@ -123,10 +231,12 @@ class ChartPane(QWidget):
         fps: int = 15,
         show_ema: bool = False,
         show_price_axis: bool = True,
+        body_width_fraction: float = 0.72,
     ) -> None:
         super().__init__()
         self.exchange = exchange
         self.symbol = symbol
+        self._body_width_fraction = max(0.1, min(0.98, body_width_fraction))
         self.timeframe = timeframe
         self.max_points = max_points
         self.show_ema = show_ema
@@ -147,6 +257,10 @@ class ChartPane(QWidget):
         self._chart_mode = "candles"
         self._show_bubbles = False
         self._trades_cache = deque(maxlen=1000)
+        self._show_cvd = False
+        self._cvd_processor = CandleCVDProcessor(timeframe)
+        self._cvd_bar_item: pg.BarGraphItem | None = None
+        self._show_vpvr = False
 
         self.price_x_axis = pg.DateAxisItem(orientation="bottom")
         self.price_plot = pg.PlotWidget(axisItems={"bottom": self.price_x_axis})
@@ -157,6 +271,7 @@ class ChartPane(QWidget):
         self.price_plot.getViewBox().enableAutoRange(x=False, y=False)
         self.price_plot.getViewBox().sigResized.connect(self._update_vol_geometry)
         self.price_plot.getViewBox().sigYRangeChanged.connect(self._on_y_range_changed)
+        self.price_plot.getViewBox().sigXRangeChanged.connect(self._on_x_range_changed)
 
         if self.show_price_axis:
             self.price_plot.setLabel("right", "Price", **_LABEL_CSS)
@@ -188,7 +303,14 @@ class ChartPane(QWidget):
         self.candle_item = CandlestickItem()
         self.ha_item = CandlestickItem()
         self.line_item = pg.PlotDataItem(pen=pg.mkPen(color="#2196f3", width=1.5))
-        
+
+        # Equity-mode items (pg.BarGraphItem bodies + paired-segment wicks).
+        # Set when load_equity_bars() is called; cleared in clear_data().
+        self._eq_wicks_up: pg.PlotDataItem | None = None
+        self._eq_wicks_dn: pg.PlotDataItem | None = None
+        self._eq_body_up: pg.BarGraphItem | None = None
+        self._eq_body_dn: pg.BarGraphItem | None = None
+
         # Bubbles plot overlay
         self.bubbles_item = pg.ScatterPlotItem(
             size=10, 
@@ -198,6 +320,12 @@ class ChartPane(QWidget):
         )
         self.bubbles_item.setZValue(10)
         
+        # VPVR overlay — added before candles so it renders behind them.
+        self._vpvr_item = VpvrItem()
+        self._vpvr_item.hide()
+        self._vpvr_item.setZValue(-1)
+        self.price_plot.addItem(self._vpvr_item)
+
         self.price_plot.addItem(self.candle_item)
         self.price_plot.addItem(self.ha_item)
         self.price_plot.addItem(self.line_item)
@@ -206,9 +334,39 @@ class ChartPane(QWidget):
         self.volume_item: pg.BarGraphItem | None = None
         self.ema_item: pg.PlotDataItem | None = None
 
+        self.cvd_x_axis = pg.DateAxisItem(orientation="bottom")
+        self.cvd_plot = pg.PlotWidget(axisItems={"bottom": self.cvd_x_axis})
+        self.cvd_plot.setBackground("#060a11")
+        self.cvd_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.cvd_plot.setMouseEnabled(y=False, x=True)
+        _style_pg_plot(self.cvd_plot)
+        self.cvd_plot.setXLink(self.price_plot)
+        self.cvd_plot.hideAxis("left")
+        self.cvd_plot.showAxis("right")
+        self.cvd_plot.getAxis("right").setStyle(tickTextOffset=6)
+        self.cvd_plot.setLabel("right", "CVD", **_LABEL_CSS)
+        self.cvd_plot.setMaximumHeight(140)
+        self.cvd_plot.setMinimumHeight(80)
+        self._cvd_zero_line = pg.InfiniteLine(
+            angle=0, pos=0, movable=False, pen=_CVD_ZERO_PEN
+        )
+        self.cvd_plot.addItem(self._cvd_zero_line)
+        self.cvd_plot.hide()
+
+        self._pane_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._pane_splitter.setHandleWidth(2)
+        self._pane_splitter.setChildrenCollapsible(True)
+        self._pane_splitter.addWidget(self.price_plot)
+        self._pane_splitter.addWidget(self.cvd_plot)
+        self._pane_splitter.setCollapsible(0, False)
+        self._pane_splitter.setCollapsible(1, True)
+        self._pane_splitter.setStretchFactor(0, 1)
+        self._pane_splitter.setStretchFactor(1, 0)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.price_plot)
+        layout.setSpacing(0)
+        layout.addWidget(self._pane_splitter)
 
         mono = QFont()
         mono.setStyleHint(QFont.StyleHint.Monospace)
@@ -246,6 +404,7 @@ class ChartPane(QWidget):
         self.exchange = exchange
         self.symbol = symbol
         self.timeframe = timeframe
+        self._cvd_processor.set_timeframe(timeframe)
         self.clear_data()
         self._subscribe()
         LOGGER.debug("Chart pane resubscribed: %s/%s/%s", exchange, symbol, timeframe)
@@ -264,7 +423,19 @@ class ChartPane(QWidget):
         self.line_item.setData([], [])
         self.bubbles_item.clear()
         self._trades_cache.clear()
-        
+        self._cvd_processor.reset()
+        if self._cvd_bar_item is not None:
+            self.cvd_plot.removeItem(self._cvd_bar_item)
+            self._cvd_bar_item = None
+
+        for _attr in ("_eq_wicks_up", "_eq_wicks_dn", "_eq_body_up", "_eq_body_dn"):
+            _item = getattr(self, _attr, None)
+            if _item is not None:
+                try:
+                    self.price_plot.removeItem(_item)
+                except Exception:
+                    pass
+                setattr(self, _attr, None)
         if self.volume_item is not None:
             self.vb_vol.removeItem(self.volume_item)
             self.volume_item = None
@@ -280,6 +451,144 @@ class ChartPane(QWidget):
         self._ohlcv_label.hide()
         self._v_line.hide()
         self._h_line.hide()
+
+    def load_from_arrays(
+        self,
+        x: list[float],
+        opens: list[float],
+        highs: list[float],
+        lows: list[float],
+        closes: list[float],
+        volumes: list[float],
+    ) -> None:
+        """Replace chart data from pre-computed arrays (e.g. CandleChartPayload)."""
+        n = min(len(x), self.max_points)
+        self.timestamps = list(x[-n:])
+        self.opens = list(opens[-n:])
+        self.highs = list(highs[-n:])
+        self.lows = list(lows[-n:])
+        self.closes = list(closes[-n:])
+        self.volumes = list(volumes[-n:])
+        self._did_initial_fit = False
+        self._dirty = True
+
+    def load_equity_bars(
+        self,
+        x: list[int],
+        opens: list[float],
+        highs: list[float],
+        lows: list[float],
+        closes: list[float],
+        volumes: list[float],
+        *,
+        body_fraction: float = 0.6,
+    ) -> None:
+        """Render equity OHLCV using pg.BarGraphItem bodies + paired-segment wicks.
+
+        Uses pyqtgraph's native BarGraphItem (same renderer as volume bars) so
+        widths are handled by the library and always have correct spacing.
+        Does NOT set _dirty — the render timer is bypassed entirely for equity.
+        """
+        n = min(len(x), self.max_points)
+        self.timestamps = list(x[-n:])
+        self.opens = list(opens[-n:])
+        self.highs = list(highs[-n:])
+        self.lows = list(lows[-n:])
+        self.closes = list(closes[-n:])
+        self.volumes = list(volumes[-n:])
+        self._did_initial_fit = False
+        self._dirty = False  # equity renders here, not through the timer
+
+        xs = self.timestamps
+        os_ = self.opens
+        hs = self.highs
+        ls = self.lows
+        cs = self.closes
+        vs = self.volumes
+        nn = len(xs)
+
+        # -- Clear existing equity and standard candle items --
+        for _attr in ("_eq_wicks_up", "_eq_wicks_dn", "_eq_body_up", "_eq_body_dn"):
+            _it = getattr(self, _attr, None)
+            if _it is not None:
+                try:
+                    self.price_plot.removeItem(_it)
+                except Exception:
+                    pass
+                setattr(self, _attr, None)
+        self.candle_item.set_data([], [], [], [], [], body_width=1.0)
+        self.ha_item.set_data([], [], [], [], [], body_width=1.0)
+        self.line_item.setData([], [])
+
+        # -- Split bars by direction --
+        up = [i for i in range(nn) if cs[i] >= os_[i]]
+        dn = [i for i in range(nn) if cs[i] < os_[i]]
+
+        # -- Wicks (full low→high, body painted on top covers the middle) --
+        def _wick_arrays(indices):
+            wx, wy = [], []
+            for i in indices:
+                wx += [xs[i], xs[i]]
+                wy += [ls[i], hs[i]]
+            return wx, wy
+
+        upwx, upwy = _wick_arrays(up)
+        dnwx, dnwy = _wick_arrays(dn)
+
+        self._eq_wicks_up = pg.PlotDataItem(
+            x=upwx, y=upwy, connect="pairs",
+            pen=pg.mkPen(_UP_HEX, width=1),
+        )
+        self._eq_wicks_dn = pg.PlotDataItem(
+            x=dnwx, y=dnwy, connect="pairs",
+            pen=pg.mkPen(_DN_HEX, width=1),
+        )
+        self.price_plot.addItem(self._eq_wicks_up)
+        self.price_plot.addItem(self._eq_wicks_dn)
+
+        # -- Bodies (BarGraphItem: library handles the width automatically) --
+        def _body_arrays(indices):
+            bx = [xs[i] for i in indices]
+            by0 = [min(os_[i], cs[i]) for i in indices]
+            by1 = [max(os_[i], cs[i]) for i in indices]
+            return bx, by0, by1
+
+        upbx, upby0, upby1 = _body_arrays(up)
+        dnbx, dnby0, dnby1 = _body_arrays(dn)
+
+        self._eq_body_up = pg.BarGraphItem(
+            x=upbx, y0=upby0, y1=upby1,
+            width=body_fraction,
+            brush=QBrush(_UP_COLOR), pen=pg.mkPen(None),
+        )
+        self._eq_body_dn = pg.BarGraphItem(
+            x=dnbx, y0=dnby0, y1=dnby1,
+            width=body_fraction,
+            brush=QBrush(_DN_COLOR), pen=pg.mkPen(None),
+        )
+        self.price_plot.addItem(self._eq_body_up)
+        self.price_plot.addItem(self._eq_body_dn)
+
+        # -- Volume --
+        if self.volume_item is not None:
+            self.vb_vol.removeItem(self.volume_item)
+        brushes = [
+            QBrush(QColor(38, 166, 154, 140)) if cs[i] >= os_[i]
+            else QBrush(QColor(239, 83, 80, 140))
+            for i in range(nn)
+        ]
+        self.volume_item = pg.BarGraphItem(
+            x=xs, height=vs,
+            width=body_fraction,
+            brushes=brushes, pen=pg.mkPen(None),
+        )
+        self.vb_vol.addItem(self.volume_item)
+        self.vb_vol.enableAutoRange(pg.ViewBox.YAxis, True)
+
+        # -- Price line & initial fit --
+        self._update_price_line()
+        self._fit_initial_view()
+        self._did_initial_fit = True
 
     def set_chart_mode(self, mode: str) -> None:
         normalized = (mode or "").strip().lower()
@@ -297,6 +606,76 @@ class ChartPane(QWidget):
 
     def bubbles_enabled(self) -> bool:
         return self._show_bubbles
+
+    def set_cvd_enabled(self, enabled: bool) -> None:
+        self._show_cvd = bool(enabled)
+        if self._show_cvd:
+            self.cvd_plot.show()
+            total = self._pane_splitter.height()
+            cvd_h = max(100, min(160, total // 5))
+            self._pane_splitter.setSizes([total - cvd_h, cvd_h])
+        else:
+            self.cvd_plot.hide()
+            self._pane_splitter.setSizes([self._pane_splitter.height(), 0])
+        self._dirty = True
+
+    def cvd_enabled(self) -> bool:
+        return self._show_cvd
+
+    def set_vpvr_enabled(self, enabled: bool) -> None:
+        self._show_vpvr = bool(enabled)
+        if self._show_vpvr:
+            self._vpvr_item.show()
+            self._render_vpvr()
+        else:
+            self._vpvr_item.hide()
+            self._vpvr_item.set_profile([], 0.0, 1.0, 1.0)
+
+    def vpvr_enabled(self) -> bool:
+        return self._show_vpvr
+
+    def cvd_stats(self) -> dict[str, float | None]:
+        """Return summary CVD stats for the current session."""
+        if not self._show_cvd:
+            return {"session_cvd": None, "bar_delta": None, "total_buy": None, "total_sell": None}
+        _ts, deltas, cumulative = self._cvd_processor.get_series()
+        session_cvd = cumulative[-1] if cumulative else 0.0
+        bar_delta = deltas[-1] if deltas else 0.0
+        total_buy = sum(b[0] for b in self._cvd_processor._buckets.values())
+        total_sell = sum(b[1] for b in self._cvd_processor._buckets.values())
+        return {
+            "session_cvd": session_cvd,
+            "bar_delta": bar_delta,
+            "total_buy": total_buy,
+            "total_sell": total_sell,
+        }
+
+    def set_ema_enabled(self, enabled: bool) -> None:
+        self.show_ema = bool(enabled)
+        if not enabled and self.ema_item is not None:
+            self.price_plot.removeItem(self.ema_item)
+            self.ema_item = None
+        self._dirty = True
+
+    def ema_enabled(self) -> bool:
+        return self.show_ema
+
+    def set_price_axis_visible(self, visible: bool) -> None:
+        """Show or hide the right-hand price Y-axis at runtime.
+
+        Call with ``visible=False`` when the OB ladder is shown (it acts as
+        the visual Y-axis) and ``visible=True`` when the ladder is hidden so
+        the chart has its own price scale.
+        """
+        self.show_price_axis = visible
+        if visible:
+            self.price_plot.setLabel("right", "Price", **_LABEL_CSS)
+            self.price_plot.showAxis("right")
+            self.price_plot.hideAxis("left")
+            self.price_plot.getAxis("right").setStyle(tickTextOffset=6)
+        else:
+            self.price_plot.hideAxis("right")
+            self.price_plot.hideAxis("left")
 
     def set_runtime(self, runtime) -> None:
         self.runtime = runtime
@@ -331,8 +710,8 @@ class ChartPane(QWidget):
             emitter.unregister(Signals.NEW_CANDLES, self._on_new_candles)
             emitter.unregister(Signals.UPDATED_CANDLES, self._on_updated_candles)
             emitter.unregister(Signals.NEW_TRADE, self._on_new_trade)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("Chart pane unregister handler failed: %s", exc)
         self._handlers_registered = False
 
     def _subscribe(self) -> None:
@@ -377,7 +756,8 @@ class ChartPane(QWidget):
         if exchange != self.exchange or trade_data.get("symbol") != self.symbol:
             return
         self._trades_cache.append(trade_data)
-        if self._show_bubbles:
+        self._cvd_processor.add_trade(trade_data)
+        if self._show_bubbles or self._show_cvd:
             self._dirty = True
 
     def _replace_from_dataframe(self, data: pd.DataFrame) -> None:
@@ -456,7 +836,7 @@ class ChartPane(QWidget):
         if self._chart_mode == "candles":
             self.candle_item.show()
             self.candle_item.set_data(
-                x, self.opens, self.highs, self.lows, self.closes, body_width=candle_width * 0.72
+                x, self.opens, self.highs, self.lows, self.closes, body_width=candle_width * self._body_width_fraction
             )
         elif self._chart_mode == "line":
             self.line_item.show()
@@ -477,7 +857,7 @@ class ChartPane(QWidget):
                 ha_lows.append(ha_l)
                 ha_closes.append(ha_c)
             self.ha_item.set_data(
-                x, ha_opens, ha_highs, ha_lows, ha_closes, body_width=candle_width * 0.72
+                x, ha_opens, ha_highs, ha_lows, ha_closes, body_width=candle_width * self._body_width_fraction
             )
             
         if self._show_bubbles and self._trades_cache:
@@ -520,31 +900,106 @@ class ChartPane(QWidget):
             
         self._update_price_line()
 
-        if self.volume_item is not None:
-            self.vb_vol.removeItem(self.volume_item)
-        brushes = [
+        vol_brushes = [
             QBrush(QColor(38, 166, 154, 140)) if c >= o else QBrush(QColor(239, 83, 80, 140))
             for o, c in zip(self.opens, self.closes)
         ]
-        self.volume_item = pg.BarGraphItem(
-            x=x,
-            height=self.volumes,
-            width=candle_width * 0.72,
-            brushes=brushes,
-            pen=pg.mkPen(None),
-        )
-        self.vb_vol.addItem(self.volume_item)
+        vol_width = candle_width * self._body_width_fraction
+        if self.volume_item is None:
+            self.volume_item = pg.BarGraphItem(
+                x=x, height=self.volumes, width=vol_width, brushes=vol_brushes, pen=pg.mkPen(None),
+            )
+            self.vb_vol.addItem(self.volume_item)
+        else:
+            self.volume_item.setOpts(x=x, height=self.volumes, width=vol_width, brushes=vol_brushes)
         self.vb_vol.enableAutoRange(pg.ViewBox.YAxis, True)
 
         if self.show_ema:
-            if self.ema_item is not None:
-                self.price_plot.removeItem(self.ema_item)
             ema = pd.Series(self.closes).ewm(span=20, adjust=False).mean().tolist()
-            self.ema_item = self.price_plot.plot(x=x, y=ema, pen=pg.mkPen(color=(100, 180, 255), width=1.0))
+            if self.ema_item is None:
+                self.ema_item = self.price_plot.plot(x=x, y=ema, pen=pg.mkPen(color=(100, 180, 255), width=1.0))
+            else:
+                self.ema_item.setData(x=x, y=ema)
+
+        if self._show_cvd:
+            self._render_cvd()
+
+        if self._show_vpvr:
+            self._render_vpvr()
 
         if x and not self._did_initial_fit:
             self._fit_initial_view()
             self._did_initial_fit = True
+
+    def _render_cvd(self) -> None:
+        ts, deltas, _cumulative = self._cvd_processor.get_series()
+        if not ts:
+            return
+
+        candle_width = self._current_candle_width * self._body_width_fraction
+        brushes = [
+            QBrush(QColor(38, 166, 154, 200)) if d >= 0
+            else QBrush(QColor(239, 83, 80, 200))
+            for d in deltas
+        ]
+
+        if self._cvd_bar_item is None:
+            self._cvd_bar_item = pg.BarGraphItem(
+                x=ts, height=deltas, width=candle_width, brushes=brushes, pen=pg.mkPen(None),
+            )
+            self.cvd_plot.addItem(self._cvd_bar_item)
+        else:
+            self._cvd_bar_item.setOpts(x=ts, height=deltas, width=candle_width, brushes=brushes)
+        self.cvd_plot.getViewBox().enableAutoRange(pg.ViewBox.YAxis, True)
+
+    def _render_vpvr(self) -> None:
+        """Compute and draw the Volume Profile Visible Range overlay."""
+        if not self.timestamps or not self.volumes:
+            return
+
+        vb = self.price_plot.getViewBox()
+        x_lo, x_hi = vb.viewRange()[0]
+        y_lo, y_hi = vb.viewRange()[1]
+        price_span = max(y_hi - y_lo, 1e-9)
+        x_span = max(x_hi - x_lo, 1e-9)
+
+        # Collect candle indices visible in the current X window.
+        lo_idx = bisect.bisect_left(self.timestamps, x_lo)
+        hi_idx = bisect.bisect_right(self.timestamps, x_hi)
+        if lo_idx >= hi_idx:
+            self._vpvr_item.set_profile([], x_hi, 1.0, 1.0)
+            return
+
+        # Distribute each candle's volume into price bins.
+        bin_h = price_span / _VPVR_N_BINS
+        vol_bins = [0.0] * _VPVR_N_BINS
+
+        for i in range(lo_idx, hi_idx):
+            lo = self.lows[i]
+            hi_p = self.highs[i]
+            vol = self.volumes[i]
+            candle_span = max(hi_p - lo, bin_h * 0.1)
+
+            # First and last bin indices this candle touches.
+            b_lo = max(0, int((lo - y_lo) / bin_h))
+            b_hi = min(_VPVR_N_BINS - 1, int((hi_p - y_lo) / bin_h))
+
+            for b in range(b_lo, b_hi + 1):
+                bin_lo = y_lo + b * bin_h
+                bin_hi_p = bin_lo + bin_h
+                overlap = min(hi_p, bin_hi_p) - max(lo, bin_lo)
+                if overlap > 0:
+                    vol_bins[b] += vol * (overlap / candle_span)
+
+        # Build (center, volume) pairs for non-empty bins.
+        bins = [
+            (y_lo + (b + 0.5) * bin_h, vol_bins[b])
+            for b in range(_VPVR_N_BINS)
+            if vol_bins[b] > 0
+        ]
+
+        max_bar_width = x_span * _VPVR_WIDTH_FRAC
+        self._vpvr_item.set_profile(bins, x_hi, max_bar_width, bin_h)
 
     def _fit_initial_view(self) -> None:
         if not self.timestamps:
@@ -623,7 +1078,7 @@ class ChartPane(QWidget):
         if self.show_price_axis:
             self._price_pill.hide()
             return
-        self._price_pill.setText(f"{price:.2f}")
+        self._price_pill.setText(_fmt_price(price))
         self._price_pill.setStyleSheet(
             "color: #ffffff; "
             f"background: {hex_color}; "
@@ -691,9 +1146,10 @@ class ChartPane(QWidget):
         pct = (delta / o * 100) if o != 0 else 0.0
         color = _UP_HEX if c >= o else _DN_HEX
 
+        sign = "+" if delta >= 0 else ""
         self._ohlcv_label.setText(
-            f"O {o:.2f}  H {h:.2f}  L {l:.2f}  C {c:.2f}  "
-            f"{delta:+.2f} ({pct:+.2f}%)  Vol: {v:.0f}"
+            f"O {_fmt_price(o)}  H {_fmt_price(h)}  L {_fmt_price(l)}  C {_fmt_price(c)}  "
+            f"{sign}{_fmt_price(delta)} ({pct:+.2f}%)  Vol: {_fmt_vol(v)}"
         )
         self._ohlcv_label.setStyleSheet(f"color: {color}; background: transparent; padding: 2px 8px;")
         self._ohlcv_label.adjustSize()
@@ -702,6 +1158,12 @@ class ChartPane(QWidget):
     def _on_y_range_changed(self, _vb, y_range) -> None:
         self._reposition_price_pill()
         self.visible_price_range_changed.emit(float(y_range[0]), float(y_range[1]))
+        if self._show_vpvr:
+            self._render_vpvr()
+
+    def _on_x_range_changed(self, _vb, _x_range) -> None:
+        if self._show_vpvr:
+            self._render_vpvr()
 
     def _infer_candle_width_seconds(self) -> float:
         if len(self.timestamps) >= 2:

@@ -10,7 +10,6 @@ The repo is centered on one active product: `sentinel`.
 ## Source Of Truth
 
 - `sentinel/` is the only active application/runtime.
-- `sentinel_ops/` is legacy and not part of the active product direction.
 - Dependencies are managed in `pyproject.toml`.
 - Use `uv`, not `requirements.txt`.
 
@@ -19,7 +18,6 @@ The repo is centered on one active product: `sentinel`.
 - App: `uv run python -m sentinel`
 - Tests: `uv run python -m pytest`
 
-If you touch `sentinel_ops`, treat it as legacy maintenance only.
 
 ## Repository Structure
 
@@ -50,7 +48,6 @@ If you touch `sentinel_ops`, treat it as legacy maintenance only.
 ### 1. Sentinel-first only
 
 - Do not reintroduce `trade_suite`.
-- Do not build new runtime features in `sentinel_ops`.
 - New code that matters to the app belongs under `sentinel`.
 
 ### 2. Layout persistence contract
@@ -118,13 +115,48 @@ The global top bar is workspace-level only.
 
 Each `ChartDockWidget` and `ChartOrderflowDockWidget` owns its own:
 
-- `Symbol`
+- `Symbol` — editable combo (Return key confirms custom symbol)
 - `Timeframe`
 - `Mode`
 - `Bubbles`
+- `EMA` — toggles EMA-20 overlay on price pane; `ChartPane.set_ema_enabled(bool)`
+- `CVD` — toggles the CVD subplot below the price pane (live-only, no historical bootstrap)
+- `VPVR` — toggles volume-at-price overlay
+- `OB` — toggles the orderbook ladder (`ChartOrderflowDockWidget` only)
 
 This state must persist per widget.
 Do not reintroduce global market-control broadcasting.
+
+OB toggle contract:
+- When OB is ON: `ChartPane.show_price_axis=False`, `_right_container` visible, OB subscription active
+- When OB is OFF: `ChartPane.set_price_axis_visible(True)`, `_right_container` hidden
+- Orderbook subscription is started on first enable; it stays active if OB is toggled off mid-session (reconnect on next toggle-on)
+- `export_definition()` saves `show_ob`, `show_cvd`, `show_ema`, and `show_vpvr` per widget instance
+
+EMA contract:
+- `ChartPane.set_ema_enabled(bool)` / `ema_enabled() -> bool` toggle the EMA-20 line
+- When disabled, the `ema_item` is removed from the plot immediately
+- On render, EMA uses `setData()` in-place rather than remove+recreate
+
+CVD contract:
+- `CandleCVDProcessor` (in `sentinel/analysis/cvd_processor.py`) accumulates live trades into per-candle buy/sell buckets
+- CVD starts from zero when the widget opens — no historical bootstrap
+- `ChartPane.set_cvd_enabled(bool)` shows/hides the CVD `QSplitter` pane below the price chart
+- `ChartPane.cvd_stats()` returns `{session_cvd, bar_delta, total_buy, total_sell}` for the stats strip
+
+Delta Stats contract (`ChartOrderflowDockWidget` only):
+- `DeltaStatsPanel` widget shows below the OB ladder when BOTH OB and CVD are active
+- Refreshed every 500 ms via `_stats_timer` → `_refresh_delta_stats()` → `chart_pane.cvd_stats()`
+- Shows: bar delta, session CVD, buy/sell volume, buy/sell ratio gradient bar
+- Hidden automatically when OB or CVD is toggled off; timer stopped
+
+VPVR contract:
+- `VpvrItem` (in `sentinel/widgets/chart_pane.py`) draws horizontal volume-profile bars as a `pg.GraphicsObject` in data-space
+- VPVR updates on every Y range change (`sigYRangeChanged`) and X range change (`sigXRangeChanged`)
+- Volume is distributed across `_VPVR_N_BINS` = 60 price buckets using linear candle-range interpolation
+- Bars are anchored to the right edge of the visible X range; max bar width = 22% of visible X span
+- Point of Control (highest-volume bin) is highlighted in amber
+- `ChartPane.set_vpvr_enabled(bool)` shows/hides the overlay; persists via `show_vpvr` in `export_definition`
 
 ### 7. Chart+Orderflow contract
 

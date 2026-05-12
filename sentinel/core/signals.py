@@ -10,40 +10,46 @@ import inspect
 
 
 class Signals(Enum):
-    # TODO: Make sure these payloads below are correct 
-    CREATE_EXCHANGE_TAB = auto() # payload: {'exchange': str}
-    CREATE_TAB = auto() # payload: {'tab_name': str}
-    NEW_CANDLES = auto() # payload: {'symbol': str, 'timeframe': str}
-    NEW_CHART_REQUESTED = auto() # payload: {'symbol': str, 'timeframe': str}
-    NEW_ORDERBOOK_REQUESTED = auto() # payload: {'symbol': str}
-    NEW_TRADING_PANEL_REQUESTED = auto() # payload: {'symbol': str}
-    NEW_PRICE_LEVEL_REQUESTED = auto() # payload: {'symbol': str}
-    NEW_TRADE = auto() # payload: {'symbol': str, 'trade': dict}
-    ORDER_BOOK_UPDATE = auto() # payload: {'symbol': str, 'orderbook': dict}
-    ORDERBOOK_VISIBILITY_CHANGED = auto() # payload: {'symbol': str, 'visible': bool}
-    SYMBOL_CHANGED = auto() # payload: {'symbol': str}
-    TIMEFRAME_CHANGED = auto() # payload: {'symbol': str, 'timeframe': str}
-    TRADE_STAT_UPDATE = auto() # payload: {'symbol': str, 'trade_stats': dict}
-    VIEWPORT_RESIZED = auto()
+    # ── Live market data ────────────────────────────────────────────
+    # NEW_CANDLES      → (exchange: str, symbol: str, timeframe: str, candles: DataFrame)
+    # UPDATED_CANDLES  → same shape as NEW_CANDLES (last bar updated)
+    # NEW_TRADE        → (exchange: str, trade: dict)   ccxt trade dict
+    # ORDER_BOOK_UPDATE→ (exchange: str, orderbook: dict)  {bids, asks, symbol}
+    # NEW_TICKER_DATA  → (exchange: str, symbol: str, ticker: dict)
+    # TRADE_STAT_UPDATE→ (exchange: str, symbol: str, stats: dict)
+    NEW_CANDLES = auto()
     UPDATED_CANDLES = auto()
+    NEW_TRADE = auto()
+    ORDER_BOOK_UPDATE = auto()
+    NEW_TICKER_DATA = auto()
+    TRADE_STAT_UPDATE = auto()
 
-    # SEC Data Signals
-    SEC_FILINGS_UPDATE = auto()          # Data: {'ticker': str, 'filings': list[dict]}
-    SEC_INSIDER_TX_UPDATE = auto()       # Data: {'ticker': str, 'transactions': list[dict]}
-    SEC_FINANCIALS_UPDATE = auto()     # Data: {'ticker': str, 'financials': dict} # Structure TBD
-    SEC_DATA_FETCH_ERROR = auto()        # Data: {'ticker': str, 'data_type': str, 'error': str}
+    # ── Widget / task lifecycle ──────────────────────────────────────
+    # WIDGET_CLOSED → (widget_id: str)
+    # TASK_SUCCESS  → (task_name: str, result: Any)
+    # TASK_ERROR    → (task_name: str, error: Exception)
+    WIDGET_CLOSED = auto()
+    TASK_SUCCESS = auto()
+    TASK_ERROR = auto()
 
-    # Dashboard/Widget Management Signals
-    NEW_SEC_FILING_VIEWER_REQUESTED = auto() # Added for SEC Filing Viewer
-    WIDGET_CLOSED = auto() # payload: {'widget_id': str}
-
-    # Data Fetching Signals (Example - Adapt as needed)
-    FETCH_OHLCV = auto() # payload: {'exchange': str, 'symbol': str, 'timeframe': str}
-    NEW_TICKER_DATA = auto() # payload: (exchange: str, symbol: str, ticker_data_dict: dict)
-
-    # Generic Task Signals
-    TASK_SUCCESS = auto() # data: {'task_name': str, 'result': Any}
-    TASK_ERROR = auto()   # data: {'task_name': str, 'error': Exception}
+    # ── Reserved / future use ────────────────────────────────────────
+    # Kept for forward compatibility; not yet wired to any widget.
+    CREATE_EXCHANGE_TAB = auto()
+    CREATE_TAB = auto()
+    NEW_CHART_REQUESTED = auto()
+    NEW_ORDERBOOK_REQUESTED = auto()
+    NEW_TRADING_PANEL_REQUESTED = auto()
+    NEW_PRICE_LEVEL_REQUESTED = auto()
+    ORDERBOOK_VISIBILITY_CHANGED = auto()
+    SYMBOL_CHANGED = auto()
+    TIMEFRAME_CHANGED = auto()
+    VIEWPORT_RESIZED = auto()
+    FETCH_OHLCV = auto()
+    SEC_FILINGS_UPDATE = auto()
+    SEC_INSIDER_TX_UPDATE = auto()
+    SEC_FINANCIALS_UPDATE = auto()
+    SEC_DATA_FETCH_ERROR = auto()
+    NEW_SEC_FILING_VIEWER_REQUESTED = auto()
 
 
 class SignalEmitter:
@@ -145,44 +151,50 @@ class SignalEmitter:
             self._queue.put((signal, args, kwargs))
 
     def _execute_callbacks(self, signal: Signals, args, kwargs):
-        """ Safely executes callbacks for a given signal. """
+        """Safely execute all callbacks registered for *signal*."""
         callbacks = self._callbacks.get(signal, [])
-        logging.debug(f"[SignalQueue] Executing {len(callbacks)} callbacks for {signal.name}")
+        logging.debug("[SignalQueue] Executing %d callbacks for %s", len(callbacks), signal.name)
         for callback in callbacks:
             try:
                 if inspect.iscoroutinefunction(callback):
                     if self.loop:
-                        # Schedule the async callback on the provided event loop
                         asyncio.run_coroutine_threadsafe(callback(*args, **kwargs), self.loop)
                     else:
-                        logging.warning(f"Async callback {callback.__name__} for signal {signal.name} cannot be run without an event loop. Use set_loop().")
+                        logging.warning(
+                            "Async callback %s for signal %s has no event loop. Call set_loop() first.",
+                            callback.__name__,
+                            signal.name,
+                        )
                 else:
-                    # Execute synchronous callback directly
-                    logging.debug(f"[SignalQueue] Calling: {callback.__name__} for {signal.name}")
+                    logging.debug("[SignalQueue] Calling %s for %s", callback.__name__, signal.name)
                     callback(*args, **kwargs)
-            except Exception as e:
-                # Log the exception and the callback that caused it
-                logging.error(f"Error in callback {callback.__name__} for signal {signal.name}: {e}", exc_info=True)
+            except Exception as exc:
+                logging.error(
+                    "Error in callback %s for signal %s: %s",
+                    callback.__name__,
+                    signal.name,
+                    exc,
+                    exc_info=True,
+                )
 
-    def process_signal_queue(self, sender=None, app_data=None, user_data=None):
+    def process_signal_queue(self) -> int:
+        """Drain the cross-thread signal queue on the main GUI thread.
+
+        Returns the number of signals processed.  Call this periodically
+        from any Qt timer or event handler running on the main thread.
         """
-        Process signals queued from background threads. This should be called
-        regularly by the main GUI thread (e.g., via a frame callback).
-        The sender, app_data, user_data arguments are ignored but needed for dpg frame callback compatibility.
-        """
-        
         processed_count = 0
         while not self._queue.empty():
             try:
                 signal, args, kwargs = self._queue.get_nowait()
-                logging.debug(f"[SignalQueue] Dequeued signal: {signal.name}")
+                logging.debug("[SignalQueue] Dequeued signal: %s", signal.name)
                 processed_count += 1
                 self._execute_callbacks(signal, args, kwargs)
             except queue.Empty:
-                # Should not happen with the while loop condition, but good practice
                 break
-            except Exception as e:
-                logging.error(f"Error processing signal queue: {e}", exc_info=True)
+            except Exception as exc:
+                logging.error("Error processing signal queue: %s", exc, exc_info=True)
+        return processed_count
     
 
     def unregister(self, signal: Signals, callback: Callable):

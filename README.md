@@ -1,6 +1,6 @@
-# Trade Suite v2 (Sentinel Python)
+# Sentinel Lite
 
-Trade Suite v2 (codename: Sentinel Python) is a desktop trading workstation built with `PySide6`, `PyQtGraph`, and `qasync`.
+Sentinel Lite is a desktop trading workstation built with `PySide6`, `PyQtGraph`, and `qasync`.
 
 Current focus:
 - live charting
@@ -80,7 +80,6 @@ Important behavior:
 - Dependencies are managed in `pyproject.toml`
 - Use `uv`
 - The active app is `sentinel`
-- `sentinel_ops/` is legacy and not part of the active product direction
 
 ## Validation
 
@@ -94,11 +93,6 @@ uv run python -m pytest
 ## Project Guidance
 
 Contributor and agent operating guidance lives in `AGENTS.md`.
-
-## Tiny Daily Note
-
-- 2026-03-15: README touch-up + project heartbeat check ✅
-- 2026-03-19: Clarified repository naming (Trade Suite v2 vs Sentinel codename) for cleaner public onboarding ✅
 
 ## License
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QObject, Signal
+
+LOGGER = logging.getLogger(__name__)
 
 from sentinel.market.prep.chart_payload_builder import CandleChartPayloadBuilder
 from sentinel.market.query import HistoricalBarsQuery, Timeframe
@@ -44,7 +47,11 @@ class EquityChartViewModel(QObject):
                 end=now,
             )
             bars = await self._service.get_historical_bars(query)
-            actions = await self._service.get_corporate_actions(symbol, start=query.start, end=query.end)
+            try:
+                actions = await self._service.get_corporate_actions(symbol, start=query.start, end=query.end)
+            except Exception as exc:
+                LOGGER.warning("Failed to fetch corporate actions for %s: %s", symbol, exc)
+                actions = []
             payload = self._payload_builder.build(bars, actions)
 
             if request_id != self._last_request_id:

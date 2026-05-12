@@ -58,3 +58,4 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+.uv-cache/

@@ -4,7 +4,7 @@ from pathlib import Path
 import pyqtgraph as pg
 import qtawesome as qta
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QSizePolicy, QToolBar, QWidget
 from qasync import asyncClose
 
@@ -61,11 +61,16 @@ class SentinelMainWindow(QMainWindow):
         bar.addWidget(spacer)
 
         _btn = "#7a99be"
-        search_act = QAction(qta.icon("mdi6.magnify", color=_btn), "Search", self)
-        replay_act = QAction(qta.icon("mdi6.history", color=_btn), "Replay", self)
-        layout_act = QAction(qta.icon("mdi6.view-dashboard-outline", color=_btn), "Layout", self)
-        for act in (search_act, replay_act, layout_act):
-            bar.addAction(act)
+        save_act = QAction(qta.icon("mdi6.content-save-outline", color=_btn), "Save Layout", self)
+        save_act.setToolTip("Save layout  (Ctrl+S)")
+        save_act.setShortcut(QKeySequence.StandardKey.Save)
+        save_act.triggered.connect(self._save_layout)
+        bar.addAction(save_act)
+
+        reset_act = QAction(qta.icon("mdi6.restore", color=_btn), "Reset Layout", self)
+        reset_act.setToolTip("Reset to default layout")
+        reset_act.triggered.connect(self._reset_layout)
+        bar.addAction(reset_act)
 
     def _build_left_toolbar(self) -> None:
         bar = QToolBar("Drawing")
@@ -102,40 +107,67 @@ class SentinelMainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         menu = self.menuBar()
+        _ic = "#7a99be"
 
+        # ── File menu ────────────────────────────────────────────────
         file_menu = menu.addMenu("File")
-        new_chart_action = QAction("New Chart", self)
-        new_chart_action.triggered.connect(self._on_new_chart)
-        file_menu.addAction(new_chart_action)
 
-        new_chart_orderflow_action = QAction("New Chart + Orderflow", self)
-        new_chart_orderflow_action.triggered.connect(self._on_new_chart_orderflow)
-        file_menu.addAction(new_chart_orderflow_action)
-
-        new_orderbook_action = QAction("New Orderbook", self)
-        new_orderbook_action.triggered.connect(self._on_new_orderbook)
-        file_menu.addAction(new_orderbook_action)
-
-        new_dom_action = QAction("New DOM", self)
-        new_dom_action.triggered.connect(self._on_new_dom)
-        file_menu.addAction(new_dom_action)
-
-        new_dock_action = QAction("New Placeholder Dock", self)
-        new_dock_action.triggered.connect(self._on_new_placeholder)
-        file_menu.addAction(new_dock_action)
-
-        save_layout_action = QAction("Save Layout", self)
+        save_layout_action = QAction(
+            qta.icon("mdi6.content-save-outline", color=_ic), "Save Layout", self
+        )
+        save_layout_action.setShortcut(QKeySequence.StandardKey.Save)
         save_layout_action.triggered.connect(self._save_layout)
         file_menu.addAction(save_layout_action)
 
-        reset_layout_action = QAction("Reset Layout", self)
+        reset_layout_action = QAction(
+            qta.icon("mdi6.restore", color=_ic), "Reset Layout", self
+        )
         reset_layout_action.triggered.connect(self._reset_layout)
         file_menu.addAction(reset_layout_action)
 
         file_menu.addSeparator()
-        exit_action = QAction("Exit", self)
+        exit_action = QAction(qta.icon("mdi6.exit-to-app", color=_ic), "Exit", self)
+        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        # ── Widgets menu ─────────────────────────────────────────────
+        widgets_menu = menu.addMenu("Widgets")
+
+        new_chart_action = QAction(
+            qta.icon("mdi6.chart-candlestick", color=_ic), "New Chart", self
+        )
+        new_chart_action.setShortcut(QKeySequence("Ctrl+Alt+C"))
+        new_chart_action.triggered.connect(self._on_new_chart)
+        widgets_menu.addAction(new_chart_action)
+
+        new_chart_orderflow_action = QAction(
+            qta.icon("mdi6.chart-box-outline", color=_ic), "New Chart + Orderflow", self
+        )
+        new_chart_orderflow_action.setShortcut(QKeySequence("Ctrl+Alt+O"))
+        new_chart_orderflow_action.triggered.connect(self._on_new_chart_orderflow)
+        widgets_menu.addAction(new_chart_orderflow_action)
+
+        new_equity_chart_action = QAction(
+            qta.icon("mdi6.finance", color=_ic), "New Equity Chart", self
+        )
+        new_equity_chart_action.triggered.connect(self._on_new_equity_chart)
+        widgets_menu.addAction(new_equity_chart_action)
+
+        widgets_menu.addSeparator()
+
+        new_dom_action = QAction(
+            qta.icon("mdi6.table-of-contents", color=_ic), "New DOM", self
+        )
+        new_dom_action.setShortcut(QKeySequence("Ctrl+Alt+D"))
+        new_dom_action.triggered.connect(self._on_new_dom)
+        widgets_menu.addAction(new_dom_action)
+
+        new_orderbook_action = QAction(
+            qta.icon("mdi6.book-open-outline", color=_ic), "New Orderbook", self
+        )
+        new_orderbook_action.triggered.connect(self._on_new_orderbook)
+        widgets_menu.addAction(new_orderbook_action)
 
     def _bootstrap_layout(self) -> None:
         self.widget_registry.load_or_create_defaults()
@@ -190,6 +222,11 @@ class SentinelMainWindow(QMainWindow):
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, chart)
         if not chart.isVisible():
             chart.show()
+
+    def _on_new_equity_chart(self) -> None:
+        self.widget_registry.add_equity_chart(
+            area=Qt.DockWidgetArea.LeftDockWidgetArea,
+        )
 
     def _on_new_placeholder(self) -> None:
         count = len(self.widget_registry.docks) + 1

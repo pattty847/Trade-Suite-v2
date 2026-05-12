@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDockWidget,
     QHeaderView,
     QHBoxLayout,
@@ -17,6 +18,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+_DEFAULT_SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "BTC/USDT", "ETH/USDT"]
+_DEFAULT_EXCHANGES = ["coinbase", "binance", "kraken"]
 
 from sentinel.analysis.orderbook_processor import OrderBookProcessor
 from sentinel.core.signals import Signals
@@ -39,6 +43,8 @@ _EPSILON = 1e-9
 
 
 class DomDockWidget(QDockWidget):
+    closed = Signal()
+
     def __init__(
         self,
         *,
@@ -75,7 +81,25 @@ class DomDockWidget(QDockWidget):
         body = QWidget()
         root = QVBoxLayout(body)
         root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(6)
+        root.setSpacing(4)
+
+        # Symbol / exchange selector row
+        sym_row = QHBoxLayout()
+        sym_row.setSpacing(6)
+        self.exchange_combo = QComboBox()
+        self.exchange_combo.addItems(_DEFAULT_EXCHANGES)
+        self._set_combo(self.exchange_combo, exchange)
+        self.exchange_combo.setFixedHeight(24)
+        self.symbol_combo = QComboBox()
+        self.symbol_combo.addItems(_DEFAULT_SYMBOLS)
+        self._set_combo(self.symbol_combo, symbol)
+        self.symbol_combo.setFixedHeight(24)
+        sym_row.addWidget(self.exchange_combo)
+        sym_row.addWidget(self.symbol_combo, 1)
+        root.addLayout(sym_row)
+
+        self.exchange_combo.currentTextChanged.connect(self._on_combo_changed)
+        self.symbol_combo.currentTextChanged.connect(self._on_combo_changed)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Tick"))
@@ -125,6 +149,20 @@ class DomDockWidget(QDockWidget):
 
         self.set_runtime(runtime)
 
+    def change_subscription(self, exchange: str, symbol: str) -> None:
+        """Switch to a different exchange/symbol without recreating the widget."""
+        if exchange == self.exchange and symbol == self.symbol:
+            return
+        self._unsubscribe()
+        self.exchange = exchange
+        self.symbol = symbol
+        self.last_orderbook = None
+        self._dirty = False
+        self._cell_cache.clear()
+        self.spread_label.setText("Spread: -")
+        self.setWindowTitle(f"DOM - {exchange.upper()} {symbol}")
+        self._subscribe()
+
     def export_definition(self) -> dict[str, Any]:
         return {
             "instance_id": self.instance_id,
@@ -135,6 +173,20 @@ class DomDockWidget(QDockWidget):
                 "levels": self.levels,
             },
         }
+
+    def _on_combo_changed(self, _value: str) -> None:
+        self.change_subscription(
+            self.exchange_combo.currentText(),
+            self.symbol_combo.currentText(),
+        )
+
+    @staticmethod
+    def _set_combo(combo: QComboBox, value: str) -> None:
+        idx = combo.findText(value)
+        if idx < 0:
+            combo.addItem(value)
+            idx = combo.findText(value)
+        combo.setCurrentIndex(idx)
 
     def set_runtime(self, runtime) -> None:
         self.runtime = runtime
@@ -154,8 +206,8 @@ class DomDockWidget(QDockWidget):
             return
         try:
             self.runtime.core.emitter.unregister(Signals.ORDER_BOOK_UPDATE, self._on_order_book_update)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("DOM unregister handler failed: %s", exc)
         self._handlers_registered = False
 
     def _subscribe(self) -> None:
@@ -322,6 +374,7 @@ class DomDockWidget(QDockWidget):
         super().resizeEvent(event)
 
     def closeEvent(self, event):  # noqa: N802
+        self.closed.emit()
         self._timer.stop()
         self._unsubscribe()
         self._unregister_handlers()
